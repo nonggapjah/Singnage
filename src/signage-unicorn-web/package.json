@@ -3,10 +3,10 @@
     "version": "2.0.0",
     "private": true,
     "scripts": {
-        "dev": "next dev",
-        "dev:lan": "next dev -H 0.0.0.0",
+        "dev": "next dev -p 8865",
+        "dev:lan": "next dev -p 8865 -H 0.0.0.0",
         "build": "next build",
-        "start": "next start",
+        "start": "next start -p 8865",
         "lint": "eslint"
     },
     "dependencies": {

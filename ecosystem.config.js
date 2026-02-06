@@ -14,7 +14,7 @@ module.exports = {
         {
             name: "signage-web",
             script: "npm",
-            args: "run dev -- -p 3000",
+            args: "run dev -- -p 8865",
             cwd: "./src/signage-unicorn-web",
             watch: false,
             shell: true,
