@@ -1,0 +1,59 @@
+import { apiFetch } from '@/lib/api-fetch';
+import { Device, DeviceCommand } from '../types';
+
+export const deviceApi = {
+    getAll: async () => {
+        return await apiFetch<Device[]>('/devices');
+    },
+
+    register: async (data: { deviceKey: string; deviceName: string; branchCode: string; ipAddress?: string }) => {
+        return await apiFetch<Device>('/devices/register', {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+    },
+
+    sendCommand: async (deviceId: string, command: string) => {
+        return await apiFetch<{ success: boolean }>(`/devices/${deviceId}/command`, {
+            method: 'POST',
+            body: JSON.stringify({ command }),
+        });
+    },
+
+    batchSendCommand: async (deviceIds: string[], command: string) => {
+        return await apiFetch<{ success: boolean }>(`/devices/batch-command`, {
+            method: 'POST',
+            body: JSON.stringify({ deviceIds, command }),
+        });
+    },
+
+    deleteDevice: async (id: string) => {
+        return await apiFetch<{ success: boolean }>(`/devices/${id}`, {
+            method: 'DELETE',
+        });
+    },
+
+    cleanupOffline: async () => {
+        return await apiFetch<{ success: boolean }>('/devices/cleanup-offline', {
+            method: 'POST',
+        });
+    },
+
+    heartbeat: async (data: {
+        deviceId: string;
+        status: string;
+        currentPlaylistId?: string;
+        currentPlaylistItemId?: string;
+        currentMediaId?: string;
+        currentPositionSec?: number;
+    }) => {
+        return await apiFetch<DeviceCommand[]>('/devices/heartbeat', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    },
+
+    fixDb: async () => {
+        return await apiFetch('/devices/fix-devices-db');
+    }
+};

@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>Signage Unicorn - Native Player</title>
+    <style>
+        body,
+        html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background: #000;
+            color: #fff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+            cursor: none !important;
+        }
+
+        body.show-cursor,
+        body.show-cursor * {
+            cursor: default !important;
+        }
+
+        /* Accessibility: Keyboard Navigation */
+        button:focus,
+        input:focus {
+            outline: 3px solid #00f2ff !important;
+            outline-offset: 2px;
+            box-shadow: 0 0 15px rgba(0, 242, 255, 0.5);
+        }
+
+        #player-container {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
+        .media-element {
+            max-width: 100%;
+            max-height: 100%;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        #safety-jingle {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            z-index: 100;
+            transition: opacity 1s ease-in-out;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        #hud-overlay {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 5000;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            pointer-events: none;
+            align-items: flex-end;
+        }
+
+        .hud-notice {
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(0, 242, 255, 0.3);
+            color: #00f2ff;
+            padding: 8px 15px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 900;
+            font-family: monospace;
+            text-transform: uppercase;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+            animation: slideInHUD 0.3s ease-out;
+        }
+
+        @keyframes slideInHUD {
+            from {
+                transform: translateX(50px);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        #overlay {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            font-size: 10px;
+            font-family: monospace;
+            color: rgba(255, 255, 255, 0.2);
+            z-index: 200;
+        }
+
+        #status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #ffaa00;
+            display: inline-block;
+            margin-right: 5px;
+        }
+
+        #setup-screen {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.9);
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+        }
+
+        .input-group {
+            margin-bottom: 20px;
+        }
+
+        input {
+            background: #222;
+            border: 1px solid #444;
+            color: #fff;
+            padding: 10px;
+            border-radius: 5px;
+            width: 300px;
+            margin-top: 5px;
+        }
+
+        button {
+            background: #00f2ff;
+            color: #000;
+            background: #00f2ff;
+            color: #000;
+            border: none;
+            padding: 10px 30px;
+            border-radius: 5px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+            outline: none;
+        }
+
+        button:active {
+            transform: scale(0.95);
+        }
+
+        button:hover {
+            opacity: 0.8;
+            box-shadow: 0 0 15px rgba(0, 242, 255, 0.3);
+        }
+
+        #dashboard-screen {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.9);
+            backdrop-filter: blur(20px);
+            z-index: 2000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            padding: 20px;
+        }
+
+        .dashboard-content {
+            background: #0a0a0a;
+            padding: 0;
+            border-radius: 24px;
+            border: 1px solid #333;
+            width: 100%;
+            max-width: 1000px;
+            max-height: 90vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 0 100px rgba(0, 0, 0, 1), 0 0 40px rgba(0, 242, 255, 0.05);
+            position: relative;
+        }
+
+        .dash-header {
+            padding: 30px 40px;
+            border-bottom: 1px solid #222;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .dash-header h2 {
+            margin: 0;
+            font-size: 28px;
+            font-weight: 900;
+            letter-spacing: -0.5px;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .status-pulse {
+            width: 12px;
+            height: 12px;
+            background: #00f2ff;
+            border-radius: 50%;
+            box-shadow: 0 0 15px #00f2ff;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% {
+                opacity: 1;
+                transform: scale(1);
+            }
+
+            50% {
+                opacity: 0.5;
+                transform: scale(1.2);
+            }
+
+            100% {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+
+        .dash-body {
+            padding: 40px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .dash-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: #151515;
+            padding: 15px;
+            border-radius: 12px;
+            border: 1px solid #222;
+        }
+
+        .stat-label {
+            font-size: 10px;
+            color: #555;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-weight: 800;
+            margin-bottom: 8px;
+        }
+
+        .stat-value {
+            font-size: 14px;
+            font-weight: 700;
+        }
+
+        .stat-progress {
+            width: 100%;
+            height: 4px;
+            background: #222;
+            border-radius: 2px;
+            margin-top: 10px;
+            overflow: hidden;
+        }
+
+        .stat-bar {
+            height: 100%;
+            background: #00f2ff;
+            box-shadow: 0 0 10px rgba(0, 242, 255, 0.5);
+            transition: width 0.5s ease-out;
+        }
+
+        .stat-card.wide {
+            grid-column: span 2;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .playlist-info-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+
+        .media-progress-box {
+            background: #000;
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid #222;
+        }
+
+        .action-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .maintenance-btn {
+            height: 60px;
+            background: #151515;
+            border: 1px solid #222;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            gap: 15px;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: #fff;
+            text-align: left;
+            width: 100%;
+        }
+
+        .maintenance-btn:hover {
+            border-color: #00f2ff;
+            background: rgba(0, 242, 255, 0.05);
+        }
+
+        .maintenance-btn.primary {
+            border-color: #00f2ff80;
+            background: linear-gradient(90deg, #00f2ff10, transparent);
+        }
+
+        .maintenance-btn span.icon {
+            font-size: 24px;
+        }
+
+        .btn-text div:first-child {
+            font-weight: 800;
+            font-size: 13px;
+        }
+
+        .btn-text div:last-child {
+            font-size: 10px;
+            color: #555;
+            font-family: monospace;
+        }
+
+        .log-box {
+            background: rgba(0, 0, 0, 0.5);
+            border: 1px solid #222;
+            border-radius: 12px;
+            padding: 20px;
+            font-family: monospace;
+            font-size: 11px;
+            color: #888;
+            height: 100%;
+            overflow-y: auto;
+            min-height: 200px;
+        }
+
+        .log-line {
+            margin-bottom: 4px;
+        }
+
+        .log-line.latest {
+            color: #fff;
+        }
+
+        #config-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(10, 10, 10, 0.95);
+            z-index: 100;
+            padding: 60px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(10px);
+        }
+
+        .dash-footer {
+            padding: 20px;
+            border-top: 1px solid #222;
+            background: #050505;
+            text-align: center;
+            font-size: 10px;
+            color: #444;
+            letter-spacing: 1px;
+        }
+
+        .control-shortcuts {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-top: 30px;
+            border-top: 1px solid #222;
+            padding-top: 30px;
+        }
+
+        .shortcut-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .shortcut-key {
+            padding: 4px 10px;
+            background: #222;
+            border: 1px solid #333;
+            border-radius: 5px;
+            font-size: 10px;
+            font-weight: 900;
+            color: #fff;
+        }
+
+        .shortcut-label {
+            font-size: 8px;
+            color: #555;
+            font-weight: 800;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="player-container">
+        <!-- Safety Jingle (Embedded) -->
+        <img id="safety-jingle" src="assets/safety-jingle.png" alt="Safety Jingle">
+
+        <video id="video-player" class="media-element hidden" autoplay muted></video>
+        <img id="image-player" class="media-element hidden">
+
+        <div id="overlay">
+            <span id="status-dot"
+                style="width: 8px; height: 8px; display: inline-block; border-radius: 50%; background: #555; margin-right: 5px;"></span>
+            <span id="device-info">INITIALIZING...</span>
+            <span style="margin-left: 10px; opacity: 0.3; font-size: 9px;">v2.1.0</span>
+        </div>
+
+        <div id="hud-overlay"></div>
+    </div>
+
+    <!-- First Time Setup -->
+    <div id="setup-screen" class="hidden">
+        <h1 style="font-weight: 900; letter-spacing: -1px; color: #00f2ff;">SIGNAGE UNICORN</h1>
+        <p style="opacity: 0.5; margin-bottom: 30px;">DEVICE REGISTRATION v2.1.0</p>
+        <div class="input-group">
+            <label>SERVER IP</label><br>
+            <input type="text" id="server-ip" placeholder="http://server-ip:5018">
+        </div>
+        <div class="input-group">
+            <label>DEVICE NAME</label><br>
+            <input type="text" id="device-name" placeholder="e.g. Lobby Entrance 01">
+        </div>
+        <div class="input-group">
+            <label>BRANCH CODE</label><br>
+            <input type="text" id="branch-code" placeholder="e.g. 1024">
+        </div>
+        <button id="save-settings" style="margin-top: 20px; width: 100%;">CONNECT & REGISTER</button>
+    </div>
+
+    <!-- Premium Dashboard -->
+    <div id="dashboard-screen" class="hidden">
+        <div class="dashboard-content">
+            <!-- Settings Overlay (Hidden by default) -->
+            <div id="config-overlay" class="hidden">
+                <h2 style="margin-bottom: 5px;">UPDATE CONFIGURATION</h2>
+                <p style="color: #555; font-size: 12px; margin-bottom: 30px;">Core system connection settings</p>
+
+                <div style="width: 100%; max-width: 400px;">
+                    <div class="input-group">
+                        <label>DEVICE ID <span style="color: #ff4d4d; font-size: 9px;">(CRITICAL)</span></label>
+                        <input type="text" id="dash-device-id-input"
+                            style="width: 100%; box-sizing: border-box; background: #000; color: #ff4d4d; border-color: #331111;">
+                    </div>
+                    <div class="input-group">
+                        <label>SERVER IP</label>
+                        <input type="text" id="dash-server-ip" style="width: 100%; box-sizing: border-box;">
+                    </div>
+                    <div class="input-group">
+                        <label>DEVICE NAME</label>
+                        <input type="text" id="dash-device-name" style="width: 100%; box-sizing: border-box;">
+                    </div>
+                    <div class="input-group">
+                        <label>BRANCH CODE</label>
+                        <input type="text" id="dash-branch-code" style="width: 100%; box-sizing: border-box;">
+                    </div>
+                    <div style="margin-top: 40px; display: flex; gap: 10px;">
+                        <button id="update-settings" style="flex: 1;">SAVE & RELOAD</button>
+                        <button id="hide-config" style="background: #222; color: #fff; flex: 1;">CANCEL</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="dash-header">
+                <div>
+                    <h2><span class="status-pulse"></span> DEVICE DASHBOARD</h2>
+                    <p
+                        style="font-size: 10px; font-family: monospace; color: #555; margin-top: 10px; margin-left: 27px; text-transform: uppercase; letter-spacing: 2px;">
+                        Local Diagnostics & Control</p>
+                </div>
+                <div style="text-align: right; display: flex; align-items: center; gap: 20px;">
+                    <div style="font-family: monospace; font-size: 11px;">
+                        <div id="dash-device-name-display" style="font-weight: 900; color: #fff;">NAME: ---</div>
+                        <div style="color: #444; margin-top: 2px;">ID: <span id="dash-device-id">---</span></div>
+                    </div>
+                    <button id="show-config"
+                        style="background: #1a1a1a; padding: 10px; border-radius: 12px; border: 1px solid #333; cursor: pointer;">⚙️</button>
+                </div>
+            </div>
+
+            <div class="dash-body">
+                <div class="dash-grid">
+                    <div class="stat-card">
+                        <div class="stat-label">Network Status</div>
+                        <div id="dash-status" class="stat-value" style="color: #00f2ff;">ONLINE</div>
+                        <div id="dash-ip"
+                            style="font-size: 10px; color: #444; font-family: monospace; margin-top: 5px;">127.0.0.1
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Storage</div>
+                        <div class="stat-value"><span id="storage-used">0.0</span> / <span id="storage-total">0.0</span>
+                            GB</div>
+                        <div class="stat-progress">
+                            <div id="storage-bar" class="stat-bar" style="width: 0%;"></div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Offline Readiness</div>
+                        <div id="dash-ready-status" class="stat-value" style="color: #00f2ff;">READY</div>
+                        <div
+                            style="display: flex; justify-content: space-between; font-size: 9px; margin-top: 5px; font-family: monospace; color: #444;">
+                            <span>SYNCED</span>
+                            <span><span id="dash-cached-count">0</span> / <span id="dash-total-count">0</span>
+                                CLIPS</span>
+                        </div>
+                        <div class="stat-progress">
+                            <div id="dash-sync-bar" class="stat-bar" style="width: 0%;"></div>
+                        </div>
+                    </div>
+                    <div class="stat-card wide">
+                        <div class="playlist-info-row">
+                            <div style="flex: 1;">
+                                <div class="stat-label">Active Playlist</div>
+                                <div id="dash-playlist-name" class="stat-value" style="font-size: 18px; color: #fff;">
+                                    ---</div>
+                            </div>
+                            <div style="text-align: right;">
+                                <div class="stat-label">Playlist Loop</div>
+                                <div id="dash-loop-info" class="stat-value" style="font-size: 12px; color: #555;">ITEM 0
+                                    / 0</div>
+                            </div>
+                        </div>
+                        <div class="media-progress-box">
+                            <div
+                                style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                                <div id="dash-current-media"
+                                    style="font-size: 11px; font-weight: 800; color: #00f2ff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px;">
+                                    ▶ INITIALIZING...</div>
+                                <div style="font-family: monospace; font-size: 10px;"><span id="dash-pos">00:00</span> /
+                                    <span id="dash-dur">00:00</span>
+                                </div>
+                            </div>
+                            <div class="stat-progress" style="height: 2px;">
+                                <div id="dash-media-bar" class="stat-bar" style="width: 0%;"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="action-grid">
+                    <div style="display: flex; flex-direction: column; gap: 10px;">
+                        <div class="stat-label" style="margin-bottom: 5px;">Maintenance Actions</div>
+                        <button id="show-playlists" class="maintenance-btn primary"
+                            style="background: #2c3e50; border-color: #34495e;">
+                            <span class="icon">🎬</span>
+                            <div class="btn-text">
+                                <div>SELECT PLAYLIST</div>
+                                <div>Manual Local Override</div>
+                            </div>
+                        </button>
+                        <button id="force-sync" class="maintenance-btn primary">
+                            <span class="icon">📂</span>
+                            <div class="btn-text">
+                                <div>FORCE SYNC</div>
+                                <div>Check for Content Updates</div>
+                            </div>
+                        </button>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                            <button id="clear-cache-btn" class="maintenance-btn" style="height: 50px;">
+                                <div class="btn-text">
+                                    <div style="color: #ff4d4d;">CLEAR CACHE</div>
+                                    <div style="font-size: 8px;">Wipe local files</div>
+                                </div>
+                            </button>
+                            <button id="refresh-app-btn" class="maintenance-btn" style="height: 50px;">
+                                <div class="btn-text">
+                                    <div>REFRESH APP</div>
+                                    <div>F5 / Reload Shell</div>
+                                </div>
+                            </button>
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                            <button id="vol-down" class="maintenance-btn"
+                                style="height: 40px; justify-content: center;">- VOL</button>
+                            <button id="vol-up" class="maintenance-btn" style="height: 40px; justify-content: center;">+
+                                VOL</button>
+                        </div>
+                        <button id="view-patch-history" class="maintenance-btn"
+                            style="height: 40px; border-color: #9b59b640; margin-top: 5px;">
+                            <div class="btn-text" style="display: flex; align-items: center; gap: 10px;">
+                                <span style="font-size: 14px;">📝</span> <span>VIEW PATCH HISTORY</span>
+                            </div>
+                        </button>
+                        <button id="check-update-btn" class="maintenance-btn"
+                            style="height: 40px; border-color: #00f2ff40; margin-top: 5px;">
+                            <div class="btn-text" style="display: flex; align-items: center; gap: 10px;">
+                                <span style="font-size: 14px;">🚀</span> <span>CHECK FOR UPDATE</span>
+                            </div>
+                        </button>
+                        <div id="update-status-msg"
+                            style="font-size: 10px; color: #555; margin-top: 5px; font-family: monospace; padding-left: 10px;">
+                        </div>
+                    </div>
+
+                    <div style="display: flex; flex-direction: column;">
+                        <div class="stat-label" style="margin-bottom: 20px;">Recent System Logs</div>
+                        <div id="log-container" class="log-box">
+                            <div class="log-line">Waiting for events...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="control-shortcuts">
+                    <button class="shortcut-item" id="btn-f1">
+                        <div class="shortcut-key">F1</div>
+                        <div class="shortcut-label">HELP</div>
+                    </button>
+                    <button class="shortcut-item" id="btn-f2">
+                        <div class="shortcut-key">F2</div>
+                        <div class="shortcut-label">VOL -</div>
+                    </button>
+                    <button class="shortcut-item" id="btn-f3">
+                        <div class="shortcut-key">F3</div>
+                        <div class="shortcut-label">VOL +</div>
+                    </button>
+                    <button class="shortcut-item" id="btn-f4">
+                        <div class="shortcut-key">F4</div>
+                        <div class="shortcut-label">MUTE</div>
+                    </button>
+                    <button class="shortcut-item" id="btn-f5">
+                        <div class="shortcut-key">F5</div>
+                        <div class="shortcut-label">RELOAD</div>
+                    </button>
+                    <button class="shortcut-item" id="btn-f6">
+                        <div class="shortcut-key">F6</div>
+                        <div class="shortcut-label">SYNC</div>
+                    </button>
+                    <button class="shortcut-item" id="btn-f7">
+                        <div class="shortcut-key">F7</div>
+                        <div class="shortcut-label">ADMIN</div>
+                    </button>
+                    <button class="shortcut-item" id="btn-f8">
+                        <div class="shortcut-key">F8</div>
+                        <div class="shortcut-label">WIPE</div>
+                    </button>
+                    <button class="shortcut-item" id="btn-esc">
+                        <div class="shortcut-key">ESC</div>
+                        <div class="shortcut-label">CLOSE</div>
+                    </button>
+                </div>
+            </div>
+
+            <div class="dash-footer">
+                SIGNAGE UNICORN DEVICE OS v2.1.0 • POWERED BY UNICORN ENGINE
+            </div>
+        </div>
+    </div>
+
+    <!-- Patch History Modal -->
+    <div id="patch-history-screen" class="hidden"
+        style="position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 3000; display: flex; align-items: center; justify-content: center; padding: 40px;">
+        <div class="dashboard-content" style="max-width: 800px; height: 100%;">
+            <div class="dash-header">
+                <h2>PATCH HISTORY</h2>
+                <button id="close-patch-history" style="background: #e74c3c;">BACK</button>
+            </div>
+            <div id="changelog-content"
+                style="flex: 1; overflow-y: auto; padding: 30px; font-family: monospace; font-size: 13px; color: #aaa; background: #000; white-space: pre-wrap;">
+                Loading...
+            </div>
+        </div>
+    </div>
+
+    <!-- Playlist Selection Modal -->
+    <div id="playlist-select-screen" class="hidden"
+        style="position: fixed; inset: 0; background: rgba(0,0,0,0.95); z-index: 3000; display: flex; align-items: center; justify-content: center; padding: 40px;">
+        <div class="dashboard-content" style="max-width: 800px; height: 100%; display: flex; flex-direction: column;">
+            <div class="dash-header">
+                <h2>SELECT PLAYLIST OVERRIDE</h2>
+                <button id="close-playlists" style="background: #e74c3c;">BACK</button>
+            </div>
+            <div id="playlist-list-container"
+                style="flex: 1; overflow-y: auto; padding: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                <!-- Playlists injected here -->
+                <div style="color: #444; font-family: monospace;">Fetching playlists from server...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Help Modal -->
+    <div id="help-screen" class="hidden"
+        style="position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 3000; display: flex; align-items: center; justify-content: center; padding: 40px;">
+        <div class="dashboard-content" style="max-width: 600px;">
+            <div class="dash-header">
+                <h2>SYSTEM HELP</h2>
+                <button id="close-help" style="background: #e74c3c;">CLOSE</button>
+            </div>
+            <div style="padding: 30px; line-height: 1.6; color: #aaa;">
+                <p><strong style="color: #00f2ff;">Signage Unicorn Client v2.1.0</strong></p>
+                <hr style="border: 0; border-top: 1px solid #333; margin: 15px 0;">
+                <ul style="list-style: none; padding: 0;">
+                    <li><span style="color: #fff; width: 40px; display: inline-block;">F1</span> Open this help guide
+                    </li>
+                    <li><span style="color: #fff; width: 40px; display: inline-block;">F2/F3</span> Volume control</li>
+                    <li><span style="color: #fff; width: 40px; display: inline-block;">F4</span> Mute / Unmute</li>
+                    <li><span style="color: #fff; width: 40px; display: inline-block;">F5</span> Reload application
+                        shell</li>
+                    <li><span style="color: #fff; width: 40px; display: inline-block;">F6</span> Force sync with server
+                    </li>
+                    <li><span style="color: #fff; width: 40px; display: inline-block;">F7</span> Toggle admin dashboard
+                    </li>
+                    <li><span style="color: #fff; width: 40px; display: inline-block;">F8</span> Wipe all local cache &
+                        settings</li>
+                    <li><span style="color: #fff; width: 40px; display: inline-block;">ESC</span> Close current overlay
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <script src="src/renderer.js"></script>
+</body>
+
+</html>

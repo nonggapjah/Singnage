@@ -1,0 +1,719 @@
+const { ipcRenderer } = require('electron');
+
+let config = null;
+let playlist = [];
+let currentIndex = 0;
+let isPlaying = false;
+let heartbeatTimer = null;
+let currentItemTimer = null;
+let mediaStartTime = 0;
+let mediaDuration = 0;
+let volume = 50;
+let isMuted = false;
+let cacheProgress = 0;
+
+// Queues for Offline Sync
+let systemLogQueue = JSON.parse(localStorage.getItem('system_log_queue') || '[]');
+let playbackLogQueue = JSON.parse(localStorage.getItem('playback_queue') || '[]');
+
+const hudOverlay = document.getElementById('hud-overlay');
+
+const jingleEl = document.getElementById('safety-jingle');
+const videoEl = document.getElementById('video-player');
+const imageEl = document.getElementById('image-player');
+const deviceInfoEl = document.getElementById('device-info');
+const statusDot = document.getElementById('status-dot');
+const setupScreen = document.getElementById('setup-screen');
+const dashboardScreen = document.getElementById('dashboard-screen');
+const patchHistoryScreen = document.getElementById('patch-history-screen');
+const changelogContent = document.getElementById('changelog-content');
+const configOverlay = document.getElementById('config-overlay');
+const helpScreen = document.getElementById('help-screen');
+const playlistSelectScreen = document.getElementById('playlist-select-screen');
+const playlistListContainer = document.getElementById('playlist-list-container');
+
+// Dashboard UI Elements
+const dashStatus = document.getElementById('dash-status');
+const dashDeviceId = document.getElementById('dash-device-id');
+const dashDeviceIdInput = document.getElementById('dash-device-id-input');
+const dashDeviceNameDisp = document.getElementById('dash-device-name-display');
+const dashPlaylistName = document.getElementById('dash-playlist-name');
+const dashLoopInfo = document.getElementById('dash-loop-info');
+const dashCurrentMedia = document.getElementById('dash-current-media');
+const dashPos = document.getElementById('dash-pos');
+const dashDur = document.getElementById('dash-dur');
+const dashMediaBar = document.getElementById('dash-media-bar');
+const dashSyncBar = document.getElementById('dash-sync-bar');
+const dashCachedCount = document.getElementById('dash-cached-count');
+const dashTotalCount = document.getElementById('dash-total-count');
+const dashReadyStatus = document.getElementById('dash-ready-status');
+const storageUsed = document.getElementById('storage-used');
+const storageTotal = document.getElementById('storage-total');
+const storageBar = document.getElementById('storage-bar');
+const logContainer = document.getElementById('log-container');
+
+async function init() {
+    config = await ipcRenderer.invoke('get-config');
+    volume = config.volume ?? 50;
+    isMuted = config.isMuted ?? false;
+    videoEl.volume = isMuted ? 0 : volume / 100;
+
+    // Load Cached Jingle
+    const cachedJingle = localStorage.getItem('safety_jingle_data');
+    if (cachedJingle) jingleEl.src = cachedJingle;
+
+    if (!config.deviceId) {
+        showSetup();
+    } else {
+        startSync();
+        updateStorage();
+        syncJingle(); // New in v1.5.0: Sync global jingle
+    }
+}
+
+// --- Jingle Sync (Matches signage-unicorn-web) ---
+async function syncJingle() {
+    if (!config.serverIp) return;
+    try {
+        const res = await fetch(`${config.serverIp}/api/v1/system/settings/safety_jingle_id`);
+        const data = await res.json();
+        const serverJingleId = data.data;
+        const savedJingleId = localStorage.getItem('safety_jingle_id');
+
+        if (serverJingleId && serverJingleId !== savedJingleId) {
+            addLog(`Global Jingle Update: ${serverJingleId}`);
+            const mediaRes = await fetch(`${config.serverIp}/api/v1/media/${serverJingleId}`);
+            const mediaData = await mediaRes.json();
+
+            if (mediaData.success && mediaData.data.blobUrl) {
+                const url = mediaData.data.blobUrl;
+                const response = await fetch(url);
+                const blob = await response.blob();
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    const base64data = reader.result;
+                    localStorage.setItem('safety_jingle_data', base64data);
+                    localStorage.setItem('safety_jingle_id', serverJingleId);
+                    jingleEl.src = base64data;
+                    addLog('System Jingle cached locally');
+                };
+                reader.readAsDataURL(blob);
+            }
+        }
+    } catch (e) {
+        console.warn("Jingle sync failed", e);
+    }
+}
+
+// --- Logging System ---
+function addLog(msg, type = 'info', skipSync = false) {
+    const time = new Date().toLocaleTimeString();
+    const line = document.createElement('div');
+    line.className = 'log-line latest';
+    line.innerText = `[${time}] ${msg}`;
+
+    if (type === 'error') line.style.color = '#ff4d4d';
+    if (type === 'warn') line.style.color = '#f1c40f';
+
+    const previous = logContainer.querySelector('.latest');
+    if (previous) previous.classList.remove('latest');
+
+    logContainer.prepend(line);
+    while (logContainer.children.length > 50) logContainer.removeChild(logContainer.lastChild);
+
+    if (!skipSync && config && config.deviceId) {
+        systemLogQueue.push({
+            deviceId: config.deviceId,
+            logType: type.toUpperCase(),
+            message: msg,
+            source: 'Player',
+            createdAt: new Date().toISOString()
+        });
+        saveSystemQueue();
+    }
+}
+
+function showHUD(msg, duration = 3000) {
+    const notice = document.createElement('div');
+    notice.className = 'hud-notice';
+    notice.innerText = msg;
+    hudOverlay.appendChild(notice);
+    setTimeout(() => {
+        notice.style.opacity = '0';
+        notice.style.transform = 'translateY(-20px)';
+        notice.style.transition = 'all 0.5s ease-in';
+        setTimeout(() => notice.remove(), 500);
+    }, duration);
+}
+
+function updateCursorVisibility() {
+    const shouldShow = !dashboardScreen.classList.contains('hidden') ||
+        !setupScreen.classList.contains('hidden') ||
+        !playlistSelectScreen.classList.contains('hidden') ||
+        !helpScreen.classList.contains('hidden') ||
+        !patchHistoryScreen.classList.contains('hidden');
+
+    if (shouldShow) document.body.classList.add('show-cursor');
+    else document.body.classList.remove('show-cursor');
+}
+
+function highlightShortcut(btnId) {
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+    btn.style.background = '#00f2ff';
+    btn.querySelector('.shortcut-key').style.color = '#000';
+    setTimeout(() => {
+        btn.style.background = '';
+        btn.querySelector('.shortcut-key').style.color = '';
+    }, 200);
+}
+
+function saveSystemQueue() {
+    localStorage.setItem('system_log_queue', JSON.stringify(systemLogQueue));
+}
+
+async function syncSystemLogs() {
+    if (systemLogQueue.length === 0 || !config.serverIp) return;
+
+    // Process queue sequentially
+    let successCount = 0;
+    const originalLength = systemLogQueue.length;
+
+    while (systemLogQueue.length > 0) {
+        const log = systemLogQueue[0];
+        try {
+            const res = await fetch(`${config.serverIp}/api/v1/logs`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(log)
+            });
+            if (res.ok) {
+                systemLogQueue.shift(); // Remove only on success
+                successCount++;
+            } else {
+                break; // Server error, stop batch
+            }
+        } catch (err) {
+            break; // Network error, stop batch
+        }
+    }
+
+    if (successCount > 0) {
+        saveSystemQueue();
+        console.log(`Synced ${successCount}/${originalLength} system logs`);
+    }
+}
+
+function recordPlayback(item, duration, result = 'success', error = '') {
+    const log = {
+        tempId: Math.random().toString(36).substring(2, 15),
+        deviceId: config.deviceId,
+        mediaId: item.media.mediaId,
+        playlistId: config.lastPlaylistId || null,
+        duration: Math.max(1, Math.floor(duration / 1000)),
+        result: result,
+        errorMessage: error,
+        playedAt: new Date().toISOString(),
+        timestamp: new Date().toISOString()
+    };
+    playbackLogQueue.push(log);
+    savePlaybackQueue();
+    syncPlaybackLogs();
+}
+
+function savePlaybackQueue() {
+    localStorage.setItem('playback_queue', JSON.stringify(playbackLogQueue));
+}
+
+async function syncPlaybackLogs() {
+    if (playbackLogQueue.length === 0 || !config.serverIp) return;
+
+    let successCount = 0;
+    const originalLength = playbackLogQueue.length;
+
+    while (playbackLogQueue.length > 0) {
+        const log = playbackLogQueue[0];
+        try {
+            const res = await fetch(`${config.serverIp}/api/v1/logs/playback`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(log)
+            });
+            if (res.ok) {
+                playbackLogQueue.shift();
+                successCount++;
+            } else {
+                console.error('Playback Sync Error:', res.status, await res.text());
+                break;
+            }
+        } catch (err) {
+            break;
+        }
+    }
+
+    if (successCount > 0) {
+        savePlaybackQueue();
+        console.log(`Synced ${successCount}/${originalLength} playback logs`);
+    }
+}
+
+// --- Sync & Heartbeat ---
+async function startSync() {
+    const version = await ipcRenderer.invoke('get-app-version');
+    dashDeviceId.innerText = config.deviceId;
+    dashDeviceNameDisp.innerText = `NAME: ${config.deviceName || 'UNNAMED'}`;
+    deviceInfoEl.innerText = `${config.deviceName || 'DEVICE'} • v${version}`;
+
+    addLog(`System initialized. Version ${version}`);
+
+    // Auto-resume last playlist on boot if exists
+    if (config.lastPlaylistId) {
+        const savedIndex = parseInt(localStorage.getItem('last_playlist_index') || '0');
+        addLog(`Auto-resuming last playlist: ${config.lastPlaylistId} at index ${savedIndex}`);
+        loadPlaylist(config.lastPlaylistId, savedIndex);
+    }
+
+    await sync();
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    heartbeatTimer = setInterval(sync, 15000);
+}
+
+async function sync() {
+    try {
+        const res = await fetch(`${config.serverIp}/api/v1/devices/heartbeat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                deviceId: config.deviceId,
+                deviceName: config.deviceName,
+                branchCode: config.branchCode,
+                status: isPlaying ? 'PLAYING' : 'IDLE',
+                currentPlaylistId: config.lastPlaylistId || '',
+                currentMediaId: (playlist[currentIndex] && playlist[currentIndex].media) ? playlist[currentIndex].media.mediaId : '',
+                currentPlaylistItemId: (playlist[currentIndex]) ? playlist[currentIndex].playlistItemId : '',
+                currentPositionSec: isPlaying ? Math.floor(videoEl.currentTime) : 0,
+                cacheProgress: cacheProgress
+            })
+        });
+
+        if (res.ok) {
+            const data = await res.json();
+            statusDot.style.background = '#00f2ff';
+            dashStatus.innerText = 'ONLINE';
+            dashStatus.style.color = '#00f2ff';
+
+            if (data.data && data.data.length > 0) {
+                for (const cmd of data.data) {
+                    addLog(`Received command: ${cmd.commandType}`);
+                    const type = cmd.commandType;
+                    if (type === 'FORCE_SYNC') { showHUD('REMOTE SYNC'); loadPlaylist(config.lastPlaylistId); }
+                    if (type === 'RELOAD' || type === 'REFRESH') { showHUD('RELOADING...'); setTimeout(() => window.location.reload(), 1000); }
+                    if (type === 'REBOOT') { showHUD('SYSTEM REBOOT...'); ipcRenderer.invoke('reboot-device'); }
+                    if (type.startsWith('PLAY_PLAYLIST:')) {
+                        const pid = type.split(':')[1];
+                        if (pid) { showHUD('REMOTE PLAYLIST'); loadPlaylist(pid); }
+                    }
+                }
+            }
+            syncPlaybackLogs();
+            syncSystemLogs();
+        } else throw new Error('Status ' + res.status);
+    } catch (err) {
+        statusDot.style.background = '#ff4d4d';
+        dashStatus.innerText = 'OFFLINE';
+        dashStatus.style.color = '#ff4d4d';
+        addLog(`Heartbeat failed: ${err.message}`, 'error', true);
+    }
+}
+
+// --- Playlist Management ---
+async function loadPlaylist(playlistId, resumeIndex = 0) {
+    if (!playlistId) return;
+    try {
+        dashReadyStatus.innerText = 'SYNCING...';
+        dashReadyStatus.style.color = '#f1c40f';
+        addLog(`Loading playlist data: ${playlistId}`);
+
+        let items = [];
+        let playlistName = 'Standard Loop';
+
+        try {
+            const res = await fetch(`${config.serverIp}/api/v1/playlists/${playlistId}`);
+            const data = await res.json();
+            if (data.success && data.data.items) {
+                items = data.data.items.filter(i => i.media);
+                playlistName = data.data.playlistName || playlistName;
+
+                // --- Cache Structure for Offline Survival ---
+                localStorage.setItem(`playlist_cache_${playlistId}`, JSON.stringify({
+                    items,
+                    playlistName,
+                    cachedAt: new Date().toISOString()
+                }));
+            }
+        } catch (fetchErr) {
+            addLog(`Server unreachable, trying local cache...`, 'warn');
+            const cached = localStorage.getItem(`playlist_cache_${playlistId}`);
+            if (cached) {
+                const cachedData = JSON.parse(cached);
+                items = cachedData.items;
+                playlistName = cachedData.playlistName;
+                addLog(`Offline Mode: Loaded from cache (Dated: ${cachedData.cachedAt})`);
+            } else {
+                throw new Error("No local cache found for this playlist.");
+            }
+        }
+
+        if (items.length > 0) {
+            // --- Content Hashing (Smart Sync) ---
+            const contentHash = playlistId + '|' + items.map(i => `${i.mediaId}-${i.durationOverride || 0}`).join(',');
+            const savedHash = localStorage.getItem('playlist_hash');
+
+            dashPlaylistName.innerText = playlistName;
+            dashTotalCount.innerText = items.length;
+
+            if (contentHash === savedHash && playlist.length > 0) {
+                addLog("Smart Sync: Hash matches. Skipping re-download.");
+                dashReadyStatus.innerText = 'READY';
+                dashReadyStatus.style.color = '#00f2ff';
+                return;
+            }
+
+            cacheProgress = 0;
+            let synced = 0;
+            for (const item of items) {
+                const media = item.media;
+                // Double check if file exists (background sync)
+                await ipcRenderer.invoke('download-media', {
+                    url: media.blobUrl,
+                    filename: media.fileName
+                });
+                synced++;
+                cacheProgress = Math.round((synced / items.length) * 100);
+                dashCachedCount.innerText = synced;
+                dashSyncBar.style.width = cacheProgress + '%';
+            }
+
+            playlist = items;
+            config.lastPlaylistId = playlistId;
+            localStorage.setItem('playlist_hash', contentHash);
+            await ipcRenderer.invoke('save-config', config);
+
+            dashReadyStatus.innerText = 'READY';
+            dashReadyStatus.style.color = '#00f2ff';
+            addLog(`Sync complete: ${items.length} items ready`);
+
+            if (!isPlaying) {
+                currentIndex = resumeIndex < items.length ? resumeIndex : 0;
+                playNext();
+            }
+        }
+    } catch (err) {
+        addLog(`Load playlist failed: ${err.message}`, 'error');
+        dashReadyStatus.innerText = 'SYNC ERROR';
+        dashReadyStatus.style.color = '#ff4d4d';
+    }
+}
+
+// --- Playback Engine ---
+function formatTime(ms) {
+    const totalSec = Math.floor(ms / 1000);
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
+function updatePlaybackHUD() {
+    if (!isPlaying) return;
+    const elapsed = Date.now() - mediaStartTime;
+    const progress = Math.min(100, (elapsed / mediaDuration) * 100);
+    dashPos.innerText = formatTime(elapsed);
+    dashMediaBar.style.width = progress + '%';
+}
+setInterval(updatePlaybackHUD, 500);
+
+async function playNext() {
+    if (playlist.length === 0) {
+        isPlaying = false; jingleEl.classList.remove('hidden');
+        dashCurrentMedia.innerText = '▶ IDLE / WAITING'; return;
+    }
+    localStorage.setItem('last_playlist_index', currentIndex);
+    isPlaying = true;
+    const item = playlist[currentIndex];
+    const media = item.media;
+    const localDir = await ipcRenderer.invoke('get-local-path');
+    const localFile = `file://${localDir}/${media.fileName}`;
+
+    dashCurrentMedia.innerText = `▶ ${media.displayName || media.fileName}`;
+    dashLoopInfo.innerText = `ITEM ${currentIndex + 1} / ${playlist.length}`;
+
+    mediaStartTime = Date.now();
+    mediaDuration = (item.durationOverride || media.durationSec || 10) * 1000;
+    dashDur.innerText = formatTime(mediaDuration);
+    jingleEl.classList.add('hidden');
+
+    addLog(`Playing: ${media.displayName || media.fileName} (${currentIndex + 1}/${playlist.length})`);
+
+    const onComplete = (skipLog = false) => {
+        if (!skipLog) recordPlayback(item, Date.now() - mediaStartTime);
+        currentIndex = (currentIndex + 1) % playlist.length;
+        playNext();
+    };
+
+    if (media.fileName.toLowerCase().match(/\.(mp4|webm|mov)$/)) {
+        videoEl.src = localFile; videoEl.classList.remove('hidden'); imageEl.classList.add('hidden');
+        videoEl.onended = () => onComplete(false);
+        videoEl.onerror = () => {
+            const err = videoEl.error ? `Code ${videoEl.error.code}: ${videoEl.error.message}` : 'Unknown Playback Error';
+            console.error('Video Error:', err, localFile);
+            recordPlayback(item, 0, 'error', err);
+            setTimeout(() => onComplete(true), 2000);
+        };
+    } else {
+        imageEl.src = localFile; imageEl.classList.remove('hidden'); videoEl.classList.add('hidden');
+        if (currentItemTimer) clearTimeout(currentItemTimer);
+        currentItemTimer = setTimeout(() => onComplete(false), mediaDuration);
+        imageEl.onerror = () => {
+            const err = 'Image Load Failed';
+            console.error(err, localFile);
+            recordPlayback(item, 0, 'error', err);
+            setTimeout(() => onComplete(true), 2000);
+        };
+    }
+}
+
+// --- Interaction & Utils ---
+function updateStorage() {
+    ipcRenderer.invoke('get-storage-info').then(info => {
+        storageUsed.innerText = info.used; storageTotal.innerText = info.total;
+        storageBar.style.width = info.percent + '%';
+    });
+}
+
+function showSetup() {
+    setupScreen.classList.remove('hidden');
+    document.getElementById('server-ip').value = config.serverIp || 'http://localhost:5018';
+    document.getElementById('save-settings').onclick = async () => {
+        const ip = document.getElementById('server-ip').value.replace(/\/$/, "");
+        const name = document.getElementById('device-name').value;
+        const branch = document.getElementById('branch-code').value;
+        if (!ip || !name) return alert('โปรดกรอกข้อมูล');
+        try {
+            const res = await fetch(`${ip}/api/v1/devices/register`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ deviceKey: 'WIN-' + Math.random().toString(36).substr(2, 6).toUpperCase(), deviceName: name, branchCode: branch, ipAddress: '127.0.0.1' })
+            });
+            const result = await res.json();
+            if (result.success) {
+                config.serverIp = ip; config.deviceName = name; config.branchCode = branch; config.deviceId = result.data.deviceId;
+                await ipcRenderer.invoke('save-config', config);
+                setupScreen.classList.add('hidden');
+                updateCursorVisibility();
+                startSync();
+            }
+        } catch (err) { alert('Connect error: ' + ip); }
+    };
+}
+
+document.getElementById('show-playlists').onclick = () => {
+    playlistSelectScreen.classList.remove('hidden');
+    playlistListContainer.innerHTML = 'Loading...';
+    fetch(`${config.serverIp}/api/v1/playlists/active`).then(r => r.json()).then(data => {
+        if (data.success) {
+            playlistListContainer.innerHTML = '';
+            data.data.forEach(p => {
+                const card = document.createElement('div'); card.className = 'playlist-card';
+                card.style.cssText = 'background:#111;padding:15px;border:1px solid #333;border-radius:10px;cursor:pointer;';
+                card.innerHTML = `<div style="color:#00f2ff;font-weight:900;">${p.playlistName}</div><div style="font-size:10px;color:#555;">${p.itemCount} Items</div>`;
+                card.onclick = () => { if (confirm('Change Playlist?')) { loadPlaylist(p.playlistId); playlistSelectScreen.classList.add('hidden'); } };
+                playlistListContainer.appendChild(card);
+            });
+        }
+    });
+};
+
+document.getElementById('update-settings').onclick = async () => {
+    // 1. Gather Values
+    const newIp = document.getElementById('dash-server-ip').value.replace(/\/$/, "");
+    const newId = document.getElementById('dash-device-id-input').value;
+    const newName = document.getElementById('dash-device-name').value;
+    const newBranch = document.getElementById('dash-branch-code').value;
+
+    if (!newIp || !newId || !newName) return alert('Settings cannot be empty.');
+
+    // 2. Warn if ID changed
+    const isIdChanged = newId !== config.deviceId;
+    if (isIdChanged) {
+        if (!confirm('CRITICAL: Changing Device ID will register a NEW device identity.\n\nAre you sure?')) return;
+    }
+
+    showHUD('TESTING CONNECTION...');
+
+    // 3. Test Connection / Register
+    try {
+        const appVer = await ipcRenderer.invoke('get-app-version');
+
+        // Use 'register' to handshake. It handles Create (if new ID) or Update (if existing ID).
+        const res = await fetch(`${newIp}/api/v1/devices/register`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                deviceKey: newId,
+                deviceName: newName,
+                branchCode: newBranch,
+                ipAddress: '127.0.0.1', // Server should detect real IP. We send placeholder.
+                appVersion: appVer
+            })
+        });
+
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        const result = await res.json();
+
+        if (result.success) {
+            // 4. Success -> Save Config
+            config.serverIp = newIp;
+            config.deviceId = newId;
+            config.deviceName = newName;
+            config.branchCode = newBranch;
+
+            await ipcRenderer.invoke('save-config', config);
+            showHUD('UPDATED. RESTARTING...');
+            setTimeout(() => window.location.reload(), 1500);
+        } else {
+            alert('Server Rejected Update: ' + (result.message || 'Unknown Error'));
+        }
+    } catch (err) {
+        console.error(err);
+        alert(`Connection Failed to ${newIp}\n\nError: ${err.message}\n\nSettings were NOT saved.`);
+    }
+};
+
+document.getElementById('show-config').onclick = () => {
+    configOverlay.classList.remove('hidden');
+    document.getElementById('dash-device-id-input').value = config.deviceId || '';
+    document.getElementById('dash-server-ip').value = config.serverIp || '';
+    document.getElementById('dash-device-name').value = config.deviceName || '';
+    document.getElementById('dash-branch-code').value = config.branchCode || '';
+    updateCursorVisibility();
+};
+
+document.getElementById('hide-config').onclick = () => {
+    configOverlay.classList.add('hidden');
+    updateCursorVisibility();
+};
+
+document.getElementById('force-sync').onclick = () => {
+    showHUD('MANUAL SYNC');
+    loadPlaylist(config.lastPlaylistId);
+};
+
+document.getElementById('clear-cache-btn').onclick = async () => {
+    if (confirm('Wipe all local media cache?')) {
+        showHUD('WIPING CACHE...');
+        await ipcRenderer.invoke('clear-cache');
+        window.location.reload();
+    }
+};
+
+document.getElementById('refresh-app-btn').onclick = () => {
+    showHUD('RELOADING...');
+    setTimeout(() => window.location.reload(), 500);
+};
+
+document.getElementById('vol-down').onclick = () => adjustVolume(-5);
+document.getElementById('vol-up').onclick = () => adjustVolume(5);
+
+document.getElementById('view-patch-history').onclick = async () => {
+    patchHistoryScreen.classList.remove('hidden');
+    changelogContent.innerText = "Loading history...";
+    updateCursorVisibility();
+    try {
+        const text = await ipcRenderer.invoke('read-changelog');
+        changelogContent.innerText = text;
+    } catch (e) {
+        changelogContent.innerText = "Error loading history.";
+    }
+};
+document.getElementById('close-patch-history').onclick = () => {
+    patchHistoryScreen.classList.add('hidden');
+    updateCursorVisibility();
+};
+
+document.getElementById('close-playlists').onclick = () => {
+    playlistSelectScreen.classList.add('hidden');
+    updateCursorVisibility();
+};
+
+document.getElementById('close-help').onclick = () => {
+    helpScreen.classList.add('hidden');
+    updateCursorVisibility();
+};
+
+document.getElementById('btn-f1').onclick = () => { helpScreen.classList.remove('hidden'); updateCursorVisibility(); };
+document.getElementById('btn-f2').onclick = () => adjustVolume(-5);
+document.getElementById('btn-f3').onclick = () => adjustVolume(5);
+document.getElementById('btn-f4').onclick = () => {
+    isMuted = !isMuted;
+    videoEl.volume = isMuted ? 0 : volume / 100;
+    showHUD(isMuted ? 'MUTED' : 'UNMUTED');
+    updateCursorVisibility();
+};
+document.getElementById('btn-f5').onclick = () => window.location.reload();
+document.getElementById('btn-f6').onclick = () => { showHUD('MANUAL SYNC'); sync(); };
+document.getElementById('btn-f7').onclick = () => { dashboardScreen.classList.toggle('hidden'); updateCursorVisibility(); };
+document.getElementById('btn-f8').onclick = () => { showHUD('RESETTING LOOP'); currentIndex = 0; playNext(); };
+document.getElementById('btn-esc').onclick = () => {
+    [patchHistoryScreen, helpScreen, configOverlay, dashboardScreen, playlistSelectScreen].forEach(s => s.classList.add('hidden'));
+    updateCursorVisibility();
+};
+
+async function adjustVolume(delta) {
+    volume = Math.max(0, Math.min(100, volume + delta));
+    videoEl.volume = volume / 100; config.volume = volume;
+    await ipcRenderer.invoke('save-config', config);
+    addLog(`Vol: ${volume}%`);
+    showHUD(`VOLUME: ${volume}%`);
+}
+
+window.addEventListener('keydown', async e => {
+    if (e.key === 'F1') { highlightShortcut('btn-f1'); helpScreen.classList.remove('hidden'); }
+    if (e.key === 'F2') { highlightShortcut('btn-f2'); adjustVolume(-5); }
+    if (e.key === 'F3') { highlightShortcut('btn-f3'); adjustVolume(5); }
+    if (e.key === 'F4') { highlightShortcut('btn-f4'); isMuted = !isMuted; videoEl.volume = isMuted ? 0 : volume / 100; showHUD(isMuted ? 'MUTED' : 'UNMUTED'); }
+    if (e.key === 'F5') { highlightShortcut('btn-f5'); showHUD('RELOADING...'); setTimeout(() => window.location.reload(), 500); }
+    if (e.key === 'F6') { highlightShortcut('btn-f6'); showHUD('MANUAL SYNC'); sync(); }
+    if (e.key === 'F7') { highlightShortcut('btn-f7'); dashboardScreen.classList.toggle('hidden'); }
+    if (e.key === 'F8') { highlightShortcut('btn-f8'); showHUD('RESETTING LOOP'); currentIndex = 0; playNext(); }
+    if (e.key === 'F11') {
+        const isFullscreen = await ipcRenderer.invoke('toggle-fullscreen');
+        showHUD(isFullscreen ? 'FULLSCREEN ON' : 'WINDOW MODE');
+    }
+    if (e.key === 'Escape') {
+        document.getElementById('btn-esc').click();
+    }
+
+    if (e.key === 'Enter') {
+        if (!setupScreen.classList.contains('hidden')) {
+            document.getElementById('save-settings').click();
+        }
+    }
+
+    updateCursorVisibility();
+});
+
+document.getElementById('check-update-btn').onclick = async () => {
+    const msg = document.getElementById('update-status-msg'); msg.innerText = "Checking...";
+    const cur = await ipcRenderer.invoke('get-app-version');
+    const res = await fetch(`${config.serverIp}/api/v1/system/settings/LatestClientVersion`).then(r => r.json());
+    if (res.data && res.data !== cur) {
+        msg.innerText = `New: ${res.data}`;
+        if (confirm(`Download v${res.data}?`)) {
+            const dr = await fetch(`${config.serverIp}/api/v1/system/settings/ClientDownloadUrl`).then(r => r.json());
+            const dl = await ipcRenderer.invoke('download-update', { url: dr.data });
+            if (dl.success) ipcRenderer.invoke('launch-installer', dl.path);
+        }
+    } else msg.innerText = "Up to date.";
+};
+
+init();

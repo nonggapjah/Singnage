@@ -1,0 +1,30 @@
+{
+  "name": "signage-unicorn-client",
+  "version": "2.1.4",
+  "description": "Standalone Player for Signage Unicorn",
+  "main": "main.js",
+  "author": "Signage Unicorn Team",
+  "license": "ISC",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder"
+  },
+  "dependencies": {
+    "axios": "^1.7.2",
+    "fs-extra": "^11.2.0"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.signage.unicorn",
+    "productName": "Signage Unicorn",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": "nsis"
+    }
+  }
+}
