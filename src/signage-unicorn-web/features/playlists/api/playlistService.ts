@@ -1,5 +1,5 @@
 import { apiFetch } from '@/lib/api-fetch';
-import { Media, Playlist, PlaylistItem } from '../types/playlist.types';
+import { MediaFile as Media, Playlist, PlaylistItem } from '../types/playlist';
 
 export const mediaService = {
     getAll: () => apiFetch<Media[]>('/media'),

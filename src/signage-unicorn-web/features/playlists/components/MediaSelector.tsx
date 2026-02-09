@@ -156,9 +156,11 @@ export const MediaSelector: React.FC<MediaSelectorProps> = ({ onSelect, onClose 
                                                 </span>
                                             </div>
 
-                                            {/* Footer */}
-                                            <div className="mt-auto flex justify-between items-center text-[10px] text-gray-600 font-mono pt-2 border-t border-white/5">
-                                                <span>{(media.fileSizeKb / 1024).toFixed(1)} MB</span>
+                                            <div className="mt-auto flex flex-col gap-1 pt-2 border-t border-white/5">
+                                                <div className="flex justify-between items-center text-[10px] text-gray-600 font-mono">
+                                                    <span>{(media.fileSizeKb / 1024).toFixed(1)} MB</span>
+                                                    <span>{media.uploadedAt ? new Date(media.uploadedAt).toLocaleDateString() : 'N/A'}</span>
+                                                </div>
                                             </div>
                                         </div>
 

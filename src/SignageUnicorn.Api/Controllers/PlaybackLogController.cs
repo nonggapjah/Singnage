@@ -27,6 +27,19 @@ namespace SignageUnicorn.Api.Controllers
             return Ok(new { success = true, message = "Playback log recorded" });
         }
 
+        [AllowAnonymous]
+        [HttpPost("batch")]
+        public async Task<IActionResult> CreateBatch([FromBody] List<CreatePlaybackLogRequest> requests)
+        {
+            if (requests == null || requests.Count == 0) return Ok(new { success = true, count = 0 });
+            
+            foreach (var log in requests)
+            {
+                await _playbackRepo.LogPlaybackAsync(log);
+            }
+            return Ok(new { success = true, message = "Batch recorded", count = requests.Count });
+        }
+
         [HttpGet]
         public async Task<IActionResult> GetLatest([FromQuery] int top = 100)
         {

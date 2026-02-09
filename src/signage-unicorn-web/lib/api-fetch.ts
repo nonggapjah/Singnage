@@ -19,9 +19,9 @@ export async function apiFetch<T = any>(
         // 2. Legacy/Fallback Variable
         if (process.env.NEXT_PUBLIC_API_BASE_URL) return process.env.NEXT_PUBLIC_API_BASE_URL;
 
-        // 3. Auto-detect Backend on the same host (LAN/Dev)
+        // 3. Auto-detect Backend (Use Relative Path to leverage Next.js Proxy)
         if (typeof window !== 'undefined') {
-            return `http://${window.location.hostname}:8862/api/v1`;
+            return '/api/v1';
         }
 
         // 4. Server-side / Default Fallback
@@ -55,6 +55,7 @@ export async function apiFetch<T = any>(
         const response = await fetch(url, {
             ...options,
             headers,
+            cache: 'no-store',
         });
 
         const text = await response.text();

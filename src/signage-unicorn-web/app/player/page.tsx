@@ -257,7 +257,7 @@ export default function PlayerPage() {
             playlistId,
             duration,
             result: 'success',
-            timestamp: new Date().toISOString()
+            playedAt: new Date().toISOString()
         };
 
         const rawQueue = localStorage.getItem('signage_pending_playback_logs');
@@ -274,8 +274,9 @@ export default function PlayerPage() {
         if (!isRegistered || !deviceId) return;
 
         const sendHeartbeat = async () => {
-            // Also sync logs during heartbeat
+            // Sync all logs during heartbeat
             syncPlaybackLogs();
+            syncSystemLogs();
 
             try {
                 // Determine Status
@@ -337,6 +338,7 @@ export default function PlayerPage() {
             const res = await playlistApi.getById(pId);
             if (res.success && res.data && res.data.items) {
                 const validItems = res.data.items.filter(i => i.media);
+                // Ensure items are sorted by positionOrder
                 const sortedItems = validItems.sort((a, b) => a.positionOrder - b.positionOrder);
 
                 // --- SMART SYNC: Change Detection ---
@@ -451,8 +453,56 @@ export default function PlayerPage() {
         }
     };
 
-    const addLog = (msg: string) => {
-        setLogs(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev].slice(0, 10));
+    const syncSystemLogs = async () => {
+        try {
+            const rawQueue = localStorage.getItem('signage_pending_system_logs');
+            if (!rawQueue) return;
+            const queue = JSON.parse(rawQueue);
+            if (queue.length === 0) return;
+
+            const successIds: string[] = [];
+            for (const log of queue) {
+                try {
+                    const res = await apiFetch('/logs', {
+                        method: 'POST',
+                        body: JSON.stringify(log)
+                    });
+                    if (res.success) successIds.push(log.tempId);
+                    else break;
+                } catch (e) { break; }
+            }
+
+            if (successIds.length > 0) {
+                const currentRaw = localStorage.getItem('signage_pending_system_logs');
+                const currentQueue = currentRaw ? JSON.parse(currentRaw) : [];
+                const updatedQueue = currentQueue.filter((item: any) => !successIds.includes(item.tempId));
+                if (updatedQueue.length > 0) localStorage.setItem('signage_pending_system_logs', JSON.stringify(updatedQueue));
+                else localStorage.removeItem('signage_pending_system_logs');
+            }
+        } catch (e) {
+            console.error("System log sync failed", e);
+        }
+    };
+
+    const addLog = (msg: string, type: 'INFO' | 'WARN' | 'ERROR' = 'INFO') => {
+        const time = new Date().toLocaleTimeString();
+        setLogs(prev => [`[${time}] ${msg}`, ...prev].slice(0, 10));
+
+        // Persistence for Audit Tracking
+        const log = {
+            tempId: Math.random().toString(36).substring(2, 15),
+            deviceId,
+            logType: type,
+            message: msg,
+            source: 'WebPlayer',
+            createdAt: new Date().toISOString()
+        };
+
+        const rawQueue = localStorage.getItem('signage_pending_system_logs');
+        const queue = rawQueue ? JSON.parse(rawQueue) : [];
+        queue.push(log);
+        localStorage.setItem('signage_pending_system_logs', JSON.stringify(queue));
+        syncSystemLogs();
     };
 
     // --- Volume Control Persistence & OSD ---

@@ -44,6 +44,8 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             if (long.TryParse(log.PlaylistId, out var plId)) p.Add("@p_playlist_id", plId);
             else p.Add("@p_playlist_uuid", log.PlaylistId);
 
+            p.Add("@p_start_time", log.PlayedAt);
+
             // Just fire and check status
             using var multi = await db.QueryMultipleAsync("sp_playback_log_std", p, commandType: CommandType.StoredProcedure);
             var status = await multi.ReadFirstOrDefaultAsync<SpStdResult>();

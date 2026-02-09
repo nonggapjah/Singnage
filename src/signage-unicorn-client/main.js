@@ -3,11 +3,50 @@ const path = require('path');
 const fs = require('fs-extra');
 const axios = require('axios');
 const { exec } = require('child_process');
+const Database = require('better-sqlite3');
 
 let mainWindow;
 let sleepBlockerId;
+let db;
+
 const CONFIG_PATH = path.join(app.getPath('userData'), 'config.json');
 const MEDIA_DIR = path.join(app.getPath('userData'), 'media_cache');
+const DB_PATH = path.join(app.getPath('userData'), 'player_offline.db');
+
+function initDb() {
+    try {
+        db = new Database(DB_PATH);
+        db.pragma('journal_mode = WAL');
+
+        // Playback Logs Table
+        db.prepare(`
+            CREATE TABLE IF NOT EXISTS playback_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                deviceId TEXT,
+                mediaId TEXT,
+                playlistId TEXT,
+                duration INTEGER,
+                result TEXT,
+                errorMessage TEXT,
+                playedAt TEXT,
+                isSynced INTEGER DEFAULT 0
+            )
+        `).run();
+
+        // Playlist Data Cache
+        db.prepare(`
+            CREATE TABLE IF NOT EXISTS playlist_cache (
+                key TEXT PRIMARY KEY,
+                data TEXT,
+                updatedAt TEXT
+            )
+        `).run();
+
+        console.log('SQLite Database Initialized at:', DB_PATH);
+    } catch (err) {
+        console.error('SQLite Initialization Failed:', err);
+    }
+}
 
 async function createWindow() {
     const primaryDisplay = screen.getPrimaryDisplay();
@@ -36,7 +75,10 @@ async function createWindow() {
     console.log('Power save blocker started:', sleepBlockerId);
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+    initDb();
+    createWindow();
+});
 
 app.on('status-bar-style', () => {
     // Hide menu bar
@@ -172,5 +214,70 @@ ipcMain.handle('reboot-device', async () => {
         return { success: true };
     } catch (err) {
         return { success: false, error: err.message };
+    }
+});
+
+// --- SQLite IPC Handlers ---
+ipcMain.handle('db-insert-playback-log', (event, log) => {
+    try {
+        const stmt = db.prepare(`
+            INSERT INTO playback_logs (deviceId, mediaId, playlistId, duration, result, errorMessage, playedAt)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        `);
+        stmt.run(log.deviceId, log.mediaId, log.playlistId, log.duration, log.result, log.errorMessage, log.playedAt);
+        return { success: true };
+    } catch (err) {
+        return { success: false, error: err.message };
+    }
+});
+
+ipcMain.handle('db-get-pending-logs', (event, limit = 50) => {
+    try {
+        return db.prepare('SELECT * FROM playback_logs WHERE isSynced = 0 LIMIT ?').all(limit);
+    } catch (err) {
+        console.error('DB Get Pending Failed:', err);
+        return [];
+    }
+});
+
+ipcMain.handle('db-mark-logs-synced', (event, ids) => {
+    try {
+        if (!ids || ids.length === 0) return { success: true };
+        const stmt = db.prepare(`UPDATE playback_logs SET isSynced = 1 WHERE id = ?`);
+        const updateMany = db.transaction((ids) => {
+            for (const id of ids) stmt.run(id);
+        });
+        updateMany(ids);
+        return { success: true };
+    } catch (err) {
+        return { success: false, error: err.message };
+    }
+});
+
+ipcMain.handle('db-clear-synced-logs', () => {
+    try {
+        db.prepare('DELETE FROM playback_logs WHERE isSynced = 1').run();
+        return { success: true };
+    } catch (err) {
+        return { success: false, error: err.message };
+    }
+});
+
+ipcMain.handle('db-save-playlist', (event, { id, data }) => {
+    try {
+        db.prepare('INSERT OR REPLACE INTO playlist_cache (key, data, updatedAt) VALUES (?, ?, ?)')
+            .run(id, JSON.stringify(data), new Date().toISOString());
+        return { success: true };
+    } catch (err) {
+        return { success: false, error: err.message };
+    }
+});
+
+ipcMain.handle('db-get-playlist', (event, id) => {
+    try {
+        const row = db.prepare('SELECT data FROM playlist_cache WHERE key = ?').get(id);
+        return row ? JSON.parse(row.data) : null;
+    } catch (err) {
+        return null;
     }
 });

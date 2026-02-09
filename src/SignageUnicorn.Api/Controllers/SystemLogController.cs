@@ -101,8 +101,21 @@ namespace SignageUnicorn.Api.Controllers
             if (log == null || string.IsNullOrEmpty(log.Message))
                 return BadRequest(ApiResponse<bool>.ErrorResponse(400, "Log message is required"));
 
-            await _repo.LogAsync(log.DeviceId, log.LogType, log.Message, log.Source ?? "Player");
+            await _repo.LogAsync(log.DeviceId, log.LogType, log.Message, log.Source ?? "Player", null, log.CreatedAt);
             return Ok(ApiResponse<bool>.SuccessResponse(true, "Log captured"));
+        }
+
+        [AllowAnonymous]
+        [HttpPost("batch")]
+        public async Task<IActionResult> CreateBatch([FromBody] List<SystemLogDto> logs)
+        {
+            if (logs == null || logs.Count == 0) return Ok(ApiResponse<bool>.SuccessResponse(true, "No logs to sync"));
+            
+            foreach (var log in logs)
+            {
+                await _repo.LogAsync(log.DeviceId, log.LogType, log.Message, log.Source ?? "Player", null, log.CreatedAt);
+            }
+            return Ok(ApiResponse<int>.SuccessResponse(logs.Count, "Batch captured"));
         }
 
         [HttpDelete]

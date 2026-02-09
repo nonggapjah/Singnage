@@ -89,7 +89,7 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             };
         }
 
-        public async Task<RepositoryResult> CreateAsync(User user)
+        public async Task<RepositoryResult> CreateAsync(User user, string? executorId = null)
         {
             using var db = CreateConnection();
             
@@ -116,7 +116,8 @@ namespace SignageUnicorn.Api.Repositories.Implementations
                 p_password_hash = pwdHash,
                 p_password_salt = pwdSalt,
                 p_password_algo = pwdAlgo,
-                p_password_iterations = pwdIter
+                p_password_iterations = pwdIter,
+                p_executor_id = executorId
             };
 
             var result = await db.QueryFirstOrDefaultAsync<SpStdContract>("sp_auth_user_std", parameters, commandType: CommandType.StoredProcedure);
@@ -131,7 +132,7 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             return RepositoryResult.Fail(-1, "DB Execution Error");
         }
 
-        public async Task<RepositoryResult> UpdateAsync(User user)
+        public async Task<RepositoryResult> UpdateAsync(User user, string? executorId = null)
         {
             using var db = CreateConnection();
             
@@ -140,7 +141,8 @@ namespace SignageUnicorn.Api.Repositories.Implementations
                 p_action = "UPDATE_PROFILE",
                 p_userid = user.UserId,
                 p_display_name = user.FullName,
-                p_avatar_url = user.AvatarUrl
+                p_avatar_url = user.AvatarUrl,
+                p_executor_id = executorId
             };
             
             var result = await db.QueryFirstOrDefaultAsync<SpStdContract>("sp_auth_user_std", parameters, commandType: CommandType.StoredProcedure);
@@ -157,7 +159,8 @@ namespace SignageUnicorn.Api.Repositories.Implementations
                 {
                     p_action = "UPDATE_ROLE",
                     p_userid = user.UserId,
-                    p_identifier_value = user.Role.ToLower()
+                    p_identifier_value = user.Role.ToLower(),
+                    p_executor_id = executorId
                 };
                 
                 await db.QueryFirstOrDefaultAsync<SpStdContract>("sp_auth_user_std", roleParams, commandType: CommandType.StoredProcedure);
@@ -166,14 +169,15 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             return RepositoryResult.Ok(result?.msg ?? "Updated");
         }
 
-        public async Task<RepositoryResult> UpdatePasswordAsync(string userId, string passwordHash)
+        public async Task<RepositoryResult> UpdatePasswordAsync(string userId, string passwordHash, string? executorId = null)
         {
             using var db = CreateConnection();
             var parameters = new
             {
                 p_action = "CHANGE_PASSWORD",
                 p_userid = userId,
-                p_password_hash = System.Text.Encoding.UTF8.GetBytes(passwordHash)
+                p_password_hash = System.Text.Encoding.UTF8.GetBytes(passwordHash),
+                p_executor_id = executorId
             };
             
             var result = await db.QueryFirstOrDefaultAsync<SpStdContract>("sp_auth_user_std", parameters, commandType: CommandType.StoredProcedure);

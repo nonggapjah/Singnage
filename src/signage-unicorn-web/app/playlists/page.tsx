@@ -42,12 +42,12 @@ const PlaylistsContent = () => {
                 </div>
             )}
 
-            <PlaylistEditor
-                playlist={activePlaylist}
-                onClose={() => setEditorOpen(false)}
-                onRemoveItem={() => { }}
-                onReorder={() => { }}
-            />
+            {editorOpen && (
+                <PlaylistEditor
+                    initialData={activePlaylist || undefined}
+                    onSave={(data) => { console.log('Save:', data); setEditorOpen(false); }}
+                />
+            )}
 
             {editorOpen && (
                 <div

@@ -38,7 +38,7 @@ export const PlaylistCard: React.FC<PlaylistCardProps> = ({ playlist, onClick })
 
             <div className="flex items-center justify-between text-xs text-white/40 border-t border-white/5 pt-3 mt-auto">
                 <span>{playlist.items?.length || 0} items</span>
-                <span>{new Date(playlist.createdAt).toLocaleDateString()}</span>
+                <span>{playlist.createdAt ? new Date(playlist.createdAt).toLocaleDateString() : 'Unknown'}</span>
             </div>
         </div>
     );

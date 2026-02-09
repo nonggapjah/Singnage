@@ -26,7 +26,7 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             public string msg { get; set; }
         }
 
-        public async Task LogAsync(string? deviceId, string logType, string message, string source = "API", long? userId = null)
+        public async Task LogAsync(string? deviceId, string logType, string message, string source = "API", long? userId = null, DateTime? createdAt = null)
         {
             // Workaround: SP does not have device_id column, injecting into message.
             string finalMessage = string.IsNullOrEmpty(deviceId) 
@@ -41,6 +41,7 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             p.Add("@p_message", finalMessage);
             p.Add("@p_source_system", source);
             p.Add("@p_userid", userId);
+            p.Add("@p_created_at", createdAt);
 
             // 1. Status (Always)
             // Just execute and verify no error if crucial, but for logging we often fire-and-forget or just await.

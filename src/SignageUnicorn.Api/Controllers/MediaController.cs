@@ -64,13 +64,22 @@ namespace SignageUnicorn.Api.Controllers
         [DisableRequestSizeLimit]
         public async Task<IActionResult> Create([FromForm] MediaUploadRequest request)
         {
-            var userId = GetUserId();
-            var result = await _service.CreateMediaAsync(request, userId);
-            if (result != null)
+            try 
             {
-                return Ok(ApiResponse<MediaFile>.SuccessResponse(result, "Media uploaded successfully"));
+                var userId = GetUserId();
+                var result = await _service.CreateMediaAsync(request, userId);
+                if (result != null)
+                {
+                    return Ok(ApiResponse<MediaFile>.SuccessResponse(result, "Media uploaded successfully"));
+                }
+                return BadRequest(ApiResponse<MediaFile>.ErrorResponse(400, "Failed to upload media"));
             }
-            return BadRequest(ApiResponse<MediaFile>.ErrorResponse(400, "Failed to upload media"));
+            catch (Exception ex)
+            {
+                // In a real production app, we would use an ILogger or ISystemLogRepository here
+                // For now, let's just return a clean error message
+                return StatusCode(500, ApiResponse<string>.ErrorResponse(500, "An internal server error occurred while uploading."));
+            }
         }
 
         [HttpPut("{id}")]

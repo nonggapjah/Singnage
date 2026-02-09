@@ -47,7 +47,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({ media, onDelete }) => {
                 </p>
                 <div className="flex justify-between items-center text-[10px] text-white/40 uppercase tracking-widest">
                     <span>{media.fileSizeKb} KB</span>
-                    <span>{new Date(media.uploadedAt).toLocaleDateString()}</span>
+                    <span>{media.uploadedAt ? new Date(media.uploadedAt).toLocaleDateString() : 'N/A'}</span>
                 </div>
             </div>
         </div>

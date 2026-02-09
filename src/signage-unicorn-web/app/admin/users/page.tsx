@@ -30,12 +30,22 @@ export default function UserManagementPage() {
             const res = await userApi.getAll();
             if (res.success && res.data) {
                 setUsers(res.data);
+
+                // If we edited current user, we might want to update the local session too
+                // (Though real session update should ideally happen via a dedicated check-session call)
             }
         } catch (error) {
             console.error("Failed to load users", error);
         } finally {
             setLoading(false);
         }
+    };
+
+    const handleSaveComplete = async () => {
+        await loadUsers();
+        // Optional: Force a slight delay to ensure DB consistency in some environments
+        // await new Promise(r => setTimeout(r, 500));
+        // await loadUsers();
     };
 
     const handleAddUser = () => {
@@ -131,12 +141,21 @@ export default function UserManagementPage() {
                         <h2 className="text-3xl font-black neon-text uppercase tracking-tighter mb-2">Team Management</h2>
                         <p className="text-gray-400 text-sm">Manage access control and user roles</p>
                     </div>
-                    <button
-                        onClick={handleAddUser}
-                        className="btn-primary flex items-center gap-2 shadow-[0_0_20px_rgba(124,58,237,0.3)] bg-gradient-to-r from-accent-purple to-indigo-600 hover:to-indigo-500 border-none"
-                    >
-                        <Plus size={18} strokeWidth={3} /> Add Member
-                    </button>
+                    <div className="flex items-center gap-3">
+                        <button
+                            onClick={loadUsers}
+                            className="p-3 rounded-xl border border-white/10 hover:border-accent-cyan/50 text-gray-400 hover:text-accent-cyan transition-all"
+                            title="Refresh List"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>
+                        </button>
+                        <button
+                            onClick={handleAddUser}
+                            className="btn-primary flex items-center gap-2 shadow-[0_0_20px_rgba(124,58,237,0.3)] bg-gradient-to-r from-accent-purple to-indigo-600 hover:to-indigo-500 border-none"
+                        >
+                            <Plus size={18} strokeWidth={3} /> Add Member
+                        </button>
+                    </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
@@ -190,7 +209,7 @@ export default function UserManagementPage() {
             <EditUserModal
                 isOpen={isModalOpen}
                 onClose={() => setIsModalOpen(false)}
-                onSave={loadUsers}
+                onSave={handleSaveComplete}
                 user={editingUser}
             />
         </div>

@@ -22,6 +22,7 @@ namespace SignageUnicorn.Api.Models
         public int Duration { get; set; }
         public string? Result { get; set; }
         public string? ErrorMessage { get; set; }
+        public DateTime? PlayedAt { get; set; }
     }
 
     public class PlaybackSummaryDto

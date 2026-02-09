@@ -175,85 +175,97 @@ function saveSystemQueue() {
 async function syncSystemLogs() {
     if (systemLogQueue.length === 0 || !config.serverIp) return;
 
-    // Process queue sequentially
-    let successCount = 0;
-    const originalLength = systemLogQueue.length;
+    // Process in batches of 50
+    const batchSize = 50;
+    const batch = systemLogQueue.slice(0, batchSize);
 
-    while (systemLogQueue.length > 0) {
-        const log = systemLogQueue[0];
-        try {
-            const res = await fetch(`${config.serverIp}/api/v1/logs`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(log)
-            });
-            if (res.ok) {
-                systemLogQueue.shift(); // Remove only on success
-                successCount++;
-            } else {
-                break; // Server error, stop batch
+    try {
+        const res = await fetch(`${config.serverIp}/api/v1/logs/batch`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(batch)
+        });
+
+        if (res.ok) {
+            systemLogQueue.splice(0, batch.length);
+            saveSystemQueue();
+            console.log(`Synced ${batch.length} system logs (Batch)`);
+
+            // If there's more, sync again soon
+            if (systemLogQueue.length > 0) {
+                setTimeout(syncSystemLogs, 1000);
             }
-        } catch (err) {
-            break; // Network error, stop batch
         }
-    }
-
-    if (successCount > 0) {
-        saveSystemQueue();
-        console.log(`Synced ${successCount}/${originalLength} system logs`);
+    } catch (err) {
+        console.warn("System Log Batch Sync failed", err.message);
     }
 }
 
-function recordPlayback(item, duration, result = 'success', error = '') {
+async function recordPlayback(item, duration, result = 'success', error = '') {
     const log = {
-        tempId: Math.random().toString(36).substring(2, 15),
         deviceId: config.deviceId,
         mediaId: item.media.mediaId,
         playlistId: config.lastPlaylistId || null,
         duration: Math.max(1, Math.floor(duration / 1000)),
         result: result,
         errorMessage: error,
-        playedAt: new Date().toISOString(),
-        timestamp: new Date().toISOString()
+        playedAt: new Date().toISOString()
     };
-    playbackLogQueue.push(log);
-    savePlaybackQueue();
+
+    // Save to SQLite via Main process
+    await ipcRenderer.invoke('db-insert-playback-log', log);
+
+    // Attempt sync
     syncPlaybackLogs();
 }
 
-function savePlaybackQueue() {
-    localStorage.setItem('playback_queue', JSON.stringify(playbackLogQueue));
-}
-
 async function syncPlaybackLogs() {
-    if (playbackLogQueue.length === 0 || !config.serverIp) return;
+    if (!config || !config.serverIp || !config.deviceId) return;
 
-    let successCount = 0;
-    const originalLength = playbackLogQueue.length;
+    try {
+        // Fetch up to 100 pending logs at a time
+        const pending = await ipcRenderer.invoke('db-get-pending-logs', 100);
+        if (!pending || pending.length === 0) return;
 
-    while (playbackLogQueue.length > 0) {
-        const log = playbackLogQueue[0];
-        try {
-            const res = await fetch(`${config.serverIp}/api/v1/logs/playback`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(log)
-            });
-            if (res.ok) {
-                playbackLogQueue.shift();
-                successCount++;
-            } else {
-                console.error('Playback Sync Error:', res.status, await res.text());
-                break;
+        console.log(`SQLite: Syncing ${pending.length} playback logs in batch...`);
+
+        // Prepare batch for API
+        const batch = pending.map(row => ({
+            deviceId: row.deviceId,
+            mediaId: row.mediaId,
+            playlistId: row.playlistId,
+            duration: row.duration,
+            result: row.result,
+            errorMessage: row.errorMessage,
+            playedAt: row.playedAt
+        }));
+
+        const res = await fetch(`${config.serverIp}/api/v1/logs/playback/batch`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(batch)
+        });
+
+        if (res.ok) {
+            const data = await res.json();
+            const syncedIds = pending.map(p => p.id);
+            await ipcRenderer.invoke('db-mark-logs-synced', syncedIds);
+
+            console.log(`SQLite Batch Sync SUCCESS: ${data.count} items recorded.`);
+
+            // Clear synced logs from DB to keep it lean
+            await ipcRenderer.invoke('db-clear-synced-logs');
+
+            // If we hit the limit, there might be more... call again
+            if (pending.length >= 100) {
+                setTimeout(syncPlaybackLogs, 1000);
             }
-        } catch (err) {
-            break;
+        } else {
+            console.warn('SQLite Batch Sync Failed (Server Error)', res.status);
         }
-    }
-
-    if (successCount > 0) {
-        savePlaybackQueue();
-        console.log(`Synced ${successCount}/${originalLength} playback logs`);
+    } catch (err) {
+        // Quietly fail during heartbeat if offline
+        console.error('SQLite Sync Network Error:', err.message);
     }
 }
 
@@ -341,26 +353,25 @@ async function loadPlaylist(playlistId, resumeIndex = 0) {
             const res = await fetch(`${config.serverIp}/api/v1/playlists/${playlistId}`);
             const data = await res.json();
             if (data.success && data.data.items) {
-                items = data.data.items.filter(i => i.media);
+                // Ensure items are sorted by positionOrder
+                items = data.data.items.filter(i => i.media).sort((a, b) => a.positionOrder - b.positionOrder);
                 playlistName = data.data.playlistName || playlistName;
 
-                // --- Cache Structure for Offline Survival ---
-                localStorage.setItem(`playlist_cache_${playlistId}`, JSON.stringify({
-                    items,
-                    playlistName,
-                    cachedAt: new Date().toISOString()
-                }));
+                // --- Cache in SQLite for Offline Survival ---
+                await ipcRenderer.invoke('db-save-playlist', {
+                    id: playlistId,
+                    data: { items, playlistName }
+                });
             }
         } catch (fetchErr) {
-            addLog(`Server unreachable, trying local cache...`, 'warn');
-            const cached = localStorage.getItem(`playlist_cache_${playlistId}`);
-            if (cached) {
-                const cachedData = JSON.parse(cached);
+            addLog(`Server unreachable, trying SQLite cache...`, 'warn');
+            const cachedData = await ipcRenderer.invoke('db-get-playlist', playlistId);
+            if (cachedData) {
                 items = cachedData.items;
                 playlistName = cachedData.playlistName;
-                addLog(`Offline Mode: Loaded from cache (Dated: ${cachedData.cachedAt})`);
+                addLog(`Offline Mode: Loaded from SQLite cache`);
             } else {
-                throw new Error("No local cache found for this playlist.");
+                throw new Error("No local SQLite cache found for this playlist.");
             }
         }
 

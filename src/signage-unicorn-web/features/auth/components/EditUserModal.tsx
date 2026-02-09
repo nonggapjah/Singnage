@@ -8,7 +8,7 @@ interface EditUserModalProps {
     user: User | null; // null for new user
     isOpen: boolean;
     onClose: () => void;
-    onSave: () => void;
+    onSave: () => void | Promise<void>;
 }
 
 export const EditUserModal: React.FC<EditUserModalProps> = ({ user, isOpen, onClose, onSave }) => {
@@ -91,7 +91,7 @@ export const EditUserModal: React.FC<EditUserModalProps> = ({ user, isOpen, onCl
                     role: formData.role
                 });
             }
-            onSave();
+            await onSave();
             onClose();
         } catch (error) {
             console.error("Failed to save user", error);
@@ -170,13 +170,13 @@ export const EditUserModal: React.FC<EditUserModalProps> = ({ user, isOpen, onCl
                             <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Role</label>
                             <div className="relative">
                                 <select
-                                    value={formData.role}
+                                    value={formData.role.toLowerCase()}
                                     onChange={(e) => setFormData({ ...formData, role: e.target.value })}
                                     className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:border-accent-cyan outline-none transition-colors appearance-none"
                                 >
-                                    <option value="Admin" className="bg-black">Admin</option>
-                                    <option value="Editor" className="bg-black">Editor</option>
-                                    <option value="Viewer" className="bg-black">Viewer</option>
+                                    <option value="admin" className="bg-black">Admin</option>
+                                    <option value="editor" className="bg-black">Editor</option>
+                                    <option value="viewer" className="bg-black">Viewer</option>
                                 </select>
                                 <UserIcon className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-600 pointer-events-none" size={18} />
                             </div>

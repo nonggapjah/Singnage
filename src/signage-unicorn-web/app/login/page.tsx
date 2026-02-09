@@ -187,13 +187,15 @@ export default function LoginPage() {
                     </form>
 
                     <div className="mt-8 pt-8 border-t border-white/5 space-y-4">
-                        <button
-                            onClick={handleAutoAdmin}
-                            className="w-full py-3 rounded-xl bg-white/5 border border-white/10 text-xs font-black text-gray-400 uppercase tracking-widest hover:bg-white/10 hover:text-white transition-all flex items-center justify-center gap-2 group/dev"
-                        >
-                            <span className="w-2 h-2 rounded-full bg-green-500/50 group-hover/dev:bg-green-400 transition-colors"></span>
-                            Local Developer Auto-Admin
-                        </button>
+                        {process.env.NEXT_PUBLIC_DEBUG !== '0' && (
+                            <button
+                                onClick={handleAutoAdmin}
+                                className="w-full py-3 rounded-xl bg-white/5 border border-white/10 text-xs font-black text-gray-400 uppercase tracking-widest hover:bg-white/10 hover:text-white transition-all flex items-center justify-center gap-2 group/dev"
+                            >
+                                <span className="w-2 h-2 rounded-full bg-green-500/50 group-hover/dev:bg-green-400 transition-colors"></span>
+                                Local Developer Auto-Admin
+                            </button>
+                        )}
 
                         <div className="text-center">
                             <Link href="/register" className="text-xs font-black text-gray-600 uppercase tracking-widest hover:text-[#00f2ff] transition-colors">

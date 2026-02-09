@@ -70,13 +70,15 @@ export default function Home() {
               <Link href="/login" className="px-10 py-4 rounded-xl bg-accent-cyan text-black font-extrabold uppercase tracking-[0.2em] border-2 border-cyan-400 hover:bg-cyan-300 hover:shadow-[0_0_30px_rgba(34,211,238,0.6)] transition-all transform hover:-translate-y-1 text-sm">
                 Initialize Access
               </Link>
-              <button
-                onClick={handleAutoLogin}
-                disabled={loading}
-                className="px-10 py-4 rounded-xl bg-black/40 border-2 border-white/20 text-white font-extrabold uppercase tracking-[0.2em] hover:bg-white/10 hover:border-white/40 shadow-lg backdrop-blur-md transition-all transform hover:-translate-y-1 text-sm"
-              >
-                {loading ? 'Initializing...' : 'Local Dev Admin'}
-              </button>
+              {process.env.NEXT_PUBLIC_DEBUG !== '0' && (
+                <button
+                  onClick={handleAutoLogin}
+                  disabled={loading}
+                  className="px-10 py-4 rounded-xl bg-black/40 border-2 border-white/20 text-white font-extrabold uppercase tracking-[0.2em] hover:bg-white/10 hover:border-white/40 shadow-lg backdrop-blur-md transition-all transform hover:-translate-y-1 text-sm"
+                >
+                  {loading ? 'Initializing...' : 'Local Dev Admin'}
+                </button>
+              )}
               <Link href="/player" className="px-10 py-4 rounded-xl bg-purple-600/20 border-2 border-purple-500/50 text-purple-300 font-extrabold uppercase tracking-[0.2em] hover:bg-purple-600/40 hover:text-white shadow-lg backdrop-blur-md transition-all transform hover:-translate-y-1 text-sm">
                 Launch Player Mode
               </Link>
@@ -109,10 +111,18 @@ export default function Home() {
           </div>
         </div>
 
-        <footer className="pt-12">
+        <footer className="pt-12 flex flex-col items-center gap-4">
+          <div className="flex gap-4">
+            <a
+              href="/setup/SignageUnicornSetup.exe"
+              className="px-4 py-2 rounded-full bg-white/5 border border-white/10 text-[10px] font-black uppercase tracking-widest text-gray-400 hover:text-accent-cyan hover:border-accent-cyan/50 transition-all"
+            >
+              📥 Download Native Player (v2.2.0)
+            </a>
+          </div>
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 border border-white/10 text-xs font-mono text-gray-500">
             <span className="w-2 h-2 rounded-full bg-accent-cyan animate-pulse" />
-            CORE v1.7.7-AUTH-ENABLED
+            CORE v{process.env.NEXT_PUBLIC_SYSTEM_VERSION || '2.2.0'}
           </div>
         </footer>
       </div>

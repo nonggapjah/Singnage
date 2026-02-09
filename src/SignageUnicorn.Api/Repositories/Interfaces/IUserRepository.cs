@@ -6,9 +6,9 @@ namespace SignageUnicorn.Api.Repositories.Interfaces
     {
         Task<User?> GetByUsernameAsync(string username);
         Task<User?> GetByIdAsync(string userId);
-        Task<RepositoryResult> CreateAsync(User user);
-        Task<RepositoryResult> UpdateAsync(User user);
-        Task<RepositoryResult> UpdatePasswordAsync(string userId, string passwordHash);
+        Task<RepositoryResult> CreateAsync(User user, string? executorId = null);
+        Task<RepositoryResult> UpdateAsync(User user, string? executorId = null);
+        Task<RepositoryResult> UpdatePasswordAsync(string userId, string passwordHash, string? executorId = null);
         Task<RepositoryResult> DeleteAsync(string userId);
         Task<IEnumerable<User>> GetAllAsync();
     }

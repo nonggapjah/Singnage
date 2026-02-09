@@ -3,7 +3,7 @@ module.exports = {
         {
             name: "signage-api",
             script: "dotnet",
-            args: "watch run --urls http://0.0.0.0:8862",
+            args: "run --no-launch-profile --urls http://0.0.0.0:8862",
             cwd: "./src/SignageUnicorn.Api",
             watch: false,
             shell: true,
@@ -13,13 +13,14 @@ module.exports = {
         },
         {
             name: "signage-web",
-            script: "npm",
-            args: "run dev -- -p 8865",
+            script: "node_modules/next/dist/bin/next",
+            args: "start -p 8865",
             cwd: "./src/signage-unicorn-web",
             watch: false,
-            shell: true,
             env: {
-                NODE_ENV: "development"
+                NODE_ENV: "production",
+                PORT: "8865",
+                NEXT_PUBLIC_API_URL: "/api/v1"
             }
         }
     ]

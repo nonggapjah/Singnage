@@ -49,7 +49,8 @@ namespace SignageUnicorn.Api.Controllers
             {
                 return StatusCode(403, ApiResponse<bool>.ErrorResponse(403, "Editors cannot create Admin users."));
             }
-            var success = await _authService.RegisterAsync(request);
+            var executorId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            var success = await _authService.RegisterAsync(request, executorId);
             if (success)
             {
                 return Ok(ApiResponse<bool>.SuccessResponse(true, "User created successfully"));
@@ -74,7 +75,8 @@ namespace SignageUnicorn.Api.Controllers
             if (user.Role == UserRoles.Admin && !User.IsInRole(UserRoles.Admin))
                  return StatusCode(403, ApiResponse<bool>.ErrorResponse(403, "Editors cannot set Admin role."));
             user.UserId = id;
-            var result = await _userRepository.UpdateAsync(user);
+            var executorId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            var result = await _userRepository.UpdateAsync(user, executorId);
             if (result.Success)
             {
                 return Ok(ApiResponse<bool>.SuccessResponse(true, "User updated successfully"));
@@ -124,7 +126,7 @@ namespace SignageUnicorn.Api.Controllers
 
             // Update with new password
             var newHash = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
-            var result = await _userRepository.UpdatePasswordAsync(userId, newHash);
+            var result = await _userRepository.UpdatePasswordAsync(userId, newHash, userId);
             
             if (result.Success)
             {

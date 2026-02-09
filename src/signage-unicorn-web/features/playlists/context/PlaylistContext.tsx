@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { Playlist, Media } from '../types/playlist.types';
+import { Playlist, MediaFile as Media } from '../types/playlist';
 import { playlistService, mediaService } from '../api/playlistService';
 
 interface PlaylistContextType {

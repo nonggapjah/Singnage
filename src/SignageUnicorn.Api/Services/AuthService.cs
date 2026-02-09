@@ -74,7 +74,7 @@ namespace SignageUnicorn.Api.Services
             };
         }
 
-        public async Task<bool> RegisterAsync(RegisterRequest request)
+        public async Task<bool> RegisterAsync(RegisterRequest request, string? executorId = null)
         {
             var existing = await _userRepository.GetByUsernameAsync(request.Username);
             if (existing != null) 
@@ -94,7 +94,7 @@ namespace SignageUnicorn.Api.Services
                 AvatarUrl = request.AvatarUrl
             };
 
-            var result = await _userRepository.CreateAsync(user);
+            var result = await _userRepository.CreateAsync(user, executorId);
             if (result.Success)
             {
                  await _systemLog.LogAsync("INFO", "AUTH", $"New user registered: '{request.Username}' ({request.Role})");

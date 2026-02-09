@@ -33,7 +33,17 @@ namespace SignageUnicorn.Api.Services
                 Console.WriteLine("[ServerService] Starting Auto-Configuration...");
 
                 // 1. Detect IP and Config
-                var currentBaseUrl = _configuration["ServerSettings:BaseUrl"] ?? "http://localhost:5018";
+                var currentBaseUrl = _configuration["ServerSettings:BaseUrl"] ?? "";
+                
+                // If BaseUrl is already set to a public domain or HTTPS, do NOT auto-configure
+                if (!string.IsNullOrEmpty(currentBaseUrl) && 
+                    (currentBaseUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase) || 
+                     !currentBaseUrl.Contains("localhost") && !currentBaseUrl.Contains("127.0.0.1") && currentBaseUrl.Count(c => c == '.') < 3))
+                {
+                    Console.WriteLine($"[ServerService] Existing BaseUrl '{currentBaseUrl}' looks like a custom domain or HTTPS. Skipping auto-configuration.");
+                    return;
+                }
+
                 var currentPort = 5018;
                 if (Uri.TryCreate(currentBaseUrl, UriKind.Absolute, out var uri))
                 {
@@ -45,13 +55,9 @@ namespace SignageUnicorn.Api.Services
 
                 Console.WriteLine($"[ServerService] Detected IP: {detectedIp}. Configured URL: {currentBaseUrl}. Target URL: {newUrl}");
 
-                // 2. Update Configuration (appsettings.json & .env) if changed or just to enforce
-                // Always running this ensures transient environment variables or misconfigurations are fixed.
-                // Note: Updating appsettings.json might trigger a reload, but doing it early in startup is usually safe or will restart the app cleanly.
+                // 2. Update Configuration (appsettings.json & .env) if changed
                 bool configUpdated = UpdateAppSettings(newUrl);
-                UpdateFrontendEnv(newUrl, currentPort); // Assuming frontend port matches backend or is standard? 
-                // Wait, frontend port is usually different (e.g., 3000). The controller had it passed in. 
-                // We'll try to preserve existing frontend port from .env if possible, or default to 3000.
+                UpdateFrontendEnv(newUrl, currentPort);
                 
                 if (configUpdated)
                 {
