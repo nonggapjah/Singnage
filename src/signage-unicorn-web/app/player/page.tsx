@@ -27,6 +27,11 @@ export default function PlayerPage() {
     const [logs, setLogs] = useState<string[]>([]);
     const [itemStartedAt, setItemStartedAt] = useState<number>(Date.now());
 
+    // Smooth Update State
+    const [pendingPlaylist, setPendingPlaylist] = useState<{ id: string, name: string, items: PlaylistItem[] } | null>(null);
+    const pendingPlaylistRef = useRef<{ id: string, name: string, items: PlaylistItem[] } | null>(null);
+    const cachedUrlsRef = useRef<Record<string, string>>({});
+
     // UX State
     const [showAdmin, setShowAdmin] = useState(false);
     const [volume, setVolume] = useState(50);
@@ -162,7 +167,7 @@ export default function PlayerPage() {
                             setPlaylistName(savedPlaylistName || 'Cached Playlist');
                             setItems(parsedItems);
                             setStatus('PLAYING_LOCAL');
-                            setDebugMsg('RESUMING CACHED PLAYLIST...');
+                            showToast('RESUMING CACHED PLAYLIST...');
 
                             // Restore Index
                             const savedIndex = localStorage.getItem('signage_playlist_index');
@@ -333,7 +338,9 @@ export default function PlayerPage() {
 
     // --- Playlist Loader ---
     const loadPlaylist = async (pId: string) => {
-        setIsLoadingContent(true);
+        // Only show full-screen loader if we have nothing playing
+        if (items.length === 0) setIsLoadingContent(true);
+
         try {
             const res = await playlistApi.getById(pId);
             if (res.success && res.data && res.data.items) {
@@ -342,32 +349,47 @@ export default function PlayerPage() {
                 const sortedItems = validItems.sort((a, b) => a.positionOrder - b.positionOrder);
 
                 // --- SMART SYNC: Change Detection ---
-                // We create a hash based on PlaylistID + MediaIDs + Order + Duration
                 const contentHash = pId + '|' + sortedItems.map(i => `${i.mediaId}-${i.durationOverride || 0}`).join(',');
                 const currentHash = localStorage.getItem('signage_playlist_hash');
 
                 if (contentHash === currentHash && items.length > 0) {
                     console.log("SMART SYNC: Content hash matches. Skipping reload to maintain local playback continuity.");
-                    setPlaylistId(pId); // Ensure ID is synced even if hash matches
+                    setPlaylistId(pId);
                     return;
                 }
 
-                console.log("SMART SYNC: Change detected. Updating local cache...");
-                setItems(sortedItems);
-                setPlaylistId(pId);
-                setPlaylistName(res.data.playlistName);
-                setCurrentIndex(0);
-                setStatus('PLAYING_NEW');
-                showToast(`PLAYLIST UPDATED: ${res.data.playlistName}`);
+                // --- IMMEDIATE SWAP IF IDLE ---
+                if (items.length === 0) {
+                    console.log("SMART SYNC: IDLE -> Loading first playlist immediately.");
+                    setItems(sortedItems);
+                    setPlaylistId(pId);
+                    setPlaylistName(res.data.playlistName);
+                    setCurrentIndex(0);
+                    setStatus('PLAYING');
 
-                // PERSIST
-                localStorage.setItem('signage_playlist_id', pId);
-                localStorage.setItem('signage_playlist_name', res.data.playlistName);
-                localStorage.setItem('signage_playlist_items', JSON.stringify(sortedItems));
-                localStorage.setItem('signage_playlist_hash', contentHash);
+                    localStorage.setItem('signage_playlist_id', pId);
+                    localStorage.setItem('signage_playlist_name', res.data.playlistName);
+                    localStorage.setItem('signage_playlist_items', JSON.stringify(sortedItems));
+                    localStorage.setItem('signage_playlist_hash', contentHash);
 
-                addLog(`SYS: Content updated '${res.data.playlistName}' (${sortedItems.length} items)`);
-                syncMediaAssets(sortedItems);
+                    addLog(`SYS: Loaded playlist '${res.data.playlistName}' (${sortedItems.length} items)`);
+                    syncMediaAssets(sortedItems);
+                } else {
+                    // --- SMOOTH BACKGROUND SWAP ---
+                    console.log("SMART SYNC: Change detected. Queuing background update...");
+                    const pending = { id: pId, name: res.data.playlistName, items: sortedItems };
+                    setPendingPlaylist(pending);
+                    pendingPlaylistRef.current = pending;
+
+                    localStorage.setItem('signage_pending_playlist_id', pId);
+                    localStorage.setItem('signage_pending_playlist_items', JSON.stringify(sortedItems));
+                    localStorage.setItem('signage_playlist_hash_pending', contentHash);
+
+                    showToast(`PLAYLIST UPDATED: SYNCING IN BACKGROUND...`);
+                    addLog(`SYS: New playlist '${res.data.playlistName}' queued for smooth swap`);
+
+                    syncMediaAssets(sortedItems);
+                }
             } else {
                 showToast('FAILED TO LOAD PLAYLIST');
                 addLog('ERR: Failed to load playlist content');
@@ -414,19 +436,28 @@ export default function PlayerPage() {
                 try {
                     // 1. Check if already in cache
                     const cachedRes = await cache.match(url);
+                    let finalUrl = '';
                     if (cachedRes) {
                         const blob = await cachedRes.blob();
-                        newCacheUrls[item.mediaId] = URL.createObjectURL(blob);
+                        finalUrl = URL.createObjectURL(blob);
                     } else {
                         // 2. Download with CORS mode
                         const response = await fetch(url, { mode: 'cors' });
                         if (response.ok) {
                             await cache.put(url, response.clone());
                             const blob = await response.blob();
-                            newCacheUrls[item.mediaId] = URL.createObjectURL(blob);
+                            finalUrl = URL.createObjectURL(blob);
                         } else {
                             throw new Error(`Server status ${response.status}`);
                         }
+                    }
+
+                    if (finalUrl) {
+                        setCachedMediaUrls(prev => {
+                            const updated = { ...prev, [item.mediaId]: finalUrl };
+                            cachedUrlsRef.current = updated;
+                            return updated;
+                        });
                     }
                 } catch (err) {
                     console.warn(`CACHE_SYNC: Failed to cache ${media.fileName}`, err);
@@ -438,7 +469,6 @@ export default function PlayerPage() {
                 setCacheProgress(Math.round((loaded / total) * 100));
             }
 
-            setCachedMediaUrls(newCacheUrls);
             setCacheProgress(100);
             setCachedCount(total);
             addLog(`SYS: Cache Sync Complete (${loaded}/${total} items)`);
@@ -550,6 +580,40 @@ export default function PlayerPage() {
             if (item.mediaId) {
                 queuePlaybackLog(item.mediaId, item.durationOverride || item.media?.durationSec || 10);
             }
+
+            // --- SMOOTH SWAP LOGIC (Using Ref for latest value) ---
+            const currentPending = pendingPlaylistRef.current;
+            if (currentPending && currentPending.items.length > 0) {
+                const firstMediaId = currentPending.items[0].mediaId;
+                if (cachedUrlsRef.current[firstMediaId]) {
+                    console.log("SMOOTH SWAP: Next playlist ready. Switching now.");
+                    setItems(currentPending.items);
+                    setPlaylistId(currentPending.id);
+                    setPlaylistName(currentPending.name);
+                    setCurrentIndex(0);
+                    setStatus('PLAYING');
+
+                    // Cleanup pending
+                    setPendingPlaylist(null);
+                    pendingPlaylistRef.current = null;
+
+                    // Finalize persistence
+                    localStorage.setItem('signage_playlist_id', currentPending.id);
+                    localStorage.setItem('signage_playlist_items', JSON.stringify(currentPending.items));
+                    const hash = localStorage.getItem('signage_playlist_hash_pending');
+                    if (hash) localStorage.setItem('signage_playlist_hash', hash);
+
+                    localStorage.removeItem('signage_pending_playlist_id');
+                    localStorage.removeItem('signage_pending_playlist_items');
+
+                    showToast('PLAYLIST SWAPPED SUCCESSFULLY');
+                    addLog(`SYS: Swapped to new playlist '${currentPending.name}'`);
+                    return; // Stop current timer loop and let next useEffect trigger with new items
+                } else {
+                    console.log("SMOOTH SWAP: Pending playlist not ready (Clip 1 not cached: " + firstMediaId + "). Staying on current.");
+                }
+            }
+
             const nextIndex = (currentIndex + 1) % items.length;
             setCurrentIndex(nextIndex);
             localStorage.setItem('signage_playlist_index', nextIndex.toString());

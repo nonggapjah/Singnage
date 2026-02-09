@@ -124,7 +124,7 @@ export default function AdminLayout({
                         {!sidebarCollapsed && (
                             <div className="flex flex-col animate-in fade-in slide-in-from-left-2 duration-500">
                                 <span className="font-black text-xl tracking-tighter neon-text">UNICORN</span>
-                                <span className="text-xs text-muted-foreground font-bold uppercase tracking-[0.3em] -mt-1">Signage OS v{stats?.systemVersion || '1.7.7'}</span>
+                                <span className="text-xs text-muted-foreground font-bold uppercase tracking-[0.3em] -mt-1">Signage OS v{stats?.systemVersion || '2.2.0'}</span>
                             </div>
                         )}
                     </Link>

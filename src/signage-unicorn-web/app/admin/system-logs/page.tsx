@@ -14,20 +14,54 @@ interface SystemLog {
 }
 
 export default function SystemLogsPage() {
+    // Helper
+    const getLocalISOString = (date: Date) => {
+        const offset = date.getTimezoneOffset() * 60000;
+        return (new Date(date.getTime() - offset)).toISOString().slice(0, 16);
+    };
+
     // Filter State
     const [startDate, setStartDate] = useState(() => {
         const d = new Date();
-        d.setHours(0, 0, 0, 0); // Start of today
-        const offset = d.getTimezoneOffset() * 60000;
-        return (new Date(d.getTime() - offset)).toISOString().slice(0, 16);
+        d.setHours(0, 0, 0, 0);
+        return getLocalISOString(d).split('T')[0];
     });
+    const [startTime, setStartTime] = useState('00:00');
 
     const [endDate, setEndDate] = useState(() => {
         const d = new Date();
-        d.setHours(23, 59, 59, 999); // End of today
-        const offset = d.getTimezoneOffset() * 60000;
-        return (new Date(d.getTime() - offset)).toISOString().slice(0, 16);
+        d.setHours(23, 59, 0, 0);
+        return getLocalISOString(d).split('T')[0];
     });
+    const [endTime, setEndTime] = useState('23:59');
+
+    const setQuickRange = (range: 'today' | 'yesterday' | 'week') => {
+        const start = new Date();
+        const end = new Date();
+
+        if (range === 'today') {
+            start.setHours(0, 0, 0, 0);
+            end.setHours(23, 59, 0, 0);
+        } else if (range === 'yesterday') {
+            start.setDate(start.getDate() - 1);
+            start.setHours(0, 0, 0, 0);
+            end.setDate(end.getDate() - 1);
+            end.setHours(23, 59, 0, 0);
+        } else if (range === 'week') {
+            start.setDate(start.getDate() - 7);
+            start.setHours(0, 0, 0, 0);
+            end.setHours(23, 59, 0, 0);
+        }
+
+        const isoStart = getLocalISOString(start);
+        const isoEnd = getLocalISOString(end);
+
+        setStartDate(isoStart.split('T')[0]);
+        setStartTime(isoStart.split('T')[1]);
+        setEndDate(isoEnd.split('T')[0]);
+        setEndTime(isoEnd.split('T')[1]);
+        setPage(1);
+    };
 
     const [filterType, setFilterType] = useState<string>('ALL');
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -64,10 +98,9 @@ export default function SystemLogsPage() {
     const fetchLogs = useCallback(async () => {
         setLoading(true);
         try {
-            // Construct Query
             const query = new URLSearchParams({
-                startDate: startDate.length === 16 ? startDate + ':00' : startDate,
-                endDate: endDate.length === 16 ? endDate + ':59' : endDate,
+                startDate: `${startDate}T${startTime}:00`,
+                endDate: `${endDate}T${endTime}:59`,
                 page: page.toString(),
                 pageSize: pageSize.toString()
             });
@@ -87,7 +120,7 @@ export default function SystemLogsPage() {
         } finally {
             setLoading(false);
         }
-    }, [startDate, endDate, filterType, page]);
+    }, [startDate, startTime, endDate, endTime, filterType, page]);
 
     useEffect(() => {
         fetchLogs();
@@ -122,75 +155,105 @@ export default function SystemLogsPage() {
                 </div>
 
                 {/* Filters */}
-                <div className="glass-panel p-2 rounded-xl border border-border flex flex-wrap gap-2 items-center">
-                    <div className="flex flex-col gap-1">
-                        <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider ml-1">Start Time</label>
-                        <input
-                            type="datetime-local"
-                            value={startDate}
-                            onChange={(e) => setStartDate(e.target.value)}
-                            className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs text-foreground font-mono focus:outline-none focus:border-accent-cyan transition-colors dark:[color-scheme:dark]"
-                        />
-                    </div>
-                    <div className="flex flex-col gap-1">
-                        <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider ml-1">End Time</label>
-                        <input
-                            type="datetime-local"
-                            value={endDate}
-                            onChange={(e) => setEndDate(e.target.value)}
-                            className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs text-foreground font-mono focus:outline-none focus:border-accent-cyan transition-colors dark:[color-scheme:dark]"
-                        />
-                    </div>
-
-                    <div className="flex flex-col gap-1 relative z-50">
-                        <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider ml-1">Level</label>
-                        <div ref={dropdownRef} className="relative">
+                <div className="flex flex-col gap-4">
+                    <div className="flex gap-2 justify-end mb-1">
+                        {['today', 'yesterday', 'week'].map((r) => (
                             <button
-                                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                                className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs text-foreground font-bold uppercase focus:outline-none focus:border-accent-cyan transition-colors h-[34px] min-w-[120px] text-left flex justify-between items-center"
+                                key={r}
+                                onClick={() => setQuickRange(r as any)}
+                                className="px-3 py-1 text-[10px] font-black uppercase tracking-widest bg-muted/10 border border-border hover:border-accent-cyan rounded-full text-muted-foreground hover:text-accent-cyan transition-all"
                             >
-                                <span>{logLevels.find(l => l.value === filterType)?.label}</span>
-                                <span className="opacity-50 ml-2">▼</span>
+                                {r}
                             </button>
-
-                            {isDropdownOpen && (
-                                <div className="absolute top-full mt-1 left-0 w-full min-w-[120px] bg-card border border-border rounded-lg shadow-xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-100">
-                                    {logLevels.map((level) => (
-                                        <button
-                                            key={level.value}
-                                            onClick={() => {
-                                                setFilterType(level.value);
-                                                setIsDropdownOpen(false);
-                                            }}
-                                            className={`px-3 py-2 text-xs font-bold text-left uppercase transition-colors hover:bg-muted ${filterType === level.value ? 'bg-accent-cyan/10 text-accent-cyan' : 'text-foreground'
-                                                }`}
-                                        >
-                                            {level.label}
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
+                        ))}
                     </div>
 
-                    <div className="w-px h-8 bg-border mx-2"></div>
+                    <div className="glass-panel p-2 rounded-xl border border-border flex flex-wrap gap-2 items-center">
+                        <div className="flex flex-col gap-1">
+                            <label className="text-[10px] font-black text-muted-foreground uppercase tracking-widest ml-1">Start (24H)</label>
+                            <div className="flex gap-1">
+                                <input
+                                    type="date"
+                                    value={startDate}
+                                    onChange={(e) => setStartDate(e.target.value)}
+                                    className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs text-foreground font-mono focus:outline-none focus:border-accent-cyan transition-colors dark:[color-scheme:dark]"
+                                />
+                                <input
+                                    type="time"
+                                    value={startTime}
+                                    onChange={(e) => setStartTime(e.target.value)}
+                                    className="bg-background border border-border rounded-lg px-2 py-1.5 text-xs text-foreground font-mono focus:outline-none focus:border-accent-cyan transition-colors dark:[color-scheme:dark] w-20"
+                                />
+                            </div>
+                        </div>
+                        <div className="flex flex-col gap-1">
+                            <label className="text-[10px] font-black text-muted-foreground uppercase tracking-widest ml-1">End (24H)</label>
+                            <div className="flex gap-1">
+                                <input
+                                    type="date"
+                                    value={endDate}
+                                    onChange={(e) => setEndDate(e.target.value)}
+                                    className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs text-foreground font-mono focus:outline-none focus:border-accent-cyan transition-colors dark:[color-scheme:dark]"
+                                />
+                                <input
+                                    type="time"
+                                    value={endTime}
+                                    onChange={(e) => setEndTime(e.target.value)}
+                                    className="bg-background border border-border rounded-lg px-2 py-1.5 text-xs text-foreground font-mono focus:outline-none focus:border-accent-cyan transition-colors dark:[color-scheme:dark] w-20"
+                                />
+                            </div>
+                        </div>
 
-                    <button
-                        onClick={() => setAutoRefresh(!autoRefresh)}
-                        className={`px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest transition-all border ${autoRefresh
-                            ? 'bg-accent-cyan/10 border-accent-cyan text-accent-cyan shadow-[0_0_10px_rgba(34,211,238,0.2)]'
-                            : 'bg-muted/20 border-border text-muted-foreground hover:text-foreground'
-                            }`}
-                    >
-                        {autoRefresh ? 'Live On' : 'Live Off'}
-                    </button>
+                        <div className="flex flex-col gap-1 relative z-50">
+                            <label className="text-[10px] font-black text-muted-foreground uppercase tracking-widest ml-1">Level</label>
+                            <div ref={dropdownRef} className="relative">
+                                <button
+                                    onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                                    className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs text-foreground font-bold uppercase focus:outline-none focus:border-accent-cyan transition-colors h-[34px] min-w-[120px] text-left flex justify-between items-center"
+                                >
+                                    <span>{logLevels.find(l => l.value === filterType)?.label}</span>
+                                    <span className="opacity-50 ml-2">▼</span>
+                                </button>
 
-                    <button
-                        onClick={() => fetchLogs()}
-                        className="px-6 py-2 rounded-lg bg-accent-cyan text-black text-xs font-black uppercase tracking-widest hover:bg-cyan-300 transition-all shadow-[0_0_15px_rgba(34,211,238,0.3)]"
-                    >
-                        Refresh
-                    </button>
+                                {isDropdownOpen && (
+                                    <div className="absolute top-full mt-1 left-0 w-full min-w-[120px] bg-card border border-border rounded-lg shadow-xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-100">
+                                        {logLevels.map((level) => (
+                                            <button
+                                                key={level.value}
+                                                onClick={() => {
+                                                    setFilterType(level.value);
+                                                    setIsDropdownOpen(false);
+                                                }}
+                                                className={`px-3 py-2 text-xs font-bold text-left uppercase transition-colors hover:bg-muted ${filterType === level.value ? 'bg-accent-cyan/10 text-accent-cyan' : 'text-foreground'
+                                                    }`}
+                                            >
+                                                {level.label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="w-px h-8 bg-border mx-2"></div>
+
+                        <button
+                            onClick={() => setAutoRefresh(!autoRefresh)}
+                            className={`px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest transition-all border ${autoRefresh
+                                ? 'bg-accent-cyan/10 border-accent-cyan text-accent-cyan shadow-[0_0_10px_rgba(34,211,238,0.2)]'
+                                : 'bg-muted/20 border-border text-muted-foreground hover:text-foreground'
+                                }`}
+                        >
+                            {autoRefresh ? 'Live On' : 'Live Off'}
+                        </button>
+
+                        <button
+                            onClick={() => fetchLogs()}
+                            className="px-6 py-2 rounded-lg bg-accent-cyan text-black text-xs font-black uppercase tracking-widest hover:bg-cyan-300 transition-all shadow-[0_0_15px_rgba(34,211,238,0.3)]"
+                        >
+                            Refresh
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -210,7 +273,7 @@ export default function SystemLogsPage() {
                         <tbody className="divide-y divide-border/30">
                             {loading && logs.length === 0 ? (
                                 <tr>
-                                    <td colSpan={4} className="p-20 text-center">
+                                    <td colSpan={5} className="p-20 text-center">
                                         <div className="animate-pulse text-accent-cyan tracking-widest text-xs uppercase font-bold">Retrieving System Events...</div>
                                     </td>
                                 </tr>
@@ -241,7 +304,7 @@ export default function SystemLogsPage() {
                             ))}
                             {!loading && logs.length === 0 && (
                                 <tr>
-                                    <td colSpan={4} className="p-20 text-center text-muted-foreground text-xs uppercase tracking-widest">
+                                    <td colSpan={5} className="p-20 text-center text-muted-foreground text-xs uppercase tracking-widest">
                                         No logs found matching criteria
                                     </td>
                                 </tr>

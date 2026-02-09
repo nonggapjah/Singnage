@@ -9,7 +9,7 @@
 .tmp
 
 # docs
-docs/
+# docs/
 wwwroot/
 
 # Logs
