@@ -11,6 +11,8 @@ let mediaDuration = 0;
 let volume = 50;
 let isMuted = false;
 let cacheProgress = 0;
+let pendingPlaylist = null; // Next playlist waiting for smooth swap
+let isSyncing = false;     // Prevent multiple sync loops
 
 // Queues for Offline Sync
 let systemLogQueue = JSON.parse(localStorage.getItem('system_log_queue') || '[]');
@@ -390,40 +392,85 @@ async function loadPlaylist(playlistId, resumeIndex = 0) {
                 return;
             }
 
-            cacheProgress = 0;
-            let synced = 0;
-            for (const item of items) {
-                const media = item.media;
-                // Double check if file exists (background sync)
-                await ipcRenderer.invoke('download-media', {
-                    url: media.blobUrl,
-                    filename: media.fileName
-                });
-                synced++;
-                cacheProgress = Math.round((synced / items.length) * 100);
-                dashCachedCount.innerText = synced;
-                dashSyncBar.style.width = cacheProgress + '%';
-            }
+            // --- Background Smooth Sync ---
+            addLog(`Smooth Sync: Queuing ${items.length} items in background...`);
+            pendingPlaylist = { id: playlistId, name: playlistName, items, hash: contentHash };
 
-            playlist = items;
-            config.lastPlaylistId = playlistId;
-            localStorage.setItem('playlist_hash', contentHash);
-            await ipcRenderer.invoke('save-config', config);
-
-            dashReadyStatus.innerText = 'READY';
-            dashReadyStatus.style.color = '#00f2ff';
-            addLog(`Sync complete: ${items.length} items ready`);
-
-            if (!isPlaying) {
-                currentIndex = resumeIndex < items.length ? resumeIndex : 0;
-                playNext();
-            }
+            // Start background sequential download
+            syncPendingAssets();
         }
     } catch (err) {
         addLog(`Load playlist failed: ${err.message}`, 'error');
         dashReadyStatus.innerText = 'SYNC ERROR';
         dashReadyStatus.style.color = '#ff4d4d';
     }
+}
+
+async function syncPendingAssets() {
+    if (isSyncing || !pendingPlaylist) return;
+    isSyncing = true;
+
+    try {
+        const items = pendingPlaylist.items;
+        let synced = 0;
+        cacheProgress = 0;
+
+        for (const item of items) {
+            // If user switched playlist again during sync, abort
+            if (!pendingPlaylist || pendingPlaylist.items !== items) break;
+
+            const media = item.media;
+            dashReadyStatus.innerText = `SYNCING ${synced + 1}/${items.length}`;
+            dashReadyStatus.style.color = '#f1c40f';
+
+            try {
+                const res = await ipcRenderer.invoke('download-media', {
+                    url: media.blobUrl,
+                    filename: media.fileName
+                });
+                synced++;
+
+                // --- IMMEDIATE START IF IDLE ---
+                // If it's the first clip and we aren't playing anything, start NOW
+                if (synced === 1 && !isPlaying) {
+                    addLog("Idle Player: First clip ready, starting playback.");
+                    swapToPending();
+                }
+
+                cacheProgress = Math.round((synced / items.length) * 100);
+                dashCachedCount.innerText = synced;
+                dashSyncBar.style.width = cacheProgress + '%';
+            } catch (e) {
+                addLog(`Sync error for ${media.fileName}: ${e.message}`, 'warn');
+            }
+        }
+
+        if (pendingPlaylist && pendingPlaylist.items === items) {
+            addLog(`Background Sync Complete. Swap ready on next clip.`);
+            dashReadyStatus.innerText = 'READY (PENDING)';
+            dashReadyStatus.style.color = '#00f2ff';
+        }
+    } finally {
+        isSyncing = false;
+    }
+}
+
+async function swapToPending() {
+    if (!pendingPlaylist) return;
+
+    addLog(`Swapping to new playlist: '${pendingPlaylist.name}'`);
+    playlist = pendingPlaylist.items;
+    config.lastPlaylistId = pendingPlaylist.id;
+    localStorage.setItem('playlist_hash', pendingPlaylist.hash);
+    await ipcRenderer.invoke('save-config', config);
+
+    dashPlaylistName.innerText = pendingPlaylist.name;
+    dashTotalCount.innerText = playlist.length;
+    dashReadyStatus.innerText = 'READY';
+
+    pendingPlaylist = null;
+    currentIndex = 0;
+    playNext();
 }
 
 // --- Playback Engine ---
@@ -465,8 +512,23 @@ async function playNext() {
 
     addLog(`Playing: ${media.displayName || media.fileName} (${currentIndex + 1}/${playlist.length})`);
 
-    const onComplete = (skipLog = false) => {
+    const onComplete = async (skipLog = false) => {
         if (!skipLog) recordPlayback(item, Date.now() - mediaStartTime);
+
+        // --- SMOOTH SWAP LOGIC ---
+        if (pendingPlaylist && pendingPlaylist.items.length > 0) {
+            const firstMedia = pendingPlaylist.items[0].media;
+            // Native check: Check if file exists in localDir
+            const exists = await ipcRenderer.invoke('download-media', { url: firstMedia.blobUrl, filename: firstMedia.fileName });
+
+            if (exists && exists.success) {
+                swapToPending();
+                return;
+            } else {
+                addLog("Smooth Swap: Next playlist first item not ready yet. Staying on current.", "warn");
+            }
+        }
+
         currentIndex = (currentIndex + 1) % playlist.length;
         playNext();
     };

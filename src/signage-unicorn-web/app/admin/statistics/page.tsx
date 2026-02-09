@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { statisticsApi } from '@/features/statistics/api/statistics-api';
 import { PlaybackSummary, BranchSummary, PlaybackLogExport } from '@/features/statistics/types';
 import { useUI } from '@/features/ui/context/UIContext';
@@ -23,27 +23,55 @@ export default function StatisticsPage() {
 
     const getTodayEnd = () => {
         const d = new Date();
-        d.setHours(23, 59, 59, 999);
+        d.setHours(23, 59, 0, 0);
         return getLocalISOString(d);
     };
 
-    const [startDate, setStartDate] = useState(getTodayStart());
-    const [endDate, setEndDate] = useState(getTodayEnd());
+    const [startDate, setStartDate] = useState(getTodayStart().split('T')[0]);
+    const [startTime, setStartTime] = useState('00:00');
+    const [endDate, setEndDate] = useState(getTodayEnd().split('T')[0]);
+    const [endTime, setEndTime] = useState('23:59');
+
+    const setQuickRange = (range: 'today' | 'yesterday' | 'week') => {
+        const start = new Date();
+        const end = new Date();
+
+        if (range === 'today') {
+            start.setHours(0, 0, 0, 0);
+            end.setHours(23, 59, 0, 0);
+        } else if (range === 'yesterday') {
+            start.setDate(start.getDate() - 1);
+            start.setHours(0, 0, 0, 0);
+            end.setDate(end.getDate() - 1);
+            end.setHours(23, 59, 0, 0);
+        } else if (range === 'week') {
+            start.setDate(start.getDate() - 7);
+            start.setHours(0, 0, 0, 0);
+            end.setHours(23, 59, 0, 0);
+        }
+
+        const isoStart = getLocalISOString(start);
+        const isoEnd = getLocalISOString(end);
+
+        setStartDate(isoStart.split('T')[0]);
+        setStartTime(isoStart.split('T')[1]);
+        setEndDate(isoEnd.split('T')[0]);
+        setEndTime(isoEnd.split('T')[1]);
+    };
 
     const [mediaSummary, setMediaSummary] = useState<PlaybackSummary[]>([]);
     const [branchSummary, setBranchSummary] = useState<BranchSummary[]>([]);
     const [recentLogs, setRecentLogs] = useState<PlaybackLogExport[]>([]);
     const [loading, setLoading] = useState(true);
     const [autoRefresh, setAutoRefresh] = useState(false);
-
     const [playlistMap, setPlaylistMap] = useState<Record<string, string>>({});
+    const [exporting, setExporting] = useState(false);
 
     const fetchData = async (silent: boolean = false) => {
         if (!silent) setLoading(true);
         try {
-            // Fix: Send Local Time to Backend (avoid UTC shift)
-            const startISO = startDate.length === 16 ? startDate + ':00' : startDate;
-            const endISO = endDate.length === 16 ? endDate + ':59' : endDate;
+            const startISO = `${startDate}T${startTime}:00`;
+            const endISO = `${endDate}T${endTime}:59`;
 
             const [mediaRes, branchRes, logsRes] = await Promise.all([
                 statisticsApi.getMediaSummary(startISO, endISO),
@@ -63,20 +91,14 @@ export default function StatisticsPage() {
         }
     };
 
-    const [exporting, setExporting] = useState(false);
-
     const handleExport = async () => {
         setExporting(true);
         try {
-            // Fix: Send Local Time to Backend because DB stores in Local Time (GETDATE())
-            // If we use .toISOString(), it converts to UTC, shifting time back by 7 hours (in TH),
-            // causing previous day's data to appear.
-            const startISO = startDate.length === 16 ? startDate + ':00' : startDate;
-            const endISO = endDate.length === 16 ? endDate + ':59' : endDate;
+            const startISO = `${startDate}T${startTime}:00`;
+            const endISO = `${endDate}T${endTime}:59`;
             const res = await statisticsApi.getExportData(startISO, endISO);
 
             if (res.success && res.data) {
-                // Convert to CSV
                 const header = ['Played At', 'Device ID', 'Device Name', 'Branch Code', 'Playlist ID', 'Media Name', 'File Name', 'Duration (s)', 'Result'];
                 const rows = res.data.map(d => [
                     `"${d.playedAt}"`,
@@ -91,7 +113,6 @@ export default function StatisticsPage() {
                 ]);
 
                 const csvContent = [header.join(','), ...rows.map(r => r.join(','))].join('\n');
-                // Add BOM for Excel UTF-8 compatibility
                 const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
                 const url = URL.createObjectURL(blob);
                 const link = document.createElement('a');
@@ -124,8 +145,7 @@ export default function StatisticsPage() {
         } catch (e) { console.error("Ref load failed", e); }
     };
 
-    // Initial Data Load
-    const isMounted = React.useRef(false);
+    const isMounted = useRef(false);
 
     useEffect(() => {
         if (!isMounted.current) {
@@ -133,25 +153,20 @@ export default function StatisticsPage() {
             fetchReferenceData();
             fetchData(false);
         }
-    }, [startDate, endDate]); // Re-fetch on manual date change? Previous code didn't. 
-    // Wait, previous code had [] for initial load, and NO dependency for date change unless autoRefresh was on.
-    // That means manual date change didn't trigger fetch unless user clicked "Filter".
-    // I will keep the behavior: Only fetch on mount (once) and when button clicked or auto-refresh.
+    }, []);
 
-    // Auto Refresh Logic
     useEffect(() => {
         let interval: NodeJS.Timeout;
         if (autoRefresh) {
             interval = setInterval(() => fetchData(true), 15000);
         }
         return () => clearInterval(interval);
-    }, [autoRefresh, startDate, endDate]);
+    }, [autoRefresh, startDate, startTime, endDate, endTime]);
 
     const totalPlays = mediaSummary.reduce((acc, curr) => acc + curr.playCount, 0);
 
     return (
         <div className="p-8 space-y-8 min-h-screen">
-            {/* Header & Controls */}
             <div className="flex flex-col md:flex-row justify-between items-end gap-6">
                 <div>
                     <h1 className="text-4xl font-black uppercase tracking-tighter neon-text mb-2">Playback Analytics</h1>
@@ -160,50 +175,83 @@ export default function StatisticsPage() {
                     </p>
                 </div>
 
-                {/* Date Filter Controls */}
-                <div className="glass-panel p-2 rounded-xl border border-border flex flex-col md:flex-row gap-2 items-center">
-                    <div className="flex flex-col gap-1">
-                        <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider ml-1">Start Time</label>
-                        <input
-                            type="datetime-local"
-                            value={startDate}
-                            onChange={(e) => setStartDate(e.target.value)}
-                            className="bg-muted/20 border border-border rounded-lg px-3 py-1.5 text-xs text-foreground font-mono focus:outline-none focus:border-accent-cyan transition-colors dark:[color-scheme:dark]"
-                        />
-                    </div>
-                    <div className="flex flex-col gap-1">
-                        <label className="text-xs font-bold text-muted-foreground uppercase tracking-wider ml-1">End Time</label>
-                        <input
-                            type="datetime-local"
-                            value={endDate}
-                            onChange={(e) => setEndDate(e.target.value)}
-                            className="bg-muted/20 border border-border rounded-lg px-3 py-1.5 text-xs text-foreground font-mono focus:outline-none focus:border-accent-cyan transition-colors dark:[color-scheme:dark]"
-                        />
+                <div className="flex flex-col gap-4">
+                    <div className="flex gap-2 justify-end mb-1">
+                        {['today', 'yesterday', 'week'].map((r) => (
+                            <button
+                                key={r}
+                                onClick={() => setQuickRange(r as any)}
+                                className="px-3 py-1 text-[10px] font-black uppercase tracking-widest bg-muted/10 border border-border hover:border-accent-cyan rounded-full text-muted-foreground hover:text-accent-cyan transition-all"
+                            >
+                                {r}
+                            </button>
+                        ))}
                     </div>
 
-                    <button
-                        onClick={() => setAutoRefresh(!autoRefresh)}
-                        className={`h-full px-4 py-2 mt-auto rounded-lg text-xs font-black uppercase tracking-widest transition-all border ${autoRefresh
-                            ? 'bg-accent-cyan/10 border-accent-cyan text-accent-cyan shadow-[0_0_10px_rgba(34,211,238,0.2)]'
-                            : 'bg-muted/20 border-border text-muted-foreground hover:text-foreground'
-                            }`}
-                    >
-                        {autoRefresh ? 'Live On' : 'Live Off'}
-                    </button>
+                    <div className="glass-panel p-2 rounded-xl border border-border flex flex-col md:flex-row gap-2 items-center">
+                        <div className="flex flex-col gap-1">
+                            <label className="text-[10px] font-black text-muted-foreground uppercase tracking-widest ml-1">Range Start (24H)</label>
+                            <div className="flex gap-1">
+                                <input
+                                    type="date"
+                                    value={startDate}
+                                    onChange={(e) => setStartDate(e.target.value)}
+                                    className="bg-muted/20 border border-border rounded-lg px-3 py-1.5 text-xs text-foreground font-mono focus:outline-none focus:border-accent-cyan transition-colors dark:[color-scheme:dark]"
+                                />
+                                <input
+                                    type="time"
+                                    step="60"
+                                    value={startTime}
+                                    onChange={(e) => setStartTime(e.target.value)}
+                                    className="bg-muted/20 border border-border rounded-lg px-2 py-1.5 text-xs text-foreground font-mono focus:outline-none focus:border-accent-cyan transition-colors dark:[color-scheme:dark] w-20"
+                                />
+                            </div>
+                        </div>
+                        <div className="flex flex-col gap-1">
+                            <label className="text-[10px] font-black text-muted-foreground uppercase tracking-widest ml-1">Range End (24H)</label>
+                            <div className="flex gap-1">
+                                <input
+                                    type="date"
+                                    value={endDate}
+                                    onChange={(e) => setEndDate(e.target.value)}
+                                    className="bg-muted/20 border border-border rounded-lg px-3 py-1.5 text-xs text-foreground font-mono focus:outline-none focus:border-accent-cyan transition-colors dark:[color-scheme:dark]"
+                                />
+                                <input
+                                    type="time"
+                                    step="60"
+                                    value={endTime}
+                                    onChange={(e) => setEndTime(e.target.value)}
+                                    className="bg-muted/20 border border-border rounded-lg px-2 py-1.5 text-xs text-foreground font-mono focus:outline-none focus:border-accent-cyan transition-colors dark:[color-scheme:dark] w-20"
+                                />
+                            </div>
+                        </div>
 
-                    <button
-                        onClick={() => fetchData(false)}
-                        className="h-full px-6 py-2 mt-auto rounded-lg bg-accent-cyan text-black text-xs font-black uppercase tracking-widest hover:bg-cyan-300 transition-all shadow-[0_0_15px_rgba(34,211,238,0.3)]"
-                    >
-                        Filter
-                    </button>
-                    <button
-                        onClick={handleExport}
-                        disabled={exporting}
-                        className="h-full px-4 py-2 mt-auto rounded-lg bg-muted/20 border border-border text-foreground hover:bg-muted/40 text-xs font-black uppercase tracking-widest transition-all"
-                    >
-                        {exporting ? '...' : 'Export'}
-                    </button>
+                        <div className="w-px h-8 bg-border mx-2 hidden md:block"></div>
+
+                        <button
+                            onClick={() => setAutoRefresh(!autoRefresh)}
+                            className={`h-full px-4 py-2 mt-auto rounded-lg text-xs font-black uppercase tracking-widest transition-all border ${autoRefresh
+                                ? 'bg-accent-cyan/10 border-accent-cyan text-accent-cyan shadow-[0_0_10px_rgba(34,211,238,0.2)]'
+                                : 'bg-muted/20 border-border text-muted-foreground hover:text-foreground'
+                                }`}
+                        >
+                            {autoRefresh ? 'Live On' : 'Live Off'}
+                        </button>
+
+                        <button
+                            onClick={() => fetchData(false)}
+                            className="h-full px-6 py-2 mt-auto rounded-lg bg-accent-cyan text-black text-xs font-black uppercase tracking-widest hover:bg-cyan-300 transition-all shadow-[0_0_15px_rgba(34,211,238,0.3)]"
+                        >
+                            Filter
+                        </button>
+                        <button
+                            onClick={handleExport}
+                            disabled={exporting}
+                            className="h-full px-4 py-2 mt-auto rounded-lg bg-muted/20 border border-border text-foreground hover:bg-muted/40 text-xs font-black uppercase tracking-widest transition-all"
+                        >
+                            {exporting ? '...' : 'Export'}
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -213,7 +261,6 @@ export default function StatisticsPage() {
 
             {!loading && (
                 <>
-                    {/* Top Cards */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
                         <div className="glass-panel p-6 rounded-2xl border border-border/50 bg-gradient-to-br from-accent-cyan/10 to-transparent">
                             <span className="text-xs font-bold text-accent-cyan uppercase tracking-widest">Total Playbacks</span>
@@ -233,7 +280,6 @@ export default function StatisticsPage() {
                     </div>
 
                     <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 animate-in fade-in slide-in-from-bottom-8 duration-700">
-                        {/* Media Performance */}
                         <div className="glass-panel p-8 rounded-3xl border border-border/50">
                             <h3 className="text-xl font-black mb-6 flex items-center gap-3 italic text-foreground">
                                 <span className="text-accent-cyan">▍</span> Content Performance Ranking
@@ -268,7 +314,6 @@ export default function StatisticsPage() {
                             </div>
                         </div>
 
-                        {/* Branch Distribution */}
                         <div className="glass-panel p-8 rounded-3xl border border-border/50">
                             <h3 className="text-xl font-black mb-6 flex items-center gap-3 italic text-foreground">
                                 <span className="text-accent-purple">▍</span> Regional Activity
@@ -294,7 +339,6 @@ export default function StatisticsPage() {
                         </div>
                     </div>
 
-                    {/* Detailed Proof of Play */}
                     <div className="glass-panel p-8 rounded-3xl border border-border/50 animate-in fade-in slide-in-from-bottom-12 duration-1000">
                         <h3 className="text-xl font-black mb-6 flex items-center justify-between italic text-foreground">
                             <span className="flex items-center gap-3">
