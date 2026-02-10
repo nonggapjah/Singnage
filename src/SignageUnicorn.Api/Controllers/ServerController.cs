@@ -7,8 +7,12 @@ using System.Threading.Tasks;
 
 namespace SignageUnicorn.Api.Controllers
 {
+    using Microsoft.AspNetCore.Authorization;
+    using SignageUnicorn.Api.Constants;
+
     [ApiController]
     [Route("api/v1/server")]
+    [Authorize(Roles = UserRoles.Admin)]
     public class ServerController : ControllerBase
     {
         private readonly ServerService _serverService;

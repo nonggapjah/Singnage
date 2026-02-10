@@ -44,7 +44,7 @@ namespace SignageUnicorn.Api.Services
                     return;
                 }
 
-                var currentPort = 5018;
+                var currentPort = 8862;
                 if (Uri.TryCreate(currentBaseUrl, UriKind.Absolute, out var uri))
                 {
                     currentPort = uri.Port;
@@ -76,8 +76,8 @@ namespace SignageUnicorn.Api.Services
 
         public object GetConfig()
         {
-            var currentBaseUrl = _configuration["ServerSettings:BaseUrl"] ?? "http://localhost:5018";
-            var currentPort = 5018;
+            var currentBaseUrl = _configuration["ServerSettings:BaseUrl"] ?? "http://localhost:8862";
+            var currentPort = 8862;
             if (Uri.TryCreate(currentBaseUrl, UriKind.Absolute, out var uri))
             {
                 currentPort = uri.Port;
@@ -101,7 +101,7 @@ namespace SignageUnicorn.Api.Services
             if (ipAddress.Contains(":")) ipAddress = ipAddress.Split(':')[0];
 
             string newUrl = $"http://{ipAddress}:{port}";
-            string oldUrl = _configuration["ServerSettings:BaseUrl"] ?? "http://localhost:5018";
+            string oldUrl = _configuration["ServerSettings:BaseUrl"] ?? "http://localhost:8862";
 
             // 1. Update appsettings.json
             if (!UpdateAppSettings(newUrl))
@@ -120,7 +120,7 @@ namespace SignageUnicorn.Api.Services
         {
             try 
             {
-                string currentBaseUrl = _configuration["ServerSettings:BaseUrl"] ?? "http://localhost:5018";
+                string currentBaseUrl = _configuration["ServerSettings:BaseUrl"] ?? "http://localhost:8862";
                 await RunMediaMigration("AUTO_DETECT", currentBaseUrl);
                 return true;
             }
@@ -142,8 +142,8 @@ namespace SignageUnicorn.Api.Services
                 }
                 
                 // Add common legacy defaults
-                targets.Add("http://localhost:5018");
-                targets.Add("http://127.0.0.1:5018");
+                targets.Add("http://localhost:8862");
+                targets.Add("http://127.0.0.1:8862");
                 
                 // Add current detected local IP with current port (derived from newUrl)
                 if (Uri.TryCreate(newUrl, UriKind.Absolute, out var newUri))

@@ -17,6 +17,7 @@ export interface PlaybackLogExport {
     deviceId?: string;
     deviceName?: string;
     branchCode?: string;
+    supplierCode?: string;
     mediaName?: string;
     fileName?: string;
     playlistId?: string;

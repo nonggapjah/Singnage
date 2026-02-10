@@ -16,7 +16,8 @@ const formatDuration = (seconds?: number) => {
 };
 
 export default function DevicesPage() {
-    const { theme } = useUI();
+    // --- API Handlers (Defined before usage) ---
+    const { theme, showModal } = useUI();
     const [devices, setDevices] = useState<Device[]>([]);
     const [playlists, setPlaylists] = useState<Playlist[]>([]);
 
@@ -39,7 +40,13 @@ export default function DevicesPage() {
     const [mediaMap, setMediaMap] = useState<Record<string, string>>({});
     const [playlistItemsMap, setPlaylistItemsMap] = useState<Record<string, PlaylistItem[]>>({});
 
-    // --- API Handlers (Defined before usage) ---
+    const showNotify = (title: string, message: string, type: 'INFO' | 'SUCCESS' | 'ERROR' = 'INFO') => {
+        showModal({ title, message, type });
+    };
+
+    const showConfirm = (title: string, message: string, onConfirm: () => void, type: 'DANGER' | 'INFO' = 'INFO') => {
+        showModal({ title, message, type, onConfirm });
+    };
     async function fetchMediaNames() {
         try {
             const { mediaApi } = await import('@/features/media/api/media-api');
@@ -87,53 +94,87 @@ export default function DevicesPage() {
     }
 
     async function handleCommand(deviceId: string, command: string) {
-        if (!confirm(`Are you sure you want to send ${command} to this device?`)) return;
-        try {
-            await deviceApi.sendCommand(deviceId, command);
-            alert(`Command ${command} queued successfully.`);
-        } catch (error) {
-            alert('Failed to send command.');
-        }
+        showConfirm(
+            'SYSTEM COMMAND',
+            `Are you sure you want to send ${command} to this device?`,
+            async () => {
+                try {
+                    const res = await deviceApi.sendCommand(deviceId, command);
+                    if (res.success) {
+                        showNotify('SUCCESS', `Command ${command} queued successfully.`, 'SUCCESS');
+                    } else {
+                        showNotify('FAILED', res.message || 'Unknown protocol error', 'ERROR');
+                    }
+                } catch (error) {
+                    showNotify('CRITICAL ERROR', 'A critical error occurred while sending the command.', 'ERROR');
+                }
+            }
+        );
     }
 
     async function handleDeleteDevice(deviceId: string) {
-        if (!confirm('Are you sure you want to deactivate/remove this device from the grid?')) return;
-        try {
-            await deviceApi.deleteDevice(deviceId);
-            fetchDevices();
-        } catch (error) {
-            alert('Failed to deactivate device.');
-        }
+        showConfirm(
+            'DEACTIVATE NODE',
+            'Are you sure you want to deactivate/remove this device from the grid?',
+            async () => {
+                try {
+                    const res = await deviceApi.deleteDevice(deviceId);
+                    if (res.success) {
+                        fetchDevices();
+                        showNotify('DEACTIVATED', 'Device removed successfully.', 'SUCCESS');
+                    } else {
+                        showNotify('ACCESS DENIED', res.message || 'Deactivation failed', 'ERROR');
+                    }
+                } catch (error) {
+                    showNotify('CRITICAL ERROR', 'A critical error occurred while deactivating the device.', 'ERROR');
+                }
+            },
+            'DANGER'
+        );
     }
 
     async function handleCleanupZombies() {
-        if (!confirm('This will deactivate all devices that have been offline for more than 14 days. Proceed?')) return;
-        try {
-            await deviceApi.cleanupOffline();
-            fetchDevices();
-            alert('Zombie cleanup successful.');
-        } catch (error) {
-            alert('Cleanup failed.');
-        }
+        showConfirm(
+            'ZOMBIE CLEANUP',
+            'This will deactivate all devices that have been offline for more than 14 days. Proceed?',
+            async () => {
+                try {
+                    const res = await deviceApi.cleanupOffline();
+                    if (res.success) {
+                        fetchDevices();
+                        showNotify('CLEANUP COMPLETE', 'Zombie cleanup successful.', 'SUCCESS');
+                    } else {
+                        showNotify('FAILED', res.message || 'Unknown error', 'ERROR');
+                    }
+                } catch (error) {
+                    showNotify('CRITICAL ERROR', 'A critical error occurred during cleanup.', 'ERROR');
+                }
+            },
+            'DANGER'
+        );
     }
 
     async function handleInitDb() {
-        if (!confirm('This will update/initialize the database schema (Tables & Stored Procedures). Proceed?')) return;
-        setInitDbLoading(true);
-        try {
-            const res = await deviceApi.fixDb();
-            if (res.success) {
-                alert('Database Initialized Successfully!');
-            } else {
-                alert('Database initialization failed: ' + (res.message || 'Unknown error'));
+        showConfirm(
+            'DATABASE INITIALIZATION',
+            'This will update/initialize the database schema (Tables & Stored Procedures). Proceed?',
+            async () => {
+                setInitDbLoading(true);
+                try {
+                    const res = await deviceApi.fixDb();
+                    if (res.success) {
+                        showNotify('SYSTEM INITIALIZED', 'Database Initialized Successfully!', 'SUCCESS');
+                    } else {
+                        showNotify('FAILED', res.message || 'Unknown error', 'ERROR');
+                    }
+                } catch (error) {
+                    showNotify('CRITICAL ERROR', 'A critical error occurred while initializing the database.', 'ERROR');
+                } finally {
+                    setInitDbLoading(false);
+                    fetchDevices();
+                }
             }
-        } catch (error) {
-            console.error('Failed to init DB', error);
-            alert('A critical error occurred while initializing the database.');
-        } finally {
-            setInitDbLoading(false);
-            fetchDevices();
-        }
+        );
     }
 
     function openAssignModal(deviceId: string) {
@@ -146,11 +187,15 @@ export default function DevicesPage() {
         if (!selectedDeviceId || !selectedPlaylistId) return;
         const command = `PLAY_PLAYLIST:${selectedPlaylistId}`;
         try {
-            await deviceApi.sendCommand(selectedDeviceId, command);
-            alert('Playlist assignment command queued successfully.');
-            setIsAssignModalOpen(false);
+            const res = await deviceApi.sendCommand(selectedDeviceId, command);
+            if (res.success) {
+                showNotify('PROTOCOL ASSIGNED', 'Playlist assignment command queued successfully.', 'SUCCESS');
+                setIsAssignModalOpen(false);
+            } else {
+                showNotify('ASSIGNMENT FAILED', res.message || 'Unknown error', 'ERROR');
+            }
         } catch (error) {
-            alert('Failed to assign playlist.');
+            showNotify('CRITICAL ERROR', 'A critical error occurred while assigning the playlist.', 'ERROR');
         }
     }
 
@@ -370,7 +415,7 @@ export default function DevicesPage() {
                                     <div className="flex justify-between items-center text-xs">
                                         <span className="text-muted-foreground uppercase tracking-wider font-bold text-xs">Check-In</span>
                                         <span className="text-foreground font-mono">
-                                            {device.lastCheckIn ? new Date(device.lastCheckIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'}
+                                            {device.lastCheckIn ? new Date(device.lastCheckIn.endsWith('Z') ? device.lastCheckIn : device.lastCheckIn + 'Z').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'}
                                         </span>
                                     </div>
                                     <div className="flex justify-between items-center text-xs">
@@ -551,7 +596,7 @@ export default function DevicesPage() {
                                             </td>
                                             <td className="p-4">
                                                 <span className="font-mono text-xs text-muted-foreground">
-                                                    {device.lastCheckIn ? new Date(device.lastCheckIn).toLocaleString() : '-'}
+                                                    {device.lastCheckIn ? new Date(device.lastCheckIn.endsWith('Z') ? device.lastCheckIn : device.lastCheckIn + 'Z').toLocaleString() : '-'}
                                                 </span>
                                             </td>
                                             <td className="p-4 text-right space-x-2">

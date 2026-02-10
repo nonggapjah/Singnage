@@ -293,9 +293,19 @@ body {
   color-scheme: light;
 }
 
-/* Ensure Dropdowns match the theme globally */
+/* Ensure Dropdowns match the theme globally and are SOLID */
 select,
 select option {
   background-color: var(--card) !important;
   color: var(--foreground) !important;
+  opacity: 1 !important;
+}
+
+.solid-dropdown {
+  background-color: var(--card) !important;
+  opacity: 1 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.5) !important;
 }

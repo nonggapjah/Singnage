@@ -61,6 +61,7 @@ async function createWindow() {
         webPreferences: {
             nodeIntegration: true,
             contextIsolation: false,
+            webSecurity: false,
         },
         backgroundColor: '#000000'
     });
@@ -90,7 +91,7 @@ ipcMain.handle('get-config', async () => {
     if (await fs.pathExists(CONFIG_PATH)) {
         return await fs.readJson(CONFIG_PATH);
     }
-    return { serverIp: 'http://localhost:5018', deviceId: null, deviceName: null, branchCode: '1000' };
+    return { serverIp: 'https://signage.aith123.com', deviceId: null, deviceName: null, branchCode: '1000' };
 });
 
 ipcMain.handle('save-config', async (event, config) => {

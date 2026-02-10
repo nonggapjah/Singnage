@@ -35,23 +35,18 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             p.Add("@p_supplier_code", supplierCode);
             p.Add("@p_remark1", remark1);
             p.Add("@p_remark2", remark2);
+            p.Add("@p_filter_status", status);
             p.Add("@p_media_type", mediaType);
 
-            // Note: SP now returns Status (Result 1) then Data (Result 2).
-            // We must read Status first.
-            
             using var multi = await db.QueryMultipleAsync("sp_media_std", p, commandType: CommandType.StoredProcedure);
             var resultStatus = await multi.ReadFirstOrDefaultAsync<SpStdResult>();
             
             if (resultStatus != null && resultStatus.err_flag)
             {
-                // In a real scenario, we might want to log this error or throw
                 return Enumerable.Empty<MediaFile>();
             }
 
             return await multi.ReadAsync<MediaFile>();
-            
-
         }
 
         public async Task<MediaFile?> GetByIdAsync(string id)
@@ -73,7 +68,7 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             return await multi.ReadFirstOrDefaultAsync<MediaFile>();
         }
 
-        public async Task<RepositoryResult> CreateAsync(MediaFile media, long? userId = null)
+        public async Task<RepositoryResult<MediaFile>> CreateAsync(MediaFile media, long? userId = null)
         {
             using var db = CreateConnection();
             var p = new DynamicParameters();
@@ -91,13 +86,18 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             p.Add("@p_remark2", media.Remark2);
             p.Add("@p_file_hash", media.FileHash);
 
-            var result = await db.QueryFirstOrDefaultAsync<SpStdResult>("sp_media_std", p, commandType: CommandType.StoredProcedure);
-            return result != null && !result.err_flag 
-                ? RepositoryResult.Ok(result.msg) 
-                : RepositoryResult.Fail(result?.err_code ?? -1, result?.msg ?? "Database Error");
+            using var multi = await db.QueryMultipleAsync("sp_media_std", p, commandType: CommandType.StoredProcedure);
+            var status = await multi.ReadFirstOrDefaultAsync<SpStdResult>();
+            
+            if (status != null && !status.err_flag)
+            {
+                var data = await multi.ReadFirstOrDefaultAsync<MediaFile>();
+                return RepositoryResult<MediaFile>.Ok(data, status.msg);
+            }
+            return RepositoryResult<MediaFile>.Fail(status?.err_code ?? -1, status?.msg ?? "Database Error");
         }
 
-        public async Task<RepositoryResult> UpdateAsync(MediaFile media, long? userId = null)
+        public async Task<RepositoryResult<MediaFile>> UpdateAsync(MediaFile media, long? userId = null)
         {
             using var db = CreateConnection();
             var p = new DynamicParameters();
@@ -114,10 +114,15 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             p.Add("@p_remark1", media.Remark1);
             p.Add("@p_remark2", media.Remark2);
 
-            var result = await db.QueryFirstOrDefaultAsync<SpStdResult>("sp_media_std", p, commandType: CommandType.StoredProcedure);
-            return result != null && !result.err_flag 
-                ? RepositoryResult.Ok(result.msg) 
-                : RepositoryResult.Fail(result?.err_code ?? -1, result?.msg ?? "Database Error");
+            using var multi = await db.QueryMultipleAsync("sp_media_std", p, commandType: CommandType.StoredProcedure);
+            var status = await multi.ReadFirstOrDefaultAsync<SpStdResult>();
+            
+            if (status != null && !status.err_flag)
+            {
+                var data = await multi.ReadFirstOrDefaultAsync<MediaFile>();
+                return RepositoryResult<MediaFile>.Ok(data, status.msg);
+            }
+            return RepositoryResult<MediaFile>.Fail(status?.err_code ?? -1, status?.msg ?? "Database Error");
         }
 
         public async Task<RepositoryResult> DeleteAsync(string id, long? userId = null, bool force = false)
@@ -133,7 +138,9 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             else
                 p.Add("@p_media_uuid", id);
 
-            var result = await db.QueryFirstOrDefaultAsync<SpStdResult>("sp_media_std", p, commandType: CommandType.StoredProcedure);
+            using var multi = await db.QueryMultipleAsync("sp_media_std", p, commandType: CommandType.StoredProcedure);
+            var result = await multi.ReadFirstOrDefaultAsync<SpStdResult>();
+            
             return result != null && !result.err_flag 
                  ? RepositoryResult.Ok(result.msg) 
                  : RepositoryResult.Fail(result?.err_code ?? -1, result?.msg ?? "Database Error");
@@ -150,7 +157,6 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             else
                 p.Add("@p_media_uuid", mediaId);
             
-            // Logic: SP returns Status (1) then Data (2).
             using var multi = await db.QueryMultipleAsync("sp_media_std", p, commandType: CommandType.StoredProcedure);
             var status = await multi.ReadFirstOrDefaultAsync<SpStdResult>();
             
@@ -159,32 +165,65 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             return await multi.ReadAsync<MediaUsageDto>();
         }
 
-        public async Task<RepositoryResult> SwapMediaAsync(string oldId, string newId, long? userId = null)
+        public async Task<RepositoryResult<MediaFile>> SwapMediaAsync(string oldId, string newId, long? userId = null)
         {
             using var db = CreateConnection();
             var p = new DynamicParameters();
             p.Add("@p_action", "REPLACE_USAGE");
             p.Add("@p_userid", userId);
 
-            // 1. Old Media ID (Source)
             if (long.TryParse(oldId, out var oldIdLong))
                 p.Add("@p_media_id", oldIdLong);
             else
                 p.Add("@p_media_uuid", oldId);
 
-            // 2. New Media ID (Target)
             if (long.TryParse(newId, out var newIdLong))
                 p.Add("@p_ref_media_id", newIdLong);
             else {
                  var refMedia = await GetByIdAsync(newId);
-                 if (refMedia == null) return RepositoryResult.Fail(-1, "New Media Not Found");
+                 if (refMedia == null) return RepositoryResult<MediaFile>.Fail(-1, "New Media Not Found");
                  p.Add("@p_ref_media_id", long.Parse(refMedia.MediaId)); 
             }
 
-            var result = await db.QueryFirstOrDefaultAsync<SpStdResult>("sp_media_std", p, commandType: CommandType.StoredProcedure);
-            return result != null && !result.err_flag 
-                 ? RepositoryResult.Ok(result.msg) 
-                 : RepositoryResult.Fail(result?.err_code ?? -1, result?.msg ?? "Database Error");
+            using var multi = await db.QueryMultipleAsync("sp_media_std", p, commandType: CommandType.StoredProcedure);
+            var status = await multi.ReadFirstOrDefaultAsync<SpStdResult>();
+            
+            if (status != null && !status.err_flag)
+            {
+                var data = await multi.ReadFirstOrDefaultAsync<MediaFile>();
+                return RepositoryResult<MediaFile>.Ok(data, status.msg);
+            }
+            return RepositoryResult<MediaFile>.Fail(status?.err_code ?? -1, status?.msg ?? "Database Error");
+        }
+
+        public async Task<RepositoryResult<MediaFile>> ReplaceAsync(MediaFile media, long? userId = null)
+        {
+            using var db = CreateConnection();
+            var p = new DynamicParameters();
+            p.Add("@p_action", "REPLACE_FILE");
+            p.Add("@p_userid", userId);
+            
+            if (long.TryParse(media.MediaId, out var idLong))
+                p.Add("@p_media_id", idLong);
+            else
+                p.Add("@p_media_uuid", media.MediaId);
+
+            p.Add("@p_file_name", media.FileName);
+            p.Add("@p_blob_url", media.BlobUrl);
+            p.Add("@p_duration_sec", media.DurationSec);
+            p.Add("@p_ratio", media.Ratio);
+            p.Add("@p_file_size_kb", media.FileSizeKb);
+            p.Add("@p_file_hash", media.FileHash);
+
+            using var multi = await db.QueryMultipleAsync("sp_media_std", p, commandType: CommandType.StoredProcedure);
+            var status = await multi.ReadFirstOrDefaultAsync<SpStdResult>();
+            
+            if (status != null && !status.err_flag)
+            {
+                var data = await multi.ReadFirstOrDefaultAsync<MediaFile>();
+                return RepositoryResult<MediaFile>.Ok(data, status.msg);
+            }
+            return RepositoryResult<MediaFile>.Fail(status?.err_code ?? -1, status?.msg ?? "Database Error");
         }
 
         public async Task<bool> SyncMediaUrls(string targetUrl, string newUrl)
@@ -195,7 +234,8 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             p.Add("@p_remark1", targetUrl); 
             p.Add("@p_blob_url", newUrl);   
 
-            var result = await db.QueryFirstOrDefaultAsync<SpStdResult>("sp_media_std", p, commandType: CommandType.StoredProcedure);
+            using var multi = await db.QueryMultipleAsync("sp_media_std", p, commandType: CommandType.StoredProcedure);
+            var result = await multi.ReadFirstOrDefaultAsync<SpStdResult>();
             return result != null && !result.err_flag;
         }
     }

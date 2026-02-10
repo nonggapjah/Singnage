@@ -1,4 +1,4 @@
-@SignageUnicorn.Api_HostAddress = http://localhost:5018
+@SignageUnicorn.Api_HostAddress = http://localhost:8862
 
 GET {{SignageUnicorn.Api_HostAddress}}/weatherforecast/
 Accept: application/json

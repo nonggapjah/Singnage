@@ -63,7 +63,7 @@ export default function SystemLogsPage() {
         setPage(1);
     };
 
-    const [filterType, setFilterType] = useState<string>('ALL');
+    const [filterType, setFilterType] = useState<string>('CRITICAL');
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
     const dropdownRef = useRef<HTMLDivElement>(null);
     const [page, setPage] = useState(1);
@@ -105,7 +105,11 @@ export default function SystemLogsPage() {
                 pageSize: pageSize.toString()
             });
 
-            if (filterType !== 'ALL') {
+            if (filterType === 'CRITICAL') {
+                query.append('logType', 'ERROR,WARNING');
+            } else if (filterType === 'ERROR_ONLY') {
+                query.append('logType', 'ERROR');
+            } else if (filterType !== 'ALL') {
                 query.append('logType', filterType);
             }
 
@@ -141,6 +145,29 @@ export default function SystemLogsPage() {
             case 'DEBUG': return 'text-gray-400 bg-gray-500/10 border-gray-500/20';
             default: return 'text-accent-cyan bg-accent-cyan/10 border-accent-cyan/20';
         }
+    };
+
+    const { showConfirm, showNotify } = useUI();
+
+    const handleCleanup = () => {
+        showConfirm(
+            'PURGE OLD LOGS',
+            'Are you sure you want to remove all system logs older than 30 days? This action cannot be undone.',
+            async () => {
+                try {
+                    const res = await apiFetch('/logs', { method: 'DELETE' });
+                    if (res.success) {
+                        showNotify('CLEANUP SUCCESS', 'System logs older than 30 days have been purged.', 'SUCCESS');
+                        fetchLogs();
+                    } else {
+                        showNotify('CLEANUP FAILED', res.message || 'Purge failed', 'ERROR');
+                    }
+                } catch (e) {
+                    showNotify('CRITICAL ERROR', 'Failed to communicate with purge engine.', 'ERROR');
+                }
+            },
+            'DANGER'
+        );
     };
 
     return (
@@ -204,35 +231,22 @@ export default function SystemLogsPage() {
                             </div>
                         </div>
 
-                        <div className="flex flex-col gap-1 relative z-50">
+                        <div className="flex flex-col gap-1 relative">
                             <label className="text-[10px] font-black text-muted-foreground uppercase tracking-widest ml-1">Level</label>
-                            <div ref={dropdownRef} className="relative">
-                                <button
-                                    onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                                    className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs text-foreground font-bold uppercase focus:outline-none focus:border-accent-cyan transition-colors h-[34px] min-w-[120px] text-left flex justify-between items-center"
-                                >
-                                    <span>{logLevels.find(l => l.value === filterType)?.label}</span>
-                                    <span className="opacity-50 ml-2">▼</span>
-                                </button>
-
-                                {isDropdownOpen && (
-                                    <div className="absolute top-full mt-1 left-0 w-full min-w-[120px] bg-card border border-border rounded-lg shadow-xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-100">
-                                        {logLevels.map((level) => (
-                                            <button
-                                                key={level.value}
-                                                onClick={() => {
-                                                    setFilterType(level.value);
-                                                    setIsDropdownOpen(false);
-                                                }}
-                                                className={`px-3 py-2 text-xs font-bold text-left uppercase transition-colors hover:bg-muted ${filterType === level.value ? 'bg-accent-cyan/10 text-accent-cyan' : 'text-foreground'
-                                                    }`}
-                                            >
-                                                {level.label}
-                                            </button>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
+                            <select
+                                value={filterType}
+                                onChange={(e) => setFilterType(e.target.value)}
+                                className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs text-foreground font-bold uppercase focus:outline-none focus:border-accent-cyan transition-colors h-[34px] min-w-[140px] appearance-none"
+                                style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' fill=\'none\' viewBox=\'0 0 24 24\' stroke=\'white\'%3E%3Cpath stroke-linecap=\'round\' stroke-linejoin=\'round\' stroke-width=\'2\' d=\'M19 9l-7 7-7-7\'%3E%3C/path%3E%3C/svg%3E")', backgroundRepeat: 'no-repeat', backgroundPosition: 'right 10px center', backgroundSize: '12px' }}
+                            >
+                                {logLevels.map((level) => (
+                                    <option key={level.value} value={level.value} className="bg-card text-foreground">
+                                        {level.label}
+                                    </option>
+                                ))}
+                                <option value="CRITICAL" className="bg-card text-red-400 font-bold">⚠️ CRITICAL ONLY (WRN+ERR)</option>
+                                <option value="ERROR_ONLY" className="bg-card text-red-500 font-black">🛑 ERRORS ONLY</option>
+                            </select>
                         </div>
 
                         <div className="w-px h-8 bg-border mx-2"></div>
@@ -245,6 +259,14 @@ export default function SystemLogsPage() {
                                 }`}
                         >
                             {autoRefresh ? 'Live On' : 'Live Off'}
+                        </button>
+
+                        <button
+                            onClick={handleCleanup}
+                            className="px-4 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-500 text-xs font-black uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all shadow-[0_0_10px_rgba(239,68,68,0.1)]"
+                            title="Purge logs older than 30 days"
+                        >
+                            Cleanup
                         </button>
 
                         <button

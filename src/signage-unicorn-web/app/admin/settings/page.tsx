@@ -6,7 +6,7 @@ import { apiFetch } from '@/lib/api-fetch';
 function SystemConfigPanel() {
     const [config, setConfig] = useState<{ currentBaseUrl: string, detectedIp: string, suggestedBaseUrl: string } | null>(null);
     const [newIp, setNewIp] = useState('');
-    const [newPort, setNewPort] = useState(5018);
+    const [newPort, setNewPort] = useState(8865);
     const [newFrontendPort, setNewFrontendPort] = useState(3000);
     const [loading, setLoading] = useState(false);
     const [refreshing, setRefreshing] = useState(true); // Start refreshing true

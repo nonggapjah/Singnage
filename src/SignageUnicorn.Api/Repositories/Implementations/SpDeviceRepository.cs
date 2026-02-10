@@ -213,18 +213,30 @@ namespace SignageUnicorn.Api.Repositories.Implementations
         {
             using (var connection = new SqlConnection(_connectionString))
             {
-                var p = new DynamicParameters();
-                p.Add("@p_action", "DEACTIVATE");
-                
-                if (long.TryParse(deviceId, out var devId)) p.Add("@p_device_id", devId);
-                else p.Add("@p_device_uuid", deviceId);
+                var p = new 
+                {
+                    p_action = "DEACTIVATE",
+                    p_device_id = long.TryParse(deviceId, out var id) ? (long?)id : null,
+                    p_device_uuid = !long.TryParse(deviceId, out _) ? deviceId : null,
+                    p_userid = userId
+                };
 
-                p.Add("@p_userid", userId);
-
-                var status = await connection.QueryFirstOrDefaultAsync<SpStdResult>("sp_device_std", p, commandType: CommandType.StoredProcedure);
-                 return status != null && !status.err_flag 
-                    ? RepositoryResult.Ok(status.msg) 
-                    : RepositoryResult.Fail(status?.err_code ?? -1, status?.msg ?? "DB Error");
+                try 
+                {
+                    using var multi = await connection.QueryMultipleAsync("sp_device_std", p, commandType: CommandType.StoredProcedure);
+                    var status = await multi.ReadFirstOrDefaultAsync<SpStdResult>();
+                    return status != null && !status.err_flag 
+                        ? RepositoryResult.Ok(status.msg) 
+                        : RepositoryResult.Fail(status?.err_code ?? -1, status?.msg ?? "DB Error");
+                }
+                catch (SqlException ex)
+                {
+                    return RepositoryResult.Fail(500, $"SQL Error: {ex.Message}");
+                }
+                catch (Exception ex)
+                {
+                    return RepositoryResult.Fail(500, $"Internal Error: {ex.Message}");
+                }
             }
         }
 
@@ -236,8 +248,10 @@ namespace SignageUnicorn.Api.Repositories.Implementations
                 p.Add("@p_action", "CLEANUP_OFFLINE");
                 p.Add("@p_cleanup_days", days);
                 
-                var status = await connection.QueryFirstOrDefaultAsync<SpStdResult>("sp_device_std", p, commandType: CommandType.StoredProcedure);
-                 return status != null && !status.err_flag 
+                using var multi = await connection.QueryMultipleAsync("sp_device_std", p, commandType: CommandType.StoredProcedure);
+                var status = await multi.ReadFirstOrDefaultAsync<SpStdResult>();
+
+                return status != null && !status.err_flag 
                     ? RepositoryResult.Ok(status.msg) 
                     : RepositoryResult.Fail(status?.err_code ?? -1, status?.msg ?? "DB Error");
             }
@@ -251,24 +265,39 @@ namespace SignageUnicorn.Api.Repositories.Implementations
                 p.Add("@p_action", "COUNT_OFFLINE_ZOMBIES");
                 p.Add("@p_cleanup_days", days);
 
-                // 1. Status
                 using var multi = await connection.QueryMultipleAsync("sp_device_std", p, commandType: CommandType.StoredProcedure);
                 var status = await multi.ReadFirstOrDefaultAsync<SpStdResult>();
                 
                 if (status != null && status.err_flag) 
                     return RepositoryResult<int>.Fail(status.err_code, status.msg);
 
-                // 2. Data (Count)
-                // We expect a single row with 'Count'
                 var data = await multi.ReadFirstOrDefaultAsync<dynamic>();
-                int count = 0;
-                if (data != null)
-                {
-                    count = (int)data.Count;
-                }
+                int count = data != null ? (int)data.Count : 0;
                 
                 return RepositoryResult<int>.Ok(count, status?.msg ?? "Count Calculated");
             }
+        }
+
+        public async Task<IEnumerable<DeviceDto>> GetDevicesByMediaIdAsync(string mediaId)
+        {
+             using var connection = new SqlConnection(_connectionString);
+             string sql = @"
+                SELECT d.* 
+                FROM sn_devices d
+                WHERE d.is_deleted = 0 
+                  AND d.current_playlist_id IN (
+                      SELECT DISTINCT playlist_id 
+                      FROM sn_playlist_items 
+                      WHERE is_deleted = 0 AND media_id = (SELECT media_id FROM sn_media_files WHERE media_id = @id OR media_uuid = @id)
+                  )";
+             return await connection.QueryAsync<DeviceDto>(sql, new { id = mediaId });
+        }
+
+        public async Task<IEnumerable<DeviceDto>> GetDevicesByPlaylistIdAsync(string playlistId)
+        {
+             using var connection = new SqlConnection(_connectionString);
+             string sql = @"SELECT * FROM sn_devices WHERE is_deleted = 0 AND (current_playlist_id = @id OR current_playlist_id = (SELECT playlist_id FROM sn_playlists WHERE playlist_uuid = @id))";
+             return await connection.QueryAsync<DeviceDto>(sql, new { id = playlistId });
         }
 
         public async Task ExecuteSqlAsync(string sql)
@@ -277,17 +306,6 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             {
                 await connection.ExecuteAsync(sql);
             }
-        }
-        
-        // Helper to apply the SP manually since we just updated the file
-        public async Task ApplyUpdatedSp()
-        {
-             // In a real scenario, we might read the file. 
-             // But here we rely on the User or Maintenance to run DB Fix, OR we run it now if possible?
-             // Since I can't easily read the file path from here without IEnv, I will assume the 'FixDatabase' logic in Service handles it.
-             // But I need the SP to be ready for the NEXT step.
-             // I will implement the C# code first, and then Trigger 'FixDatabase' or let the user know.
-             // Actually, I can use the `ExecuteSqlAsync` in the *Service* using the file I just wrote.
         }
     }
 }

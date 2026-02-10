@@ -183,6 +183,10 @@ BEGIN
     ============================================= */
     IF @p_action = 'REPLACE_USAGE'
     BEGIN
+        -- Resolve ref_media_id if UUID provided
+        IF @p_ref_media_id IS NULL AND @p_media_uuid IS NOT NULL -- Note: using p_media_uuid as target for ref logic if id is null
+            SELECT @p_ref_media_id = media_id FROM sn_media_files WHERE media_uuid = @p_media_uuid AND is_deleted = 0;
+
         -- Validate
         IF @p_ref_media_id IS NULL
         BEGIN
@@ -294,7 +298,7 @@ ResultSection:
     -- Result Set 2: Data (Depends on Action)
     IF @err_flag = 0 
     BEGIN
-        IF @p_action IN ('CREATE','UPDATE','GET_BY_ID')
+        IF @p_action IN ('CREATE','UPDATE','GET_BY_ID', 'REPLACE_FILE', 'REPLACE_USAGE')
         BEGIN
             SELECT TOP 1 * FROM sn_media_files
             WHERE media_id = @p_media_id OR media_uuid = @p_media_uuid;
@@ -365,7 +369,12 @@ ResultSection:
                 p.playlist_id,
                 p.playlist_name,
                 CASE WHEN p.status = 'active' THEN 'Y' ELSE 'N' END AS Active,
-                COUNT(pi.playlist_item_id) AS usage_count
+                COUNT(pi.playlist_item_id) AS usage_count,
+                (SELECT ISNULL(SUM(ISNULL(pi2.duration_override, m2.duration_sec)), 0) 
+                 FROM sn_playlist_items pi2 
+                 JOIN sn_media_files m2 ON pi2.media_id = m2.media_id 
+                 WHERE pi2.playlist_id = p.playlist_id AND pi2.is_deleted = 0) AS duration_sec,
+                (SELECT COUNT(*) FROM sn_devices d WHERE d.current_playlist_id = p.playlist_id AND d.is_deleted = 0) AS device_count
             FROM sn_playlist_items pi
             JOIN sn_playlists p ON pi.playlist_id = p.playlist_id
             WHERE pi.media_id = @p_media_id

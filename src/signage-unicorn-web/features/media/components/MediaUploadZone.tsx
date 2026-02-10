@@ -7,9 +7,11 @@ import { mediaApi } from '../api/media-api';
 interface MediaUploadZoneProps {
     onUploadSuccess: (mediaId?: string) => void;
     onCancel: () => void;
+    isEmbed?: boolean;
+    targetMediaId?: string;
 }
 
-export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({ onUploadSuccess, onCancel }) => {
+export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({ onUploadSuccess, onCancel, isEmbed = false, targetMediaId }) => {
     const [uploading, setUploading] = useState(false);
     const [uploadFinished, setUploadFinished] = useState(false);
     const [dragActive, setDragActive] = useState(false);
@@ -46,7 +48,7 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({ onUploadSucces
         setTimeout(() => {
             setUploading(false);
             setUploadFinished(true);
-        }, 3000);
+        }, 1500); // Faster simulation
     };
 
     const handleSave = async (isAsync: boolean = false) => {
@@ -76,7 +78,14 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({ onUploadSucces
                 return;
             }
 
-            const res = await mediaApi.upload(formData);
+            let res;
+            if (targetMediaId) {
+                // Direct Content Replacement
+                res = await mediaApi.replaceContent(targetMediaId, formData);
+            } else {
+                // New Upload
+                res = await mediaApi.upload(formData);
+            }
 
             if (!res.success) {
                 throw new Error(res.message || 'Upload failed');
@@ -131,32 +140,39 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({ onUploadSucces
         }
     };
 
+    const containerClasses = isEmbed
+        ? "w-full bg-transparent overflow-visible"
+        : "w-full max-w-5xl overflow-hidden rounded-2xl border border-border bg-background shadow-2xl ring-1 ring-border mx-auto text-foreground";
+
     return (
-        <div className="w-full max-w-5xl overflow-hidden rounded-2xl border border-border bg-background shadow-2xl ring-1 ring-border mx-auto text-foreground">
-            {/* Header */}
-            <div className="flex items-center justify-between border-b border-border px-8 py-6 bg-muted/20">
-                <div>
-                    <h1 className="text-xl font-black uppercase tracking-tighter text-foreground">Upload Media</h1>
-                    <p className="mt-1 text-xs font-bold text-muted-foreground uppercase tracking-widest">Digital Signage Content</p>
+        <div className={containerClasses}>
+            {/* Header - Hide if embedded */}
+            {!isEmbed && (
+                <div className="flex items-center justify-between border-b border-border px-8 py-6 bg-muted/20">
+                    <div>
+                        <h1 className="text-xl font-black uppercase tracking-tighter text-foreground">Upload Media</h1>
+                        <p className="mt-1 text-xs font-bold text-muted-foreground uppercase tracking-widest">Digital Signage Content</p>
+                    </div>
+                    <button
+                        onClick={onCancel}
+                        className="text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
                 </div>
-                <button
-                    onClick={onCancel}
-                    className="text-muted-foreground hover:text-foreground transition-colors"
-                >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                </button>
-            </div>
+            )}
 
-            <div className="grid grid-cols-1 md:grid-cols-5 bg-background">
+            <div className={`grid grid-cols-1 ${isEmbed ? 'lg:grid-cols-5' : 'md:grid-cols-5'} ${isEmbed ? 'p-0 bg-transparent' : 'bg-background'}`}>
                 {/* Left Column: Form */}
-                <div className="border-b border-border p-8 md:col-span-2 md:border-r md:border-b-0 space-y-6">
-                    <h2 className="text-sm font-black uppercase tracking-widest text-muted-foreground">Media Details</h2>
+                <div className={`${isEmbed ? 'p-0 lg:pr-8 lg:col-span-2' : 'p-8 md:col-span-2'} border-b border-border  ${isEmbed ? 'lg:border-r lg:border-b-0' : 'md:border-r md:border-b-0'} space-y-4`}>
+                    {isEmbed && <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-accent-cyan opacity-80">Media Details</h2>}
+                    {!isEmbed && <h2 className="text-sm font-black uppercase tracking-widest text-muted-foreground">Media Details</h2>}
 
-                    <div className="space-y-6">
+                    <div className="space-y-3 sm:space-y-4">
                         <div>
-                            <label className="block text-[10px] font-black text-muted-foreground uppercase tracking-wider mb-2 ml-1">
+                            <label className="block text-[10px] font-black text-muted-foreground uppercase tracking-wider mb-1.5 ml-1">
                                 Display Name <span className="text-red-500">*</span>
                             </label>
                             <input
@@ -164,12 +180,12 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({ onUploadSucces
                                 value={customName}
                                 onChange={(e) => setCustomName(e.target.value)}
                                 placeholder="ระบุชื่อสื่อ..."
-                                className="w-full px-4 py-3 rounded-xl bg-muted/30 border border-border text-foreground text-sm focus:border-accent-cyan focus:ring-1 focus:ring-accent-cyan focus:outline-none transition-all placeholder:text-muted-foreground/50"
+                                className="w-full px-4 py-2 rounded-xl bg-muted/20 border border-white/5 text-foreground text-xs sm:text-sm focus:border-accent-cyan focus:ring-1 focus:ring-accent-cyan/30 focus:outline-none transition-all placeholder:text-muted-foreground/30"
                             />
                         </div>
 
                         <div>
-                            <label className="block text-[10px] font-black text-muted-foreground uppercase tracking-wider mb-2 ml-1">
+                            <label className="block text-[10px] font-black text-muted-foreground uppercase tracking-wider mb-1.5 ml-1">
                                 Supplier Code <span className="text-red-500">*</span>
                             </label>
                             <input
@@ -177,35 +193,64 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({ onUploadSucces
                                 value={supplierCode}
                                 onChange={(e) => setSupplierCode(e.target.value)}
                                 placeholder="ระบุรหัส..."
-                                className="w-full px-4 py-3 rounded-xl bg-muted/30 border border-border text-foreground text-sm focus:border-accent-cyan focus:ring-1 focus:ring-accent-cyan focus:outline-none transition-all placeholder:text-muted-foreground/50"
+                                className="w-full px-4 py-2 rounded-xl bg-muted/20 border border-white/5 text-foreground text-xs sm:text-sm focus:border-accent-cyan focus:ring-1 focus:ring-accent-cyan/30 focus:outline-none transition-all placeholder:text-muted-foreground/30"
                             />
                         </div>
 
-                        <div>
-                            <label className="block text-[10px] font-black text-muted-foreground uppercase tracking-wider mb-2 ml-1">Remark 1</label>
-                            <textarea
-                                value={remark1}
-                                onChange={(e) => setRemark1(e.target.value)}
-                                placeholder="รายละเอียดเพิ่มเติม..."
-                                className="w-full h-24 pt-3 resize-none px-4 py-3 rounded-xl bg-muted/30 border border-border text-foreground text-sm focus:border-accent-cyan focus:ring-1 focus:ring-accent-cyan focus:outline-none transition-all placeholder:text-muted-foreground/50"
-                            />
-                        </div>
+                        {!isEmbed && (
+                            <>
+                                <div>
+                                    <label className="block text-[10px] font-black text-muted-foreground uppercase tracking-wider mb-2 ml-1">Remark 1</label>
+                                    <textarea
+                                        value={remark1}
+                                        onChange={(e) => setRemark1(e.target.value)}
+                                        placeholder="รายละเอียดเพิ่มเติม..."
+                                        className="w-full h-24 pt-3 resize-none px-4 py-3 rounded-xl bg-muted/30 border border-border text-foreground text-sm focus:border-accent-cyan focus:ring-1 focus:ring-accent-cyan focus:outline-none transition-all placeholder:text-muted-foreground/50"
+                                    />
+                                </div>
 
-                        <div>
-                            <label className="block text-[10px] font-black text-muted-foreground uppercase tracking-wider mb-2 ml-1">Remark 2</label>
-                            <input
-                                type="text"
-                                value={remark2}
-                                onChange={(e) => setRemark2(e.target.value)}
-                                placeholder="หมายเหตุ..."
-                                className="w-full px-4 py-3 rounded-xl bg-muted/30 border border-border text-foreground text-sm focus:border-accent-cyan focus:ring-1 focus:ring-accent-cyan focus:outline-none transition-all placeholder:text-muted-foreground/50"
-                            />
-                        </div>
+                                <div>
+                                    <label className="block text-[10px] font-black text-muted-foreground uppercase tracking-wider mb-2 ml-1">Remark 2</label>
+                                    <input
+                                        type="text"
+                                        value={remark2}
+                                        onChange={(e) => setRemark2(e.target.value)}
+                                        placeholder="หมายเหตุ..."
+                                        className="w-full px-4 py-3 rounded-xl bg-muted/30 border border-border text-foreground text-sm focus:border-accent-cyan focus:ring-1 focus:ring-accent-cyan focus:outline-none transition-all placeholder:text-muted-foreground/50"
+                                    />
+                                </div>
+                            </>
+                        )}
+
+                        {isEmbed && (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                                <div>
+                                    <label className="block text-[10px] font-black text-muted-foreground uppercase tracking-wider mb-1.5 ml-1">Remark 1</label>
+                                    <input
+                                        type="text"
+                                        value={remark1}
+                                        onChange={(e) => setRemark1(e.target.value)}
+                                        placeholder="เพิ่ม..."
+                                        className="w-full px-4 py-2 rounded-xl bg-muted/20 border border-white/5 text-foreground text-[11px] focus:border-accent-cyan focus:ring-1 focus:ring-accent-cyan/30 focus:outline-none transition-all placeholder:text-muted-foreground/30"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-[10px] font-black text-muted-foreground uppercase tracking-wider mb-1.5 ml-1">Remark 2</label>
+                                    <input
+                                        type="text"
+                                        value={remark2}
+                                        onChange={(e) => setRemark2(e.target.value)}
+                                        placeholder="เหตุ..."
+                                        className="w-full px-4 py-2 rounded-xl bg-muted/20 border border-white/5 text-foreground text-[11px] focus:border-accent-cyan focus:ring-1 focus:ring-accent-cyan/30 focus:outline-none transition-all placeholder:text-muted-foreground/30"
+                                    />
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
 
                 {/* Right Column: Upload */}
-                <div className="bg-muted/5 p-8 md:col-span-3 flex flex-col h-full relative">
+                <div className={`${isEmbed ? 'p-0 pt-6 lg:pt-0 lg:col-span-3' : 'p-8 md:col-span-3'} flex flex-col h-full relative`}>
                     {!selectedFile ? (
                         <div
                             className={`group relative flex flex-grow w-full cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed transition-all duration-300 min-h-[300px] gap-4
@@ -287,16 +332,18 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({ onUploadSucces
                 </div>
             </div>
 
-            {/* Footer Buttons */}
-            <div className="flex items-center justify-end gap-4 border-t border-border bg-muted/20 px-8 py-5">
-                <button
-                    onClick={onCancel}
-                    className="rounded-xl px-6 py-3 text-xs font-bold uppercase tracking-widest text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors"
-                >
-                    Cancel
-                </button>
-                <div className="flex gap-2">
-                    {selectedFile && (
+            {/* Footer Buttons - Hide if embedded or style differently */}
+            <div className={`flex items-center justify-end gap-4 border-t border-border ${isEmbed ? 'bg-transparent border-t-0 pt-6 px-0' : 'bg-muted/20 px-8 py-5'}`}>
+                {!isEmbed && (
+                    <button
+                        onClick={onCancel}
+                        className="rounded-xl px-6 py-3 text-xs font-bold uppercase tracking-widest text-muted-foreground hover:text-foreground hover:bg-white/5 transition-colors"
+                    >
+                        Cancel
+                    </button>
+                )}
+                <div className="flex gap-2 flex-grow md:flex-grow-0">
+                    {selectedFile && !isEmbed && (
                         <button
                             onClick={() => handleSave(true)}
                             className="rounded-xl px-6 py-3 text-xs font-bold uppercase tracking-widest text-muted-foreground hover:text-foreground border border-border hover:bg-white/5 transition-all"
@@ -307,32 +354,32 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({ onUploadSucces
                     <button
                         onClick={() => handleSave(false)}
                         disabled={!selectedFile || (uploading && !uploadFinished)}
-                        className={`rounded-xl px-8 py-3 text-xs font-black uppercase tracking-[0.2em] text-black transition-all hover:-translate-y-1 hover:shadow-lg
+                        className={`rounded-xl px-8 py-3 text-xs font-black uppercase tracking-[0.2em] text-black transition-all hover:-translate-y-1 hover:shadow-lg w-full md:w-auto
                             ${(!selectedFile || (uploading && !uploadFinished))
                                 ? 'bg-muted text-muted-foreground cursor-not-allowed'
                                 : 'bg-accent-cyan hover:bg-cyan-300 hover:shadow-[0_0_20px_rgba(34,211,238,0.4)]'}
                         `}
                     >
-                        {uploadFinished ? 'Save Media' : 'Upload & Save'}
+                        {uploadFinished ? (isEmbed ? 'Confirm New File' : 'Save Media') : 'Upload & Save'}
                     </button>
                 </div>
             </div>
 
             {/* Notification Portal */}
             {showAsyncNotice && (
-                <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 animate-in fade-in duration-300">
-                    <div className="absolute inset-0 bg-black/80 backdrop-blur-sm"></div>
-                    <div className="relative bg-background border border-border p-8 rounded-3xl max-w-md text-center space-y-6 shadow-2xl skew-y-0">
-                        <div className="w-16 h-16 bg-accent-cyan/20 text-accent-cyan rounded-full flex items-center justify-center mx-auto text-3xl shadow-[0_0_20px_rgba(34,211,238,0.3)]">
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <div className="fixed inset-0 z-[300] flex items-center justify-center p-6 animate-in fade-in duration-300">
+                    <div className="absolute inset-0 bg-black/80 backdrop-blur-md"></div>
+                    <div className="relative bg-[#121212] border border-white/10 p-8 rounded-3xl max-w-md text-center space-y-6 shadow-2xl skew-y-0">
+                        <div className="w-20 h-20 bg-accent-cyan/10 text-accent-cyan rounded-full flex items-center justify-center mx-auto text-3xl shadow-[0_0_20px_rgba(34,211,238,0.3)] border border-accent-cyan/20">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                             </svg>
                         </div>
                         <div className="space-y-2">
-                            <h3 className="text-xl font-black text-foreground uppercase tracking-tight">Background Processing</h3>
-                            <p className="text-muted-foreground leading-relaxed text-sm font-medium">
-                                ระบบ processing ข้อมูล Ratio และ Duration ในพื้นหลัง
-                                คุณสามารถตรวจสอบผลลัพธ์ได้ใน Media Library
+                            <h3 className="text-2xl font-black text-white uppercase tracking-tight italic">Background Processing</h3>
+                            <p className="text-gray-400 leading-relaxed text-sm font-medium">
+                                ระบบกำลังประมวลผลวิดีโอในพื้นหลัง...
+                                คุณสามารถตรวจสอบสถานะได้ในหน้าคลังสื่อ
                             </p>
                         </div>
                         <button

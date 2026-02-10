@@ -157,7 +157,7 @@ ResultSection:
                 (@p_start_date IS NULL OR created_at >= @p_start_date)
                 AND (@p_end_date IS NULL OR created_at <= @p_end_date)
                 AND (@p_log_level IS NULL OR log_level = @p_log_level)
-                AND (@p_category IS NULL OR category = @p_category)
+                AND (@p_category IS NULL OR @p_category = '' OR category IN (SELECT [value] FROM STRING_SPLIT(@p_category, ',')))
                 AND (@p_source_system IS NULL OR source_system = @p_source_system)
             ORDER BY created_at DESC
             OFFSET (@p_page - 1) * @p_page_size ROWS

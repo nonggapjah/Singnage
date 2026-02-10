@@ -5,6 +5,7 @@ using SignageUnicorn.Api.Models.Responses; // Use existing ApiResponse
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using SignageUnicorn.Api.Constants;
+using SignageUnicorn.Api.Repositories.Interfaces;
 
 namespace SignageUnicorn.Api.Controllers
 {
@@ -14,10 +15,12 @@ namespace SignageUnicorn.Api.Controllers
     public class MediaController : ControllerBase
     {
         private readonly MediaService _service;
+        private readonly ISystemLogRepository _systemLog;
 
-        public MediaController(MediaService service)
+        public MediaController(MediaService service, ISystemLogRepository systemLog)
         {
             _service = service;
+            _systemLog = systemLog;
         }
 
         [HttpGet]
@@ -76,9 +79,9 @@ namespace SignageUnicorn.Api.Controllers
             }
             catch (Exception ex)
             {
-                // In a real production app, we would use an ILogger or ISystemLogRepository here
-                // For now, let's just return a clean error message
-                return StatusCode(500, ApiResponse<string>.ErrorResponse(500, "An internal server error occurred while uploading."));
+                var userId = GetUserId();
+                await _systemLog.LogAsync(null, "ERROR", $"[MediaController] UPLOAD_FAILED | Message: {ex.Message} | StackTrace: {ex.StackTrace}", "API", userId);
+                return StatusCode(500, ApiResponse<string>.ErrorResponse(500, $"An internal server error occurred while uploading: {ex.Message}"));
             }
         }
 
@@ -121,19 +124,52 @@ namespace SignageUnicorn.Api.Controllers
             var data = await _service.GetMediaUsageAsync(id);
             return Ok(ApiResponse<IEnumerable<MediaUsageDto>>.SuccessResponse(data));
         }
-        [HttpPost("replace")]
+
+        [HttpPost("swap")]
         [Authorize(Roles = UserRoles.Admin + "," + UserRoles.Editor)]
-        public async Task<IActionResult> Replace([FromBody] SignageUnicorn.Api.Models.Requests.MediaReplaceRequest request)
+        public async Task<IActionResult> Swap([FromBody] SignageUnicorn.Api.Models.Requests.MediaReplaceRequest request)
         {
-            var userId = GetUserId();
-            var result = await _service.ReplaceMediaAsync(request.OldMediaId, request.NewMediaId, request.ArchiveOld, userId);
-            
-            if (result)
+            try
             {
-                return Ok(ApiResponse<bool>.SuccessResponse(true, "Media replaced successfully"));
+                var userId = GetUserId();
+                var result = await _service.ReplaceMediaAsync(request.OldMediaId, request.NewMediaId, request.ArchiveOld, userId);
+                
+                if (result)
+                {
+                    return Ok(ApiResponse<bool>.SuccessResponse(true, "Media swapped successfully"));
+                }
+                return BadRequest(ApiResponse<bool>.ErrorResponse(400, "Failed to swap media. Verify IDs exist."));
             }
-            // Check why failed? For now generics error.
-            return BadRequest(ApiResponse<bool>.ErrorResponse(400, "Failed to replace media. Verify IDs exist."));
+            catch (Exception ex)
+            {
+                var userId = GetUserId();
+                await _systemLog.LogAsync(null, "ERROR", $"[MediaController] SWAP_FAILED | Message: {ex.Message}", "API", userId);
+                return StatusCode(500, ApiResponse<bool>.ErrorResponse(500, $"Internal error during swap: {ex.Message}"));
+            }
+        }
+
+        [HttpPost("{id}/replace")]
+        [Authorize(Roles = UserRoles.Admin + "," + UserRoles.Editor)]
+        [Consumes("multipart/form-data")]
+        public async Task<IActionResult> Replace(string id, [FromForm] MediaUploadRequest request)
+        {
+            try
+            {
+                var userId = GetUserId();
+                var result = await _service.ReplaceMediaContentAsync(id, request, userId);
+                
+                if (result != null)
+                {
+                    return Ok(ApiResponse<MediaFile>.SuccessResponse(result, "Media content replaced successfully"));
+                }
+                return BadRequest(ApiResponse<MediaFile>.ErrorResponse(400, "Failed to replace media content. Verify ID exists."));
+            }
+            catch (Exception ex)
+            {
+                var userId = GetUserId();
+                await _systemLog.LogAsync(null, "ERROR", $"[MediaController] REPLACE_CONTENT_FAILED | Message: {ex.Message}", "API", userId);
+                return StatusCode(500, ApiResponse<MediaFile>.ErrorResponse(500, $"Internal error during replacement: {ex.Message}"));
+            }
         }
     }
 }

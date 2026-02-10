@@ -49,6 +49,7 @@ namespace SignageUnicorn.Api.Models
         public string? BranchCode { get; set; }
         public string? MediaName { get; set; }
         public string? FileName { get; set; }
+        public string? SupplierCode { get; set; }
         public string? PlaylistId { get; set; }
         public int DurationSec { get; set; }
         public string? Result { get; set; }

@@ -209,12 +209,12 @@ ResultSection:
                 pl.device_id AS DeviceId,
                 d.device_name AS DeviceName,
                 pl.branch_code AS BranchCode,
+                m.supplier_code AS SupplierCode,
+                pl.playlist_id AS PlaylistId,
                 m.display_name AS MediaName,
                 m.file_name AS FileName,
-                pl.playlist_id AS PlaylistId,
                 pl.duration_sec AS DurationSec,
-                pl.status AS Result,
-                pl.error_message AS ErrorMessage
+                CASE WHEN isnull(pl.error_message,'') = '' THEN pl.status ELSE pl.error_message END AS Result
             FROM sn_playback_logs pl
             LEFT JOIN sn_devices d ON pl.device_id = d.device_id
             LEFT JOIN sn_media_files m ON pl.media_id = m.media_id

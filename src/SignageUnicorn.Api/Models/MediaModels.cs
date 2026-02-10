@@ -48,5 +48,7 @@ namespace SignageUnicorn.Api.Models
         public string PlaylistName { get; set; } = string.Empty;
         public string Active { get; set; } = string.Empty;
         public int UsageCount { get; set; }
+        public int DurationSec { get; set; }
+        public int DeviceCount { get; set; }
     }
 }

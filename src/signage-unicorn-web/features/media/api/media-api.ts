@@ -40,10 +40,17 @@ export const mediaApi = {
         return apiFetch(`/media/${id}/usage`);
     },
 
-    replace: async (oldMediaId: string, newMediaId: string, archiveOld: boolean = true): Promise<ApiResponse<boolean>> => {
-        return apiFetch('/media/replace', {
+    replace: async (oldId: string, newId: string, archiveOld: boolean) => {
+        return await apiFetch<boolean>('/media/swap', {
             method: 'POST',
-            body: JSON.stringify({ oldMediaId, newMediaId, archiveOld }),
+            body: JSON.stringify({ oldMediaId: oldId, newMediaId: newId, archiveOld }),
         });
-    }
+    },
+
+    replaceContent: async (id: string, formData: FormData) => {
+        return await apiFetch<MediaFile>(`/media/${id}/replace`, {
+            method: 'POST',
+            body: formData,
+        });
+    },
 };

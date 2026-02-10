@@ -193,10 +193,10 @@ export default function DashboardPage() {
             {/* Footer Info */}
             <div className="pt-10 flex justify-between items-center opacity-30 animate-in stagger-5">
                 <div className="text-[10px] font-mono tracking-widest uppercase">
-                    System Protocol v1.0.42 // Auth verified // Node Cluster Active
+                    System Protocol v{stats?.systemVersion || '2.2.0'} // Auth verified // Node Cluster Active
                 </div>
                 <div className="text-[10px] font-mono tracking-widest uppercase">
-                    Unicorn Tech Architecture
+                    Unicorn Tech Integration Co.,Ltd.
                 </div>
             </div>
         </div >

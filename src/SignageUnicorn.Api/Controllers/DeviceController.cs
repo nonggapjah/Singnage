@@ -104,6 +104,11 @@ namespace SignageUnicorn.Api.Controllers
             {
                 return Ok(ApiResponse<object>.SuccessResponse(null, "Device deleted successfully"));
             }
+
+            if (result.ErrorCode == 500)
+            {
+                return StatusCode(500, ApiResponse<object>.ErrorResponse(500, result.Message));
+            }
             return BadRequest(ApiResponse<object>.ErrorResponse(result.ErrorCode, result.Message));
         }
 

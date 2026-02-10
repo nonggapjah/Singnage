@@ -28,7 +28,8 @@ This document outlines the permissions and access control matrix for the Signage
 | | **Manage Items** (Add/Remove/Sort) | ❌ | ❌ | ✅ | ✅ |
 | | **Delete Playlist** | ❌ | ❌ | ✅ | ✅ |
 | **System Settings** | Read Settings (e.g. Jingle) | ✅ | ✅ | ✅ | ✅ |
-| | **Update Settings** | ❌ | ❌ | ❌ | ✅ |
+| | **Update Jingle / Volume** | ❌ | ❌ | ❌ | ✅ |
+| | **Manage Server Config (IP/Port)** | ❌ | ❌ | ❌ | ✅ |
 | **Users** | View All Users | ❌ | ❌ | ✅ | ✅ |
 | | **Manage Users** (Create/Edit/Delete) | ❌ | ❌ | ✅* | ✅ |
 | | *Manage Admins* | ❌ | ❌ | ❌ | ✅ |

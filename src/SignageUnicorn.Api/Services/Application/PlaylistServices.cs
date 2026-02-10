@@ -9,11 +9,77 @@ namespace SignageUnicorn.Api.Services.Application
     {
         private readonly IPlaylistRepository _playlistRepo;
         private readonly ISystemLogRepository _logRepo;
+        private readonly IDeviceRepository _deviceRepo;
+        private readonly IConfiguration _configuration;
+        private readonly IHttpContextAccessor _httpContextAccessor;
 
-        public PlaylistService(IPlaylistRepository playlistRepo, ISystemLogRepository logRepo) 
+        public PlaylistService(IPlaylistRepository playlistRepo, ISystemLogRepository logRepo, IDeviceRepository deviceRepo, IConfiguration configuration, IHttpContextAccessor httpContextAccessor) 
         {
             _playlistRepo = playlistRepo;
             _logRepo = logRepo;
+            _deviceRepo = deviceRepo;
+            _configuration = configuration;
+            _httpContextAccessor = httpContextAccessor;
+        }
+
+        // Helper to ensure media URLs are absolute and correct for the current network context
+        private string TransformUrl(string blobUrl)
+        {
+            if (string.IsNullOrEmpty(blobUrl)) return blobUrl;
+
+            var baseUrl = _configuration["ServerSettings:BaseUrl"];
+            if (string.IsNullOrEmpty(baseUrl))
+            {
+                var httpRequest = _httpContextAccessor.HttpContext?.Request;
+                if (httpRequest != null) baseUrl = $"{httpRequest.Scheme}://{httpRequest.Host}";
+            }
+
+            // Case 1: Relative Path - Always transform
+            if (!blobUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!string.IsNullOrEmpty(baseUrl))
+                {
+                    return $"{baseUrl.TrimEnd('/')}/{blobUrl.TrimStart('/')}";
+                }
+                return blobUrl;
+            }
+
+            // Case 2: Absolute Path containing localhost or 127.0.0.1
+            if (blobUrl.Contains("localhost", StringComparison.OrdinalIgnoreCase) || blobUrl.Contains("127.0.0.1"))
+            {
+                if (!string.IsNullOrEmpty(baseUrl))
+                {
+                     int protoEnd = blobUrl.IndexOf("://");
+                     if (protoEnd > 0)
+                     {
+                         int firstSlashAfterProto = blobUrl.IndexOf('/', protoEnd + 3);
+                         if (firstSlashAfterProto > 0)
+                         {
+                             var path = blobUrl.Substring(firstSlashAfterProto);
+                             return $"{baseUrl.TrimEnd('/')}/{path.TrimStart('/')}";
+                         }
+                     }
+                }
+            }
+            return blobUrl;
+        }
+
+        // ... (GetAllPlaylistsAsync and GetPlaylistByIdAsync remain same) ...
+
+        private async Task NotifyAffectedDevices(string playlistId)
+        {
+            try
+            {
+                var affectedDevices = await _deviceRepo.GetDevicesByPlaylistIdAsync(playlistId);
+                foreach (var dev in affectedDevices)
+                {
+                    await _deviceRepo.AddCommandAsync(dev.DeviceId, "FORCE_SYNC");
+                }
+            }
+            catch (Exception ex)
+            {
+                await _logRepo.LogAsync(null, "WARN", $"[PlaylistService] NOTIFY_FAILED | {ex.Message}", "API");
+            }
         }
 
         public async Task<List<PlaylistDto>> GetAllPlaylistsAsync(bool onlyActive = false, string searchTerm = null)
@@ -30,16 +96,26 @@ namespace SignageUnicorn.Api.Services.Application
             {
                 var items = (await _playlistRepo.GetPlaylistItemsAsync(playlistId)).ToList();
 
-                // Polyfill nested Media object for client compatibility
+                // Polyfill nested Media object for client compatibility & Transform URLs
                 foreach (var item in items)
                 {
+                    // 1. Transform the item's direct URL
+                    item.BlobUrl = TransformUrl(item.BlobUrl);
+                    
+                    // 2. Ensure Duration is valid (Fallback to 10s)
+                    if (!item.OriginalDuration.HasValue || item.OriginalDuration.Value <= 0)
+                    {
+                        item.OriginalDuration = 10;
+                    }
+
+                    // 3. Create the nested Media object with transformed URL
                     item.Media = new MediaFile 
                     {
                         MediaId = item.MediaId,
                         FileName = item.FileName ?? "",
                         DisplayName = item.DisplayName,
-                        BlobUrl = item.BlobUrl ?? "",
-                        DurationSec = item.OriginalDuration ?? 0,
+                        BlobUrl = item.BlobUrl ?? "", // Already transformed above
+                        DurationSec = (item.OriginalDuration.HasValue && item.OriginalDuration.Value > 0) ? item.OriginalDuration.Value : 10,
                         Ratio = item.Ratio,
                         FileSizeKb = item.FileSizeKB
                     };
@@ -77,11 +153,14 @@ namespace SignageUnicorn.Api.Services.Application
             {
                 foreach (var item in playlist.Items)
                 {
-                    await AddPlaylistItemAsync(playlist.PlaylistId, item.MediaId, item.PositionOrder, item.DurationOverride, userId);
+                    await _playlistRepo.AddPlaylistItemAsync(Guid.NewGuid().ToString(), playlist.PlaylistId, item.MediaId, item.PositionOrder, item.DurationOverride, userId);
                 }
             }
 
             await _logRepo.LogAsync(null, "INFO", $"[PlaylistService] CREATED | Playlist: {playlist.PlaylistName} | ID: {playlist.PlaylistId}", "API", userId);
+            
+            // Note: Notify not needed for *New* playlist as no devices use it yet
+            
             return true;
         }
 
@@ -109,7 +188,6 @@ namespace SignageUnicorn.Api.Services.Application
             }
             
             // 2. Sync Items (Strategy: Soft-delete all existing, then add new)
-            // Improved strategy: Bulk clear items for this playlist
             await _playlistRepo.ClearPlaylistItemsAsync(id, userId);
 
             // 3. Add New Items
@@ -118,14 +196,15 @@ namespace SignageUnicorn.Api.Services.Application
                 int order = 1;
                 foreach (var item in playlist.Items)
                 {
-                    // Ensure position is correct based on list order
-                    // IMPORTANT: Ensure MediaId is present, otherwise skip or error? For now assume valid.
                     if (!string.IsNullOrEmpty(item.MediaId))
                     {
-                        await AddPlaylistItemAsync(id, item.MediaId, order++, item.DurationOverride, userId);
+                        await _playlistRepo.AddPlaylistItemAsync(Guid.NewGuid().ToString(), id, item.MediaId, order++, item.DurationOverride, userId);
                     }
                 }
             }
+
+            // 4. Notify affected devices
+            await NotifyAffectedDevices(id);
 
             return true;
         }
@@ -136,6 +215,10 @@ namespace SignageUnicorn.Api.Services.Application
             if (result.Success) 
             {
                 await _logRepo.LogAsync(null, "INFO", $"[PlaylistService] DELETED | PlaylistID: {id}", "API", userId);
+                
+                // Trigger sync so devices know it's gone
+                await NotifyAffectedDevices(id);
+                
                 return true;
             }
             

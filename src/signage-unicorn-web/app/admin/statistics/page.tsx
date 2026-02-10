@@ -99,17 +99,18 @@ export default function StatisticsPage() {
             const res = await statisticsApi.getExportData(startISO, endISO);
 
             if (res.success && res.data) {
-                const header = ['Played At', 'Device ID', 'Device Name', 'Branch Code', 'Playlist ID', 'Media Name', 'File Name', 'Duration (s)', 'Result'];
+                const header = ['Played At', 'Device ID', 'Device Name', 'Branch Code', 'Supplier', 'Playlist ID', 'Media Name', 'File Name', 'Duration (s)', 'Result'];
                 const rows = res.data.map(d => [
                     `"${d.playedAt}"`,
                     `"${d.deviceId || ''}"`,
                     `"${d.deviceName || ''}"`,
                     `"${d.branchCode || ''}"`,
+                    `"${d.supplierCode || ''}"`,
                     `"${d.playlistId || ''}"`,
                     `"${d.mediaName || ''}"`,
                     `"${d.fileName || ''}"`,
                     d.durationSec,
-                    d.result
+                    `"${d.result || ''}"`
                 ]);
 
                 const csvContent = [header.join(','), ...rows.map(r => r.join(','))].join('\n');

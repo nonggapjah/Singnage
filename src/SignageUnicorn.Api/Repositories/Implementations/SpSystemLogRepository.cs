@@ -72,9 +72,22 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             p.Add("@p_action", "GET_FILTERED");
             p.Add("@p_start_date", startDate);
             p.Add("@p_end_date", endDate);
-            p.Add("@p_category", logType);
             p.Add("@p_page", page);
-            p.Add("@p_page_size", pageSize);
+            
+            // Check if multiple types are requested via comma-separated string
+            bool hasMultipleTypes = !string.IsNullOrEmpty(logType) && logType.Contains(",");
+            
+            if (hasMultipleTypes)
+            {
+                // SP doesn't support multiple types natively, so fetch all for this range and filter in C#
+                p.Add("@p_category", null);
+                p.Add("@p_page_size", 1000); // Fetch a larger chunk for manual filtering
+            }
+            else
+            {
+                p.Add("@p_category", logType);
+                p.Add("@p_page_size", pageSize);
+            }
 
             // 1. Status, 2. Data
             using var multi = await db.QueryMultipleAsync("sp_system_log_std", p, commandType: CommandType.StoredProcedure);
@@ -82,7 +95,17 @@ namespace SignageUnicorn.Api.Repositories.Implementations
 
             if (status != null && status.err_flag) return Enumerable.Empty<SystemLogEntry>();
 
-            return await multi.ReadAsync<SystemLogEntry>();
+            var data = await multi.ReadAsync<SystemLogEntry>();
+
+            if (hasMultipleTypes)
+            {
+                var types = logType!.Split(',').Select(t => t.Trim().ToUpper()).ToList();
+                return data.Where(d => !string.IsNullOrEmpty(d.LogType) && types.Contains(d.LogType.ToUpper()))
+                           .Skip((page - 1) * pageSize)
+                           .Take(pageSize);
+            }
+
+            return data;
         }
 
         public async Task ClearOldLogsAsync()

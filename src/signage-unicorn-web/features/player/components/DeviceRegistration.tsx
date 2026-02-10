@@ -42,14 +42,16 @@ export const DeviceRegistration: React.FC<DeviceRegistrationProps> = ({ onRegist
             });
 
             if (response && response.success && response.data) {
-                const { deviceId } = response.data; // This might be the numeric ID or UUID depending on backend return, but we handle both.
+                const { deviceId, deviceUuid } = response.data;
+                // We prioritize UUID (string) for persistence to match system expected display
+                const persistentId = deviceUuid || deviceId;
 
                 // Save important auth data
-                localStorage.setItem('signage_device_id', deviceId);
+                localStorage.setItem('signage_device_id', persistentId);
                 localStorage.setItem('signage_device_name', name);
                 localStorage.setItem('signage_device_branch', branch);
 
-                onRegisterSuccess(deviceId);
+                onRegisterSuccess(persistentId);
             } else {
                 const debugInfo = JSON.stringify(response);
                 throw new Error((response?.message || 'Invalid response: ') + debugInfo);

@@ -68,6 +68,13 @@ BEGIN
     ===================================================== */
     IF @p_action = 'REGISTER_OR_LOGIN'
     BEGIN
+        -- TACTICAL FIX: If the UUID provided looks like a numeric ID (vulnerably saved by old frontend),
+        -- try to resolve it back to the proper string UUID of that record.
+        IF TRY_CAST(@p_device_uuid AS BIGINT) IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sn_devices WHERE device_uuid = @p_device_uuid AND is_deleted = 0)
+        BEGIN
+             SELECT TOP 1 @p_device_uuid = device_uuid FROM sn_devices WHERE device_id = TRY_CAST(@p_device_uuid AS BIGINT) AND is_deleted = 0;
+        END
+
         IF EXISTS (SELECT 1 FROM sn_devices WHERE device_uuid = @p_device_uuid AND is_deleted = 0)
         BEGIN
             UPDATE sn_devices
@@ -83,6 +90,10 @@ BEGIN
         END
         ELSE
         BEGIN
+            -- Final check: if we somehow tried to register with a UUID that IS a number matching an ID, we prevent it.
+            IF TRY_CAST(@p_device_uuid AS BIGINT) IS NOT NULL
+                SET @p_device_uuid = NEWID(); -- Force generation if collision with ID space
+
             IF @p_device_uuid IS NULL SET @p_device_uuid = NEWID();
 
             INSERT INTO sn_devices
@@ -108,13 +119,28 @@ BEGIN
         IF @p_current_media_id IS NULL AND @p_current_media_uuid IS NOT NULL
            SELECT @p_current_media_id = media_id FROM sn_media_files WHERE media_uuid = @p_current_media_uuid;
 
+        -- DATA CLEANUP: If there's a device where UUID = Numeric ID of another record, merge/delete the bad one.
+        -- (This fixes the state shown in the row 5 screenshot)
+        IF TRY_CAST(@p_device_uuid AS BIGINT) IS NOT NULL
+        BEGIN
+             DECLARE @real_uuid NVARCHAR(36);
+             SELECT TOP 1 @real_uuid = device_uuid FROM sn_devices WHERE device_id = TRY_CAST(@p_device_uuid AS BIGINT) AND is_deleted = 0;
+             
+             IF @real_uuid IS NOT NULL AND @real_uuid <> @p_device_uuid
+             BEGIN
+                  -- Mark the bad "numeric uuid" record for deletion if it exists
+                  UPDATE sn_devices SET is_deleted = 1, status = 'offline' WHERE device_uuid = @p_device_uuid;
+                  -- Continue with the "real" UUID instead
+                  SET @p_device_uuid = @real_uuid;
+                  SET @p_device_id = TRY_CAST(@real_uuid AS BIGINT); -- Try parse real one if it was numeric as well? Usually won't be.
+             END
+        END
+
         UPDATE sn_devices
         SET last_check_in = SYSUTCDATETIME(),
             status = ISNULL(@p_status, 'online'),
-            -- NEW: Update Name/Branch if provided
             device_name = ISNULL(@p_device_name, device_name),
             branch_code = ISNULL(@p_branch_code, branch_code),
-            
             ip_address = ISNULL(@p_ip_address, ip_address),
             mac_address = ISNULL(@p_mac_address, mac_address),
             app_version = ISNULL(@p_app_version, app_version),
@@ -127,7 +153,6 @@ BEGIN
         WHERE (device_id = @p_device_id OR device_uuid = @p_device_uuid)
           AND is_deleted = 0;
 
-        -- AUTO-REGISTER LOGIC FOR OLD DEVICES
         IF @@ROWCOUNT = 0 AND @p_device_uuid IS NOT NULL
         BEGIN
              INSERT INTO sn_devices

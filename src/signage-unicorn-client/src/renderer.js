@@ -565,7 +565,7 @@ function updateStorage() {
 
 function showSetup() {
     setupScreen.classList.remove('hidden');
-    document.getElementById('server-ip').value = config.serverIp || 'http://localhost:5018';
+    document.getElementById('server-ip').value = config.serverIp || 'https://signage.aith123.com';
     document.getElementById('save-settings').onclick = async () => {
         const ip = document.getElementById('server-ip').value.replace(/\/$/, "");
         const name = document.getElementById('device-name').value;
@@ -584,7 +584,10 @@ function showSetup() {
                 updateCursorVisibility();
                 startSync();
             }
-        } catch (err) { alert('Connect error: ' + ip); }
+        } catch (err) {
+            console.error('Registration failed:', err);
+            alert(`Connect error: ${ip}\nReason: ${err.message}`);
+        }
     };
 }
 
