@@ -13,6 +13,7 @@ let isMuted = false;
 let cacheProgress = 0;
 let pendingPlaylist = null; // Next playlist waiting for smooth swap
 let isSyncing = false;     // Prevent multiple sync loops
+let isBootReportSent = false; // Boot Report: send full device info once
 
 // Queues for Offline Sync
 let systemLogQueue = JSON.parse(localStorage.getItem('system_log_queue') || '[]');
@@ -298,20 +299,31 @@ async function startSync() {
 
 async function sync() {
     try {
+        // Build heartbeat payload
+        const heartbeatData = {
+            deviceId: config.deviceId,
+            deviceName: config.deviceName,
+            branchCode: config.branchCode,
+            status: isPlaying ? 'PLAYING' : 'IDLE',
+            currentPlaylistId: config.lastPlaylistId || '',
+            currentMediaId: (playlist[currentIndex] && playlist[currentIndex].media) ? playlist[currentIndex].media.mediaId : '',
+            currentPlaylistItemId: (playlist[currentIndex]) ? playlist[currentIndex].playlistItemId : '',
+            currentPositionSec: isPlaying ? Math.floor(videoEl.currentTime) : 0,
+            cacheProgress: cacheProgress
+        };
+
+        // Boot Report: enrich first heartbeat with device metadata
+        if (!isBootReportSent) {
+            const version = await ipcRenderer.invoke('get-app-version');
+            heartbeatData.appVersion = `Client ${version}`;
+            heartbeatData.ratio = `${window.screen.width}x${window.screen.height}`;
+            console.log(`[Boot Report] Sending: v${version}, ${heartbeatData.ratio}`);
+        }
+
         const res = await fetch(`${config.serverIp}/api/v1/devices/heartbeat`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                deviceId: config.deviceId,
-                deviceName: config.deviceName,
-                branchCode: config.branchCode,
-                status: isPlaying ? 'PLAYING' : 'IDLE',
-                currentPlaylistId: config.lastPlaylistId || '',
-                currentMediaId: (playlist[currentIndex] && playlist[currentIndex].media) ? playlist[currentIndex].media.mediaId : '',
-                currentPlaylistItemId: (playlist[currentIndex]) ? playlist[currentIndex].playlistItemId : '',
-                currentPositionSec: isPlaying ? Math.floor(videoEl.currentTime) : 0,
-                cacheProgress: cacheProgress
-            })
+            body: JSON.stringify(heartbeatData)
         });
 
         if (res.ok) {
@@ -319,6 +331,11 @@ async function sync() {
             statusDot.style.background = '#00f2ff';
             dashStatus.innerText = 'ONLINE';
             dashStatus.style.color = '#00f2ff';
+
+            if (!isBootReportSent) {
+                isBootReportSent = true;
+                addLog('Boot Report sent successfully.', 'info', true);
+            }
 
             if (data.data && data.data.length > 0) {
                 for (const cmd of data.data) {
@@ -574,15 +591,22 @@ function showSetup() {
         const ip = document.getElementById('server-ip').value.replace(/\/$/, "");
         const name = document.getElementById('device-name').value;
         const branch = document.getElementById('branch-code').value;
+        const loc = document.getElementById('location').value;
         if (!ip || !name) return alert('โปรดกรอกข้อมูล');
         try {
             const res = await fetch(`${ip}/api/v1/devices/register`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ deviceKey: 'WIN-' + Math.random().toString(36).substr(2, 6).toUpperCase(), deviceName: name, branchCode: branch, ipAddress: '127.0.0.1' })
+                body: JSON.stringify({
+                    deviceKey: 'WIN-' + Math.random().toString(36).substr(2, 6).toUpperCase(),
+                    deviceName: name,
+                    branchCode: branch,
+                    location: loc,
+                    ipAddress: '127.0.0.1'
+                })
             });
             const result = await res.json();
             if (result.success) {
-                config.serverIp = ip; config.deviceName = name; config.branchCode = branch; config.deviceId = result.data.deviceId;
+                config.serverIp = ip; config.deviceName = name; config.branchCode = branch; config.location = loc; config.deviceId = result.data.deviceId;
                 await ipcRenderer.invoke('save-config', config);
                 setupScreen.classList.add('hidden');
                 updateCursorVisibility();
@@ -618,6 +642,7 @@ document.getElementById('update-settings').onclick = async () => {
     const newId = document.getElementById('dash-device-id-input').value;
     const newName = document.getElementById('dash-device-name').value;
     const newBranch = document.getElementById('dash-branch-code').value;
+    const newLocation = document.getElementById('dash-location').value;
 
     if (!newIp || !newId || !newName) return alert('Settings cannot be empty.');
 
@@ -641,6 +666,7 @@ document.getElementById('update-settings').onclick = async () => {
                 deviceKey: newId,
                 deviceName: newName,
                 branchCode: newBranch,
+                location: newLocation,
                 ipAddress: '127.0.0.1', // Server should detect real IP. We send placeholder.
                 appVersion: appVer
             })
@@ -656,6 +682,7 @@ document.getElementById('update-settings').onclick = async () => {
             config.deviceId = newId;
             config.deviceName = newName;
             config.branchCode = newBranch;
+            config.location = newLocation;
 
             await ipcRenderer.invoke('save-config', config);
             showHUD('UPDATED. RESTARTING...');
@@ -675,6 +702,7 @@ document.getElementById('show-config').onclick = () => {
     document.getElementById('dash-server-ip').value = config.serverIp || '';
     document.getElementById('dash-device-name').value = config.deviceName || '';
     document.getElementById('dash-branch-code').value = config.branchCode || '';
+    document.getElementById('dash-location').value = config.location || '';
     updateCursorVisibility();
 };
 

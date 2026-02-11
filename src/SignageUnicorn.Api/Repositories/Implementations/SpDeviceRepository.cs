@@ -40,6 +40,7 @@ namespace SignageUnicorn.Api.Repositories.Implementations
                 p.Add("@p_device_name", request.DeviceName);
                 p.Add("@p_branch_code", request.BranchCode);
                 p.Add("@p_ip_address", request.IpAddress);
+                p.Add("@p_location", request.Location);
 
                 // 1. Status (ALWAYS First)
                 using var multi = await connection.QueryMultipleAsync("sp_device_std", p, commandType: CommandType.StoredProcedure);
@@ -110,6 +111,13 @@ namespace SignageUnicorn.Api.Repositories.Implementations
                 p.Add("@p_position_sec", request.CurrentPositionSec);
                 p.Add("@p_cache_progress", request.CacheProgress);
                 p.Add("@p_status", request.Status);
+
+                // Boot Report fields (sent once on startup, NULL on regular heartbeats)
+                p.Add("@p_app_version", request.AppVersion);
+                p.Add("@p_ip_address", request.IpAddress);
+                p.Add("@p_location", request.Location);
+                p.Add("@p_ratio", request.Ratio);
+                p.Add("@p_mac_address", request.MacAddress);
 
                 await connection.ExecuteAsync("sp_device_std", p, commandType: CommandType.StoredProcedure);
 

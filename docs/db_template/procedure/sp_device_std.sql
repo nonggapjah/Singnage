@@ -83,7 +83,8 @@ BEGIN
                 ip_address = ISNULL(@p_ip_address, ip_address),
                 app_version = ISNULL(@p_app_version, app_version),
                 device_name = ISNULL(@p_device_name, device_name), -- Allow rename on login too
-                branch_code = ISNULL(@p_branch_code, branch_code)
+                branch_code = ISNULL(@p_branch_code, branch_code),
+                location = ISNULL(@p_location, location)
             WHERE device_uuid = @p_device_uuid;
 
             SET @msg = N'Device logged in.';
@@ -97,9 +98,9 @@ BEGIN
             IF @p_device_uuid IS NULL SET @p_device_uuid = NEWID();
 
             INSERT INTO sn_devices
-            (device_uuid, device_name, status, branch_code, created_at, is_deleted, app_version, ip_address)
+            (device_uuid, device_name, status, branch_code, created_at, is_deleted, app_version, ip_address, location, ratio)
             VALUES
-            (@p_device_uuid, ISNULL(@p_device_name,'Unnamed Device'), 'online', ISNULL(@p_branch_code,'1000'), SYSUTCDATETIME(), 0, @p_app_version, @p_ip_address);
+            (@p_device_uuid, ISNULL(@p_device_name,'Unnamed Device'), 'online', ISNULL(@p_branch_code,'1000'), SYSUTCDATETIME(), 0, @p_app_version, @p_ip_address, @p_location, @p_ratio);
 
             SET @msg = N'Device registered.';
         END
@@ -141,6 +142,8 @@ BEGIN
             status = ISNULL(@p_status, 'online'),
             device_name = ISNULL(@p_device_name, device_name),
             branch_code = ISNULL(@p_branch_code, branch_code),
+            location = ISNULL(@p_location, location),
+            ratio = ISNULL(@p_ratio, ratio),
             ip_address = ISNULL(@p_ip_address, ip_address),
             mac_address = ISNULL(@p_mac_address, mac_address),
             app_version = ISNULL(@p_app_version, app_version),

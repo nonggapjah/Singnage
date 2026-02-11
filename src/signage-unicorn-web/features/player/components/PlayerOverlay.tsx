@@ -12,7 +12,10 @@ interface PlayerOverlayProps {
     deviceId: string | null;
     deviceName: string;
     branchCode?: string;
+    location?: string;
     ipAddress?: string;
+    lastHeartbeat?: Date | null;
+    onUpdateConfig: (data: { deviceName: string, branchCode: string, location: string }) => void;
     currentPlaylistId: string | null;
     currentPlaylistName?: string;
     currentMediaName?: string;
@@ -37,7 +40,9 @@ interface PlayerOverlayProps {
 }
 
 export const PlayerOverlay: React.FC<PlayerOverlayProps> = ({
-    isOpen, onClose, isOnline = true, deviceId, deviceName, branchCode = 'N/A', ipAddress = '127.0.0.1',
+    isOpen, onClose, isOnline = true, deviceId, deviceName, branchCode = 'N/A', location = '', ipAddress = '127.0.0.1',
+    lastHeartbeat,
+    onUpdateConfig,
     currentPlaylistId, currentPlaylistName, currentMediaName,
     currentPositionSec = 0, currentDurationSec = 0,
     playlistTotalDurationSec = 0, currentItemIndex = 0, totalItems = 0,
@@ -47,12 +52,14 @@ export const PlayerOverlay: React.FC<PlayerOverlayProps> = ({
     onVolumeDown, onVolumeUp, onRefresh, onReset, onHelp, onScreenTest
 }) => {
     const router = useRouter();
-    const [view, setView] = useState<'DASHBOARD' | 'PLAYLIST_SELECT'>('DASHBOARD');
+    const [view, setView] = useState<'DASHBOARD' | 'PLAYLIST_SELECT' | 'SETTINGS'>('DASHBOARD');
     const [playlists, setPlaylists] = useState<Playlist[]>([]);
     const [loading, setLoading] = useState(false);
 
     // Settings State
-    const [localJingleId, setLocalJingleId] = useState('');
+    const [editName, setEditName] = useState('');
+    const [editBranch, setEditBranch] = useState('');
+    const [editLocation, setEditLocation] = useState('');
 
     // Initial Focus
     const focusRef = useRef<HTMLButtonElement>(null);
@@ -60,12 +67,12 @@ export const PlayerOverlay: React.FC<PlayerOverlayProps> = ({
     useEffect(() => {
         if (isOpen) {
             setView('DASHBOARD');
-            // Load current settings
-            const savedJingle = localStorage.getItem('signage_safety_jingle_id') || '';
-            setLocalJingleId(savedJingle);
+            setEditName(deviceName);
+            setEditBranch(branchCode);
+            setEditLocation(location);
             setTimeout(() => focusRef.current?.focus(), 50);
         }
-    }, [isOpen]);
+    }, [isOpen, deviceName, branchCode, location]);
 
     // Handle body scroll lock
     useEffect(() => {
@@ -105,9 +112,9 @@ export const PlayerOverlay: React.FC<PlayerOverlayProps> = ({
         }
     };
 
-    const handleSwitchView = (v: 'PLAYLIST_SELECT') => {
+    const handleSwitchView = (v: 'PLAYLIST_SELECT' | 'SETTINGS') => {
         setView(v);
-        loadPlaylists();
+        if (v === 'PLAYLIST_SELECT') loadPlaylists();
     };
 
     const handleSelectPlaylist = (pId: string) => {
@@ -117,10 +124,20 @@ export const PlayerOverlay: React.FC<PlayerOverlayProps> = ({
         }
     };
 
+    const handleSaveSettings = (e: React.FormEvent) => {
+        e.preventDefault();
+        onUpdateConfig({
+            deviceName: editName,
+            branchCode: editBranch,
+            location: editLocation
+        });
+        setView('DASHBOARD');
+    };
+
 
     const formatTime = (sec: number) => {
         const m = Math.floor(sec / 60);
-        const s = sec % 60;
+        const s = Math.floor(sec % 60);
         return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
     };
 
@@ -133,19 +150,33 @@ export const PlayerOverlay: React.FC<PlayerOverlayProps> = ({
 
                     {/* Header */}
                     <div className="p-8 border-b border-white/10 flex justify-between items-center bg-white/5">
-                        <div>
+                        <div className="flex-1">
                             <h2 className="text-3xl font-black text-white uppercase tracking-widest flex items-center gap-4">
-                                <span className={`w-4 h-4 rounded-full ${view === 'DASHBOARD' ? 'bg-accent-cyan animate-pulse' : 'bg-purple-500'}`}></span>
-                                {view === 'DASHBOARD' ? 'Device Dashboard' : 'Select Playlist'}
+                                <span className={`w-4 h-4 rounded-full ${view === 'DASHBOARD' ? 'bg-accent-cyan animate-pulse' : view === 'SETTINGS' ? 'bg-accent-pink' : 'bg-purple-500'}`}></span>
+                                {view === 'DASHBOARD' ? 'Device Dashboard' : view === 'SETTINGS' ? 'Device Settings' : 'Select Playlist'}
                             </h2>
                             <p className="text-xs text-accent-cyan/60 font-mono mt-2 tracking-wider">
-                                {view === 'DASHBOARD' ? 'LOCAL DIAGNOSTICS & CONTROL' : 'MANUAL OVERRIDE MODE'}
+                                {view === 'DASHBOARD' ? 'LOCAL DIAGNOSTICS & CONTROL' : view === 'SETTINGS' ? 'UPDATE DEVICE CONFIGURATION' : 'MANUAL OVERRIDE MODE'}
                             </p>
                         </div>
-                        <div className="text-right font-mono text-gray-500 text-xs">
-                            <div className="mb-1 text-white text-sm font-bold uppercase">{deviceName || 'UNNAMED DEVICE'}</div>
-                            <div className="mb-1">ID: <span className="text-gray-400">{deviceId || 'UNKNOWN'}</span></div>
-                            <div>BRANCH: <span className="text-accent-pink">{branchCode}</span></div>
+                        <div className="text-right font-mono text-gray-500 text-xs flex items-center gap-6">
+                            <div className="text-right">
+                                <div className="mb-1 text-white text-sm font-bold uppercase">{deviceName || 'UNNAMED DEVICE'}</div>
+                                <div className="mb-1">ID: <span className="text-gray-400">{deviceId || 'UNKNOWN'}</span></div>
+                                <div className="flex gap-3 justify-end">
+                                    <span>BRANCH: <span className="text-accent-pink">{branchCode}</span></span>
+                                    {location && <span>LOC: <span className="text-accent-cyan">{location}</span></span>}
+                                </div>
+                            </div>
+                            {view === 'DASHBOARD' && (
+                                <button
+                                    onClick={() => setView('SETTINGS')}
+                                    className="p-3 bg-white/5 hover:bg-white/10 rounded-xl border border-white/10 text-xl transition-all"
+                                    title="Edit Device Settings"
+                                >
+                                    ⚙️
+                                </button>
+                            )}
                         </div>
                     </div>
 
@@ -163,6 +194,11 @@ export const PlayerOverlay: React.FC<PlayerOverlayProps> = ({
                                             ● {isOnline ? 'ONLINE' : 'OFFLINE'}
                                         </div>
                                         <div className="text-xs text-gray-600 font-mono mt-1">{ipAddress}</div>
+                                        {lastHeartbeat && (
+                                            <div className="text-[9px] text-gray-700 font-mono mt-1 border-t border-white/5 pt-1 uppercase">
+                                                Last Sync: {lastHeartbeat.toLocaleTimeString()}
+                                            </div>
+                                        )}
                                     </div>
 
                                     <div className="bg-white/5 rounded-xl p-4 border border-white/10">
@@ -251,7 +287,7 @@ export const PlayerOverlay: React.FC<PlayerOverlayProps> = ({
                                             onClick={() => handleSwitchView('PLAYLIST_SELECT')}
                                             className="w-full h-16 bg-gradient-to-r from-accent-cyan/20 to-transparent hover:from-accent-cyan/30 border border-accent-cyan/30 text-white font-bold uppercase tracking-widest text-sm rounded-xl flex items-center px-6 transition-all group focus:ring-2 focus:ring-accent-cyan outline-none"
                                         >
-                                            <span className="text-2xl mr-4">📂</span>
+                                            <span className="text-2xl mr-4">🎬</span>
                                             <div className="text-left">
                                                 <div>Manual Playlist Select</div>
                                                 <div className="text-[10px] text-cyan-300/60 font-mono font-normal">Browse & Force Play</div>
@@ -378,7 +414,7 @@ export const PlayerOverlay: React.FC<PlayerOverlayProps> = ({
                                                 </div>
                                             </button>
                                         ))}
-                                        {playlists.length === 0 && <div className="text-center text-gray-500 py-10">No checklists found</div>}
+                                        {playlists.length === 0 && <div className="text-center text-gray-500 py-10">No playlists found</div>}
                                     </div>
                                 )}
 
@@ -388,6 +424,62 @@ export const PlayerOverlay: React.FC<PlayerOverlayProps> = ({
                                 >
                                     Back to Dashboard
                                 </button>
+                            </div>
+                        )}
+
+                        {/* VIEW: SETTINGS (Edit Mode) */}
+                        {view === 'SETTINGS' && (
+                            <div className="animate-in slide-in-from-bottom duration-300 h-full">
+                                <form onSubmit={handleSaveSettings} className="max-w-md mx-auto space-y-6">
+                                    <div className="space-y-4">
+                                        <div className="space-y-1">
+                                            <label className="text-[10px] text-gray-500 font-black uppercase tracking-widest ml-1">Device Name</label>
+                                            <input
+                                                type="text"
+                                                value={editName}
+                                                onChange={e => setEditName(e.target.value)}
+                                                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:border-accent-pink focus:ring-1 focus:ring-accent-pink/20 transition-all"
+                                                required
+                                            />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="text-[10px] text-gray-500 font-black uppercase tracking-widest ml-1">Branch Code</label>
+                                            <input
+                                                type="text"
+                                                value={editBranch}
+                                                onChange={e => setEditBranch(e.target.value)}
+                                                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:border-accent-pink focus:ring-1 focus:ring-accent-pink/20 transition-all"
+                                                required
+                                            />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="text-[10px] text-gray-500 font-black uppercase tracking-widest ml-1">Location (Optional)</label>
+                                            <input
+                                                type="text"
+                                                value={editLocation}
+                                                onChange={e => setEditLocation(e.target.value)}
+                                                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:border-accent-pink focus:ring-1 focus:ring-accent-pink/20 transition-all"
+                                                placeholder="e.g. 1st Floor Lobby"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="flex gap-4 pt-4">
+                                        <button
+                                            type="submit"
+                                            className="flex-1 py-4 bg-accent-pink hover:bg-rose-400 text-black font-black uppercase tracking-[0.2em] rounded-xl transition-all shadow-lg hover:shadow-accent-pink/20"
+                                        >
+                                            Save Settings
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setView('DASHBOARD')}
+                                            className="px-8 bg-white/5 hover:bg-white/10 text-white font-bold uppercase tracking-widest text-xs rounded-xl border border-white/10 transition-all"
+                                        >
+                                            Cancel
+                                        </button>
+                                    </div>
+                                </form>
                             </div>
                         )}
                     </div>

@@ -6,12 +6,13 @@ import { generateId } from '@/lib/utils';
 // import { useUI } from '@/features/ui/context/UIContext'; // Removed unused import
 
 interface DeviceRegistrationProps {
-    onRegisterSuccess: (deviceId: string) => void;
+    onRegisterSuccess: (data: { deviceId: string, deviceName: string, branchCode: string, location?: string }) => void;
 }
 
 export const DeviceRegistration: React.FC<DeviceRegistrationProps> = ({ onRegisterSuccess }) => {
     const [name, setName] = useState('');
     const [branch, setBranch] = useState('');
+    const [location, setLocation] = useState('');
     const [uuid, setUuid] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
@@ -38,6 +39,7 @@ export const DeviceRegistration: React.FC<DeviceRegistrationProps> = ({ onRegist
                 deviceKey: uuid,
                 deviceName: name,
                 branchCode: branch,
+                location: location || undefined,
                 ipAddress: '127.0.0.1' // Frontend placeholder, backend should resolve real IP if needed
             });
 
@@ -50,8 +52,14 @@ export const DeviceRegistration: React.FC<DeviceRegistrationProps> = ({ onRegist
                 localStorage.setItem('signage_device_id', persistentId);
                 localStorage.setItem('signage_device_name', name);
                 localStorage.setItem('signage_device_branch', branch);
+                localStorage.setItem('signage_device_location', location);
 
-                onRegisterSuccess(persistentId);
+                onRegisterSuccess({
+                    deviceId: persistentId,
+                    deviceName: name,
+                    branchCode: branch,
+                    location: location || undefined
+                });
             } else {
                 const debugInfo = JSON.stringify(response);
                 throw new Error((response?.message || 'Invalid response: ') + debugInfo);
@@ -126,6 +134,22 @@ export const DeviceRegistration: React.FC<DeviceRegistrationProps> = ({ onRegist
                             </div>
                         </div>
 
+                        <div className="space-y-1">
+                            <label className="text-xs font-black text-gray-500 uppercase tracking-widest ml-1">Location (Optional)</label>
+                            <div className="relative group/input">
+                                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-gray-500 transition-colors">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+                                </div>
+                                <input
+                                    type="text"
+                                    value={location}
+                                    onChange={e => setLocation(e.target.value)}
+                                    className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-4 py-3 text-white outline-none focus:border-[#00f2ff] focus:ring-1 focus:ring-[#00f2ff]/20 focus:bg-white/10 transition-all placeholder:text-gray-600 font-medium"
+                                    placeholder="e.g. 1st Floor Lobby"
+                                />
+                            </div>
+                        </div>
+
                         {error && (
                             <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-xs py-3 px-4 rounded-xl text-center font-bold animate-pulse">
                                 ⚠ {error}
@@ -150,8 +174,8 @@ export const DeviceRegistration: React.FC<DeviceRegistrationProps> = ({ onRegist
                             Secure Connection Ready
                         </p>
                     </div>
-                </div>
-            </div>
-        </div>
+                </div >
+            </div >
+        </div >
     );
 };

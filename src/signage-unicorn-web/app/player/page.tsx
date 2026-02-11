@@ -16,6 +16,9 @@ export default function PlayerPage() {
     const [deviceId, setDeviceId] = useState<string | null>(null);
     const [deviceName, setDeviceName] = useState<string>('');
     const [branchCode, setBranchCode] = useState<string>('');
+    const [location, setLocation] = useState<string>('');
+    const [cacheProgress, setCacheProgress] = useState(0);
+    const [cachedCount, setCachedCount] = useState(0);
 
     // Player State
     const [status, setStatus] = useState('Checking Registration...');
@@ -26,6 +29,19 @@ export default function PlayerPage() {
     const [currentItem, setCurrentItem] = useState<PlaylistItem | null>(null);
     const [logs, setLogs] = useState<string[]>([]);
     const [itemStartedAt, setItemStartedAt] = useState<number>(Date.now());
+    const [loopTick, setLoopTick] = useState(0);
+
+    // Heartbeat Sync Ref
+    const heartbeatRef = useRef({
+        isRegistered, deviceId, deviceName, branchCode, location, status, playlistId, currentItem, cacheProgress, itemStartedAt
+    });
+
+    useEffect(() => {
+        heartbeatRef.current = {
+            isRegistered, deviceId, deviceName, branchCode, location, status: (status === 'PLAYING_LOCAL' || status === 'PLAYING_NEW') ? 'PLAYING' : status,
+            playlistId, currentItem, cacheProgress, itemStartedAt
+        };
+    }, [isRegistered, deviceId, deviceName, branchCode, location, status, playlistId, currentItem, cacheProgress, itemStartedAt]);
 
     // Smooth Update State
     const [pendingPlaylist, setPendingPlaylist] = useState<{ id: string, name: string, items: PlaylistItem[] } | null>(null);
@@ -43,11 +59,26 @@ export default function PlayerPage() {
     const [showVolumeOSD, setShowVolumeOSD] = useState(false);
     const [screenTestColor, setScreenTestColor] = useState<string | null>(null);
     const videoRef = useRef<HTMLVideoElement>(null);
+
+    // Explicit Play Trigger for Video
+    useEffect(() => {
+        if (videoRef.current && currentItem && isVideo(currentItem.media?.fileName)) {
+            // Reset to beginning just in case
+            videoRef.current.currentTime = 0;
+            videoRef.current.play().catch(e => {
+                console.warn("Video play() failed (often due to autoplay policy):", e);
+            });
+        }
+    }, [currentItem, loopTick]);
+
     const osdTimerRef = useRef<NodeJS.Timeout | null>(null);
     const [dashboardTick, setDashboardTick] = useState(0);
     const [cachedMediaUrls, setCachedMediaUrls] = useState<Record<string, string>>({});
-    const [cacheProgress, setCacheProgress] = useState(0);
-    const [cachedCount, setCachedCount] = useState(0);
+
+
+    // Boot Report: send full device info on first heartbeat only
+    const isBootReportSent = useRef(false);
+    const APP_VERSION = '2.2.1'; // Sync with package.json version
 
     const MEDIA_CACHE_NAME = 'signage-media-v1';
 
@@ -85,6 +116,7 @@ export default function PlayerPage() {
             const savedId = localStorage.getItem('signage_device_id');
             const savedName = localStorage.getItem('signage_device_name');
             const savedBranch = localStorage.getItem('signage_device_branch');
+            const savedLocation = localStorage.getItem('signage_device_location');
             const savedPlaylistId = localStorage.getItem('signage_playlist_id');
             const savedPlaylistName = localStorage.getItem('signage_playlist_name');
             const savedPlaylistItems = localStorage.getItem('signage_playlist_items');
@@ -155,6 +187,7 @@ export default function PlayerPage() {
                 setDeviceId(savedId);
                 setDeviceName(savedName || 'Unknown Device');
                 setBranchCode(savedBranch || 'N/A');
+                setLocation(savedLocation || '');
                 setIsRegistered(true);
                 setStatus('IDLE');
 
@@ -278,32 +311,51 @@ export default function PlayerPage() {
     useEffect(() => {
         if (!isRegistered || !deviceId) return;
 
-        const sendHeartbeat = async () => {
+        const sendHeartbeat = async (isManual = false) => {
+            const { deviceId, deviceName, branchCode, location, status, playlistId, currentItem, cacheProgress, itemStartedAt } = heartbeatRef.current;
+            if (!deviceId) return;
+
             // Sync all logs during heartbeat
             syncPlaybackLogs();
             syncSystemLogs();
 
             try {
-                // Determine Status
-                let currentStatus = status;
-                if (status === 'PLAYING_LOCAL' || status === 'PLAYING_NEW') {
-                    currentStatus = 'PLAYING';
-                }
-
                 const elapsed = Math.round((Date.now() - itemStartedAt) / 1000);
 
-                const res = await deviceApi.heartbeat({
+                // Build heartbeat payload
+                const heartbeatData: Parameters<typeof deviceApi.heartbeat>[0] = {
                     deviceId,
-                    status: currentStatus,
+                    deviceName: deviceName || undefined,
+                    branchCode: branchCode || undefined,
+                    location: location || undefined,
+                    status: status,
                     currentPlaylistId: playlistId || undefined,
                     currentMediaId: currentItem ? currentItem.mediaId : undefined,
                     currentPlaylistItemId: currentItem ? currentItem.playlistItemId : undefined,
-                    currentPositionSec: elapsed
-                });
+                    currentPositionSec: elapsed,
+                    cacheProgress: cacheProgress,
+                };
+
+                // Boot Report: enrich first heartbeat with device metadata
+                if (!isBootReportSent.current) {
+                    const screenRatio = `${window.screen.width}x${window.screen.height}`;
+                    heartbeatData.appVersion = `Web ${APP_VERSION}`;
+                    heartbeatData.ratio = screenRatio;
+                    console.log(`[Boot Report] Sending device metadata: v${APP_VERSION}, ${screenRatio}`);
+                }
+
+                const res = await deviceApi.heartbeat(heartbeatData);
 
                 if (res.success && res.data) {
                     setIsOnline(true);
                     setLastHeartbeat(new Date());
+                    if (!isBootReportSent.current) {
+                        isBootReportSent.current = true;
+                        console.log('[Boot Report] Device metadata sent successfully.');
+                        addLog('SYS: Registered with server');
+                    }
+                    if (isManual) addLog('SYS: Heartbeat sent (Sync OK)');
+
                     const commands = res.data;
                     commands.forEach(cmd => {
                         console.log("RECEIVED COMMAND:", cmd);
@@ -321,20 +373,32 @@ export default function PlayerPage() {
                     });
                 } else {
                     setIsOnline(false);
+                    if (isManual) addLog('WARN: Heartbeat failed (Server Reject)', 'WARN');
                 }
             } catch (e) {
                 console.error("Heartbeat failed", e);
                 setIsOnline(false);
+                if (isManual) addLog('ERR: Heartbeat failed (Network Error)', 'ERROR');
             }
         };
 
         // Initial call
         sendHeartbeat();
 
-        // Interval (15 seconds to be safe within 60s timeout)
-        const interval = setInterval(sendHeartbeat, 15000);
-        return () => clearInterval(interval);
-    }, [isRegistered, deviceId, status, playlistId, currentItem]); // Re-establish on state change to send instantaneous updates
+        // Stable Interval
+        const intId = setInterval(() => sendHeartbeat(false), 20000); // 20s stable interval
+
+        // Manual instantaneous update trigger on major state changes
+        const eventTrigger = () => {
+            // We don't want to spam, but major changes should be sent
+            sendHeartbeat(false);
+        };
+        // Note: we could listen to status/currentItem changes here, but the interval is safe.
+        // Let's add an immediate one for registration
+        if (isRegistered) sendHeartbeat(true);
+
+        return () => clearInterval(intId);
+    }, [isRegistered, deviceId]); // Only depends on identification. Logic uses Ref.
 
     // --- Playlist Loader ---
     const loadPlaylist = async (pId: string) => {
@@ -480,6 +544,8 @@ export default function PlayerPage() {
             addLog(`ERR: ${errorMsg}`);
             setCacheProgress(0);
             setCachedCount(0);
+        } finally {
+            setIsLoadingContent(false);
         }
     };
 
@@ -615,12 +681,17 @@ export default function PlayerPage() {
             }
 
             const nextIndex = (currentIndex + 1) % items.length;
-            setCurrentIndex(nextIndex);
+            if (nextIndex === currentIndex) {
+                // Same index (1-item playlist), just tick to restart effect
+                setLoopTick(t => t + 1);
+            } else {
+                setCurrentIndex(nextIndex);
+            }
             localStorage.setItem('signage_playlist_index', nextIndex.toString());
         }, safeDuration);
 
         return () => clearTimeout(timer);
-    }, [currentIndex, items]);
+    }, [currentIndex, items, loopTick]);
 
     // --- Dashboard Ticker (Ensures timer counts up while open) ---
     useEffect(() => {
@@ -637,17 +708,35 @@ export default function PlayerPage() {
         return filename.toLowerCase().match(/\.(mp4|webm|ogg|mov)$/);
     };
 
-    const handleRegistrationSuccess = (id: string) => {
-        setDeviceId(id);
-        // Refresh State from Storage immediately
-        const savedName = localStorage.getItem('signage_device_name');
-        const savedBranch = localStorage.getItem('signage_device_branch');
-        if (savedName) setDeviceName(savedName);
-        if (savedBranch) setBranchCode(savedBranch);
+    const handleRegistrationSuccess = (data: { deviceId: string, deviceName: string, branchCode: string, location?: string }) => {
+        localStorage.setItem('signage_device_id', data.deviceId);
+        localStorage.setItem('signage_device_name', data.deviceName);
+        localStorage.setItem('signage_device_branch', data.branchCode);
+        if (data.location) localStorage.setItem('signage_device_location', data.location);
 
+        setDeviceId(data.deviceId);
+        setDeviceName(data.deviceName);
+        setBranchCode(data.branchCode);
+        setLocation(data.location || '');
         setIsRegistered(true);
         setStatus('IDLE');
-        showToast(`DEVICE REGISTERED: ${id}`);
+        showToast(`DEVICE REGISTERED: ${data.deviceId}`);
+    };
+
+    const handleUpdateConfig = (data: { deviceName: string, branchCode: string, location: string }) => {
+        localStorage.setItem('signage_device_name', data.deviceName);
+        localStorage.setItem('signage_device_branch', data.branchCode);
+        localStorage.setItem('signage_device_location', data.location);
+
+        setDeviceName(data.deviceName);
+        setBranchCode(data.branchCode);
+        setLocation(data.location);
+
+        addLog('SYS: Configuration Updated locally');
+        showToast('SETTINGS UPDATED');
+
+        // Reset boot report flag so it sends updated info next heartbeat
+        isBootReportSent.current = false;
     };
 
     const showToast = (msg: string) => {
@@ -699,19 +788,22 @@ export default function PlayerPage() {
                 {currentItem && currentItem.media && !isLoadingContent ? (
                     (() => {
                         const mediaUrl = cachedMediaUrls[currentItem.mediaId] || currentItem.media.blobUrl;
+                        const itemKey = `${currentItem.playlistItemId}-${loopTick}`;
+
                         return isVideo(currentItem.media.fileName) ? (
                             <video
-                                key={currentItem.playlistItemId} // Force remount on item change
+                                key={itemKey} // Force remount on item change or loop tick
                                 ref={videoRef}
                                 src={mediaUrl}
                                 autoPlay
                                 muted={volume === 0}
                                 loop={false}
+                                playsInline
                                 className="w-full h-full object-contain relative z-30"
                             />
                         ) : (
                             <img
-                                key={currentItem.playlistItemId}
+                                key={itemKey}
                                 src={mediaUrl}
                                 alt={currentItem.media.displayName}
                                 className="w-full h-full object-contain animate-in fade-in duration-500 relative z-30"
@@ -793,7 +885,10 @@ export default function PlayerPage() {
                 deviceId={deviceId}
                 deviceName={deviceName}
                 branchCode={branchCode}
-                ipAddress="192.168.1.105" // Placeholder until we have backend push
+                location={location}
+                ipAddress="CONNECTED"
+                lastHeartbeat={lastHeartbeat}
+                onUpdateConfig={handleUpdateConfig}
                 currentPlaylistId={playlistId}
                 currentPlaylistName={playlistName}
                 limitLogs={logs}

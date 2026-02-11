@@ -39,6 +39,13 @@ namespace SignageUnicorn.Api.Controllers
         [AllowAnonymous]
         public async Task<IActionResult> Heartbeat([FromBody] HeartbeatRequest request)
         {
+            // Auto-detect IP from request (same as Register)
+            var remoteIp = HttpContext.Connection.RemoteIpAddress?.ToString();
+            if (!string.IsNullOrEmpty(remoteIp) && remoteIp != "::1")
+            {
+                request.IpAddress = remoteIp;
+            }
+
             var commands = await _deviceService.ProcessHeartbeatAsync(request);
             return Ok(ApiResponse<IEnumerable<DeviceCommandDto>>.SuccessResponse(commands));
         }

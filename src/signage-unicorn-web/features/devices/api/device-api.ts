@@ -6,7 +6,7 @@ export const deviceApi = {
         return await apiFetch<Device[]>('/devices');
     },
 
-    register: async (data: { deviceKey: string; deviceName: string; branchCode: string; ipAddress?: string }) => {
+    register: async (data: { deviceKey: string; deviceName: string; branchCode: string; location?: string; ipAddress?: string }) => {
         return await apiFetch<Device>('/devices/register', {
             method: 'POST',
             body: JSON.stringify(data),
@@ -41,11 +41,18 @@ export const deviceApi = {
 
     heartbeat: async (data: {
         deviceId: string;
+        deviceName?: string;
+        branchCode?: string;
+        location?: string;
         status: string;
         currentPlaylistId?: string;
         currentPlaylistItemId?: string;
         currentMediaId?: string;
         currentPositionSec?: number;
+        cacheProgress?: number;
+        // Boot Report fields (sent once on startup)
+        appVersion?: string;
+        ratio?: string;
     }) => {
         return await apiFetch<DeviceCommand[]>('/devices/heartbeat', {
             method: 'POST',

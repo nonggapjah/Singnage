@@ -44,6 +44,9 @@ namespace SignageUnicorn.Api.Models
         
         [JsonPropertyName("appVersion")]
         public string? AppVersion { get; set; }
+
+        [JsonPropertyName("location")]
+        public string? Location { get; set; }
     }
 
     public class HeartbeatRequest
@@ -77,6 +80,22 @@ namespace SignageUnicorn.Api.Models
 
         [JsonPropertyName("errorMessage")]
         public string? ErrorMessage { get; set; }
+
+        // --- Boot Report Fields (sent once on startup) ---
+        [JsonPropertyName("appVersion")]
+        public string? AppVersion { get; set; }
+
+        [JsonPropertyName("ipAddress")]
+        public string? IpAddress { get; set; }
+
+        [JsonPropertyName("location")]
+        public string? Location { get; set; }
+
+        [JsonPropertyName("ratio")]
+        public string? Ratio { get; set; }
+
+        [JsonPropertyName("macAddress")]
+        public string? MacAddress { get; set; }
     }
 
     public class BatchCommandRequest
