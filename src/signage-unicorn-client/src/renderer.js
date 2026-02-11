@@ -60,6 +60,10 @@ async function init() {
     isMuted = config.isMuted ?? false;
     videoEl.volume = isMuted ? 0 : volume / 100;
 
+    // Inject app version from package.json into all .app-version elements
+    const appVersion = await ipcRenderer.invoke('get-app-version');
+    document.querySelectorAll('.app-version').forEach(el => el.textContent = `v${appVersion}`);
+
     // Load Cached Jingle
     const cachedJingle = localStorage.getItem('safety_jingle_data');
     if (cachedJingle) jingleEl.src = cachedJingle;

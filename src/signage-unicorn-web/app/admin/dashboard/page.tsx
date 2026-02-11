@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { dashboardApi, DashboardStats } from '@/features/dashboard/api/dashboard-api';
 import { SystemConfigModal } from '@/features/system/components/SystemConfigModal';
+import { SYSTEM_VERSION } from '@/lib/constants';
 
 export default function DashboardPage() {
     const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -193,7 +194,7 @@ export default function DashboardPage() {
             {/* Footer Info */}
             <div className="pt-10 flex justify-between items-center opacity-30 animate-in stagger-5">
                 <div className="text-[10px] font-mono tracking-widest uppercase">
-                    System Protocol v{stats?.systemVersion || '2.2.0'} // Auth verified // Node Cluster Active
+                    System Protocol v{stats?.systemVersion || SYSTEM_VERSION} // Auth verified // Node Cluster Active
                 </div>
                 <div className="text-[10px] font-mono tracking-widest uppercase">
                     Unicorn Tech Integration Co.,Ltd.

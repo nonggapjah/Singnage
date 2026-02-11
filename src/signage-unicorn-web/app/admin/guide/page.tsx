@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
+import { SYSTEM_VERSION } from '@/lib/constants';
 
 export default function UserGuidePage() {
     const [activeSection, setActiveSection] = useState('overview');
@@ -28,7 +29,7 @@ export default function UserGuidePage() {
                 <aside className="lg:w-80 flex-shrink-0 space-y-8">
                     <div className="space-y-4">
                         <div className="inline-block px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-bold tracking-widest uppercase mb-2">
-                            System v2.2.0
+                            System v{SYSTEM_VERSION}
                         </div>
                         <h1 className="text-4xl font-black tracking-tighter uppercase leading-none italic">
                             Unicorn <br />

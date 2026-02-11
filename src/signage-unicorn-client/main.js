@@ -94,6 +94,10 @@ ipcMain.handle('get-config', async () => {
     return { serverIp: 'https://signage.aith123.com', deviceId: null, deviceName: null, branchCode: '1000' };
 });
 
+ipcMain.handle('get-app-version', () => {
+    return app.getVersion(); // Reads from package.json "version"
+});
+
 ipcMain.handle('save-config', async (event, config) => {
     await fs.writeJson(CONFIG_PATH, config);
     return { success: true };

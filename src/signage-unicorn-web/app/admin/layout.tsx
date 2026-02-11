@@ -3,6 +3,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { SYSTEM_VERSION } from '@/lib/constants';
 
 import { useUI } from '@/features/ui/context/UIContext';
 import { dashboardApi, DashboardStats } from '@/features/dashboard/api/dashboard-api';
@@ -157,7 +158,7 @@ export default function AdminLayout({
                         {!sidebarCollapsed && (
                             <div className="flex flex-col animate-in fade-in slide-in-from-left-2 duration-500">
                                 <span className="font-black text-xl tracking-tighter neon-text uppercase">UNICORN</span>
-                                <span className="text-xs text-muted-foreground font-bold uppercase tracking-[0.3em] -mt-1">OS v{stats?.systemVersion || '2.2.0'}</span>
+                                <span className="text-xs text-muted-foreground font-bold uppercase tracking-[0.3em] -mt-1">OS v{stats?.systemVersion || SYSTEM_VERSION}</span>
                             </div>
                         )}
                     </Link>

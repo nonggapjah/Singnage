@@ -5,6 +5,7 @@ import { useAuth } from "@/features/auth/context/AuthContext";
 import { authApi } from "@/features/auth/api/auth-api";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { SYSTEM_VERSION } from "@/lib/constants";
 
 export default function Home() {
   const { user, isAuthenticated, login, logout } = useAuth();
@@ -117,12 +118,12 @@ export default function Home() {
               href="/setup/SignageUnicornSetup.exe"
               className="px-4 py-2 rounded-full bg-white/5 border border-white/10 text-[10px] font-black uppercase tracking-widest text-gray-400 hover:text-accent-cyan hover:border-accent-cyan/50 transition-all"
             >
-              📥 Download Native Player (v2.2.0)
+              📥 Download Native Player (v{SYSTEM_VERSION})
             </a>
           </div>
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 border border-white/10 text-xs font-mono text-gray-500">
             <span className="w-2 h-2 rounded-full bg-accent-cyan animate-pulse" />
-            CORE v{process.env.NEXT_PUBLIC_SYSTEM_VERSION || '2.2.0'}
+            CORE v{SYSTEM_VERSION}
           </div>
         </footer>
       </div>
