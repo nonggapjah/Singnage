@@ -9,7 +9,7 @@ const nextConfig: NextConfig = {
     proxyClientMaxBodySize: '2gb',
   },
   env: {
-    NEXT_PUBLIC_DEBUG: '1', // Set to '0' for Production
+    NEXT_PUBLIC_DEBUG: '0', // Set to '1' for Development
   },
   async rewrites() {
     return [

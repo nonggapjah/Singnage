@@ -126,8 +126,11 @@ builder.Services.AddHostedService<SignageUnicorn.Api.Services.Background.Mainten
 var app = builder.Build();
 
 // 4. Configure Pipeline
-app.UseSwagger();
-app.UseSwaggerUI();
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
 
 
 app.UseForwardedHeaders(new ForwardedHeadersOptions
