@@ -139,7 +139,7 @@ BEGIN
 
         UPDATE sn_devices
         SET last_check_in = SYSUTCDATETIME(),
-            status = ISNULL(@p_status, 'ONLINE'),
+            status = UPPER(ISNULL(@p_status, 'ONLINE')),
             device_name = ISNULL(@p_device_name, device_name),
             branch_code = ISNULL(@p_branch_code, branch_code),
             location = ISNULL(@p_location, location),
