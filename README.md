@@ -49,4 +49,4 @@ We have detailed guides for every aspect of the system:
 *   **Offline Mode**: Devices will automatically switch to offline mode if the server is unreachable, using locally cached content.
 
 ---
-*Maintained by the Signage Unicorn Team*
+*Maintained by the Signage Unicorn TECH Integration*
