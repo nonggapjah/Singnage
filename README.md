@@ -41,6 +41,7 @@ We have detailed guides for every aspect of the system:
 ### For Developers & IT
 *   **[Client Build Manual](docs/guides/client-build-manual.md)**: **CRITICAL**. Instructions on how to build the `.exe` installer (includes important SQLite rebuild steps).
 *   **[Deployment Guide](docs/guides/DEPLOYMENT_GUIDE.md)**: How to deploy the full system (Server & Client) to production.
+*   **[Configuration Reference](docs/guides/configuration-reference.md)**: Technical guide to `.env`, `ecosystem.config.js`, and `package.json`.
 
 ## ⚠️ Important Notes for v2.2.1
 
