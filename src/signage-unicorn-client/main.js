@@ -106,18 +106,24 @@ ipcMain.handle('save-config', async (event, config) => {
 ipcMain.handle('get-local-path', () => MEDIA_DIR);
 
 ipcMain.handle('read-changelog', async () => {
-    // Try to find changelog in docs folder (relative to app root in dev)
+    // Try to find changelog in common locations
     const possiblePaths = [
-        path.join(__dirname, '..', '..', 'docs', 'CHANGELOG.md'),
-        path.join(app.getAppPath(), 'CHANGELOG.md')
+        path.join(app.getAppPath(), 'CHANGELOG.md'),
+        path.join(process.resourcesPath, 'CHANGELOG.md'),
+        path.join(__dirname, 'CHANGELOG.md'),
+        path.join(__dirname, '..', '..', 'docs', 'CHANGELOG.md')
     ];
 
     for (const p of possiblePaths) {
-        if (await fs.pathExists(p)) {
-            return await fs.readFile(p, 'utf8');
+        try {
+            if (await fs.pathExists(p)) {
+                return await fs.readFile(p, 'utf8');
+            }
+        } catch (e) {
+            console.error(`Failed to read changelog at ${p}:`, e);
         }
     }
-    return "Changelog not found.";
+    return "Changelog not found. (System path: " + app.getAppPath() + ")";
 });
 
 ipcMain.handle('get-storage-info', async () => {

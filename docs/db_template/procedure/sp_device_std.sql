@@ -79,7 +79,7 @@ BEGIN
         BEGIN
             UPDATE sn_devices
             SET last_check_in = SYSUTCDATETIME(),
-                status = 'online',
+                status = 'ONLINE',
                 ip_address = ISNULL(@p_ip_address, ip_address),
                 app_version = ISNULL(@p_app_version, app_version),
                 device_name = ISNULL(@p_device_name, device_name), -- Allow rename on login too
@@ -98,9 +98,9 @@ BEGIN
             IF @p_device_uuid IS NULL SET @p_device_uuid = NEWID();
 
             INSERT INTO sn_devices
-            (device_uuid, device_name, status, branch_code, created_at, is_deleted, app_version, ip_address, location, ratio)
+            (device_uuid, device_name, status, branch_code, created_at, is_deleted, app_version, ip_address, location, ratio, last_check_in)
             VALUES
-            (@p_device_uuid, ISNULL(@p_device_name,'Unnamed Device'), 'online', ISNULL(@p_branch_code,'1000'), SYSUTCDATETIME(), 0, @p_app_version, @p_ip_address, @p_location, @p_ratio);
+            (@p_device_uuid, ISNULL(@p_device_name,'Unnamed Device'), 'ONLINE', ISNULL(@p_branch_code,'1000'), SYSUTCDATETIME(), 0, @p_app_version, @p_ip_address, @p_location, @p_ratio, SYSUTCDATETIME());
 
             SET @msg = N'Device registered.';
         END
@@ -130,7 +130,7 @@ BEGIN
              IF @real_uuid IS NOT NULL AND @real_uuid <> @p_device_uuid
              BEGIN
                   -- Mark the bad "numeric uuid" record for deletion if it exists
-                  UPDATE sn_devices SET is_deleted = 1, status = 'offline' WHERE device_uuid = @p_device_uuid;
+                  UPDATE sn_devices SET is_deleted = 1, status = 'OFFLINE' WHERE device_uuid = @p_device_uuid;
                   -- Continue with the "real" UUID instead
                   SET @p_device_uuid = @real_uuid;
                   SET @p_device_id = TRY_CAST(@real_uuid AS BIGINT); -- Try parse real one if it was numeric as well? Usually won't be.
@@ -139,7 +139,7 @@ BEGIN
 
         UPDATE sn_devices
         SET last_check_in = SYSUTCDATETIME(),
-            status = ISNULL(@p_status, 'online'),
+            status = ISNULL(@p_status, 'ONLINE'),
             device_name = ISNULL(@p_device_name, device_name),
             branch_code = ISNULL(@p_branch_code, branch_code),
             location = ISNULL(@p_location, location),
@@ -161,7 +161,7 @@ BEGIN
              INSERT INTO sn_devices
              (device_uuid, device_name, status, branch_code, created_at, is_deleted, last_check_in, ip_address, app_version)
              VALUES
-             (@p_device_uuid, ISNULL(@p_device_name, 'Recovered Device'), 'online', ISNULL(@p_branch_code, '1000'), SYSUTCDATETIME(), 0, SYSUTCDATETIME(), @p_ip_address, @p_app_version);
+             (@p_device_uuid, ISNULL(@p_device_name, 'Recovered Device'), 'ONLINE', ISNULL(@p_branch_code, '1000'), SYSUTCDATETIME(), 0, SYSUTCDATETIME(), @p_ip_address, @p_app_version);
 
              SET @msg = N'Heartbeat processed (Device Recovered).';
         END
@@ -178,6 +178,13 @@ BEGIN
     ===================================================== */
     IF @p_action = 'GET_ALL'
     BEGIN
+        -- Auto-Sync Status: If silent > 60s (4 Heartbeats), update to 'OFFLINE'
+        UPDATE sn_devices 
+        SET status = 'OFFLINE' 
+        WHERE is_deleted = 0 
+          AND status <> 'OFFLINE'
+          AND (last_check_in IS NULL OR DATEDIFF(SECOND, last_check_in, SYSUTCDATETIME()) > 60);
+
         GOTO ResultSection;
     END
 
@@ -186,6 +193,14 @@ BEGIN
     ===================================================== */
     IF @p_action IN ('GET_BY_ID','GET_BY_UUID')
     BEGIN
+        -- Sync status for specific device lookup
+        UPDATE sn_devices 
+        SET status = 'OFFLINE' 
+        WHERE is_deleted = 0 
+          AND status <> 'OFFLINE'
+          AND (device_id = @p_device_id OR device_uuid = @p_device_uuid)
+          AND (last_check_in IS NULL OR DATEDIFF(SECOND, last_check_in, SYSUTCDATETIME()) > 60);
+
         GOTO ResultSection;
     END
 
@@ -195,7 +210,7 @@ BEGIN
     IF @p_action = 'DEACTIVATE'
     BEGIN
         UPDATE sn_devices
-        SET status = 'offline', is_deleted = 1,
+        SET status = 'OFFLINE', is_deleted = 1,
             deleted_at = SYSUTCDATETIME(), deleted_by = @p_userid
         WHERE device_id = @p_device_id OR device_uuid = @p_device_uuid;
 
@@ -254,8 +269,8 @@ ResultSection:
                 d.ip_address AS IpAddress,
                 
                 CASE
-                    WHEN d.last_check_in IS NULL THEN 'offline'
-                    WHEN DATEDIFF(SECOND, d.last_check_in, SYSUTCDATETIME()) > 90 THEN 'offline' 
+                    WHEN d.last_check_in IS NULL THEN 'OFFLINE'
+                    WHEN DATEDIFF(SECOND, d.last_check_in, SYSUTCDATETIME()) > 60 THEN 'OFFLINE' 
                     ELSE d.status
                 END AS Status,
 

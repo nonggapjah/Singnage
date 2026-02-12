@@ -744,13 +744,31 @@ document.getElementById('vol-up').onclick = () => adjustVolume(5);
 
 document.getElementById('view-patch-history').onclick = async () => {
     patchHistoryScreen.classList.remove('hidden');
-    changelogContent.innerText = "Loading history...";
+    changelogContent.innerText = "Loading history from server...";
     updateCursorVisibility();
+
     try {
+        // 1. Try API first (Best for latest info)
+        if (config && config.serverIp) {
+            try {
+                const res = await fetch(`${config.serverIp}/api/v1/system/changelog`);
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.success && data.data) {
+                        changelogContent.innerText = data.data;
+                        return; // Found on server, we're done
+                    }
+                }
+            } catch (apiErr) {
+                console.warn("Changelog API failed, falling back to local file...", apiErr.message);
+            }
+        }
+
+        // 2. Fallback to Local File (Best for Offline)
         const text = await ipcRenderer.invoke('read-changelog');
         changelogContent.innerText = text;
-    } catch (e) {
-        changelogContent.innerText = "Error loading history.";
+    } catch (err) {
+        changelogContent.innerText = "Failed to load patch history: " + err.message;
     }
 };
 document.getElementById('close-patch-history').onclick = () => {
