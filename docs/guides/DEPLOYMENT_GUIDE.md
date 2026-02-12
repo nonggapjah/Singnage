@@ -25,7 +25,27 @@ cd c:\git\Signage-Unicorn\src\signage-unicorn-web ; npm run build
 
 ---
 
-## 3. Process Management (PM2)
+## 3. Client Application (Electron - v2.2.1)
+Location: `src/signage-unicorn-client`
+
+### Build & Rebuild (Critical)
+To generate the `.exe` installer for devices:
+
+1.  **Rebuild Native Modules (SQLite)**:
+    ```powershell
+    npm run rebuild
+    ```
+    *Must run this before building to ensure database compatibility on target machines.*
+
+2.  **Generate Installer**:
+    ```powershell
+    npm run build
+    ```
+    Output: `dist/Signage Unicorn Setup 2.2.1.exe`
+
+---
+
+## 4. Process Management (PM2)
 Location: Root (`/`)
 
 The system uses PM2 to keep both the API and Web App running. Use the following commands to restart the services after a build.

@@ -3,7 +3,8 @@
 This document outlines the permissions and access control matrix for the Signage Unicorn system, based on the backend API controllers.
 
 **Roles defined:** `Admin`, `Editor`, `Viewer` (Default).
-**Anonymous:** Unauthenticated devices/users (Player, Kiosk).
+**Roles defined:** `Admin`, `Editor`, `Viewer` (Default).
+**Player / Kiosk:** Unauthenticated devices/users.
 
 ## Permission Matrix
 

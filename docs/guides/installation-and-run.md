@@ -1,93 +1,86 @@
-# วิธีการรันโปรเจกต์ (Run Instructions)
+# วิธีการใช้งานและติดตั้ง (Production / Cloud First)
 
-เอกสารนี้รวบรวมคำสั่งสำหรับการรันโปรเจกต์ Signage Unicorn ทั้งส่วน Frontend และ Backend
+เอกสารนี้รวบรวมคำสั่งสำหรับการรันโปรเจกต์ Signage Unicorn โดยเน้นการใช้งานจริงผ่าน Cloud Server (`signage.aith123.com`)
 
-## 1. การรันแบบ Local (ใช้เครื่องเดียว)
+## 1. การใช้งานจริง (Production Cloud)
 
-วิธีนี้เหมาะสำหรับการพัฒนาบนเครื่องตัวเองคนเดียว
+ในเวอร์ชันปัจจุบัน (2.2.1+) ระบบถูกออกแบบให้ทำงานผ่าน Cloud เป็นหลัก เพื่อให้สามารถบริหารจัดการจากส่วนกลางได้ทันที
+
+### 1.1 สำหรับเครื่องเล่น (Client / Device)
+เพียงแค่ติดตั้งไฟล์ `.exe` ที่ได้จากการ Build:
+1.  ติดตั้งโปรแกรมลงในเครื่อง Mini PC / Windows Stick
+2.  เชื่อมต่ออินเทอร์เน็ต
+3.  เปิดโปรแกรม -> ตั้งชื่อเครื่อง -> กด **Connect**
+4.  (ระบบจะวิ่งไปหา `https://signage.aith123.com` โดยอัตโนมัติ)
+
+### 1.2 สำหรับ Admin (Web Dashboard)
+*   เข้าใช้งานได้ทันทีที่: **[https://signage.aith123.com](https://signage.aith123.com)**
+*   ไม่ต้องรัน Command Line ใดๆ บนเครื่องตัวเอง
+
+---
+
+## 2. การรันแบบ Developer (Localhost)
+
+วิธีนี้เหมาะสำหรับนักพัฒนาที่ต้องการแก้บั๊กหรือพัฒนาฟีเจอร์ใหม่
 
 ### Terminal 1: Backend (.NET API)
 ```powershell
 cd "src\SignageUnicorn.Api"
 dotnet watch run
 ```
+*   API จะรันที่: `http://localhost:5018`
 
 ### Terminal 2: Frontend (Next.js)
 ```powershell
 cd "src\signage-unicorn-web"
 npm run dev
 ```
-
-*   **เข้าใช้งานเว็บ**: `http://localhost:3000`
-*   **API Swagger**: `http://localhost:5018/swagger` (หรือ port ที่ขึ้นใน terminal)
+*   Web จะรันที่: `http://localhost:3000`
 
 ---
 
-## 2. การรันผ่าน LAN (ให้อุปกรณ์อื่นเข้าได้)
+## 3. การรันแบบ LAN (ทดสอบในวงแลน)
 
-วิธีนี้สำหรับทดสอบผ่านมือถือ หรือเครื่องอื่นในวง WiFi/LAN เดียวกัน
+หากต้องการทดสอบด้วยอุปกรณ์จริงแต่ไม่มีเน็ต หรือต้องการเทสก่อนขึ้น Cloud
 
 ### Terminal 1: Backend (เปิดรับทุก IP)
-ต้องรันแบบระบุ URL ให้เป็น `0.0.0.0`
 ```powershell
 cd "src\SignageUnicorn.Api"
 dotnet watch run --urls "http://0.0.0.0:8862"
 ```
 
 ### Terminal 2: Frontend (เปิดรับทุก IP)
-รันคำสั่งนี้ (ผมเพิ่ม script นี้ให้แล้ว ใช้ง่ายขึ้นครับ)
 ```powershell
 cd "src\signage-unicorn-web"
 npm run dev:lan
 ```
 
 ### การเข้าใช้งาน
-1. **หา IP Address ของเครื่องคุณ**:
-   เปิด Terminal ใหม่แล้วพิมพ์คำสั่ง:
-   ```powershell
-   ipconfig
-   ```
-   มองหา **IPv4 Address** (เช่น `192.168.1.105` หรือ `192.168.31.199`)
-
-2. **เข้าผ่าน Browser (บนมือถือหรือคอมเครื่องอื่น)**:
-   *   **เว็บ**: `http://<YOUR_IP_ADDRESS>:3000`
-   *   (ตัวอย่าง: `http://192.168.1.160:3000`)
-
-### ข้อควรระวัง (Troubleshooting)
-*   **Firewall**: หากรันแล้วเข้าไม่ได้ ให้ตรวจสอบ Windows Firewall และกด **Allow** ให้โปรแกรม `dotnet` และ `node`
-*   **Network**: อุปกรณ์ต้องเกาะ WiFi ชื่อเดียวกับคอมพิวเตอร์
+*   เข้าผ่าน Browser: `http://<IP_เครื่องคุณ>:3000`
+*   ต้องแก้ Config ในแอป Client ให้ชี้มาที่ IP เครื่องคุณแทน `signage.aith123.com`
 
 ---
 
-## 3. การรันด้วย PM2 (Production/Server Mode)
+## 4. Server Management (PM2)
 
-วิธีนี้เหมาะสำหรับการนำไปรันบน Server หรือเครื่องที่ต้องการให้ทำงานตลอดเวลา (Background Service) และสามารถจัดการ Process ได้ง่าย โดยมีการแยก Port เพื่อไม่ให้ชนกับ Service อื่นๆ (เช่น 5018 ที่อาจจะชนได้)
+สำหรับผู้ดูแล Server ที่ `signage.aith123.com`
 
-### สิ่งที่ต้องเตรียม (Prerequisites)
-ต้องติดตั้ง **PM2** ก่อน (ถ้ายังไม่มี):
+### คำสั่งจัดการ (Root Directory)
 ```powershell
-npm install -g pm2
+pm2 status       # ดูสถานะ
+pm2 restart all  # รีสตาร์ทระบบ
+pm2 logs         # ดู Log สด
 ```
 
-### คำสั่งรัน (Start Command)
-รันจาก Root Directory ของโปรเจกต์ (`c:\Villa\Signage Unicorn`):
-
+### การอัปเดต Server
+เมื่อมีการแก้โค้ดและ Pull ลงมาใหม่:
 ```powershell
-pm2 start ecosystem.config.js
+# 1. Backend
+cd src/SignageUnicorn.Api ; dotnet publish -c Release
+
+# 2. Frontend
+cd ../signage-unicorn-web ; npm run build
+
+# 3. Restart
+pm2 restart all
 ```
-
-### การตั้งค่า Port (Configuration)
-ในไฟล์ `ecosystem.config.js` ได้กำหนด Port แยกไว้ดังนี้:
-*   **Frontend (Next.js)**: Port `3000` (ค่า Default)
-*   **Backend (.NET API)**: Port `8862` (Custom Port สำหรับ PM2)
-
-⚠️ **สำคัญ**: หากมีการเปลี่ยน IP Address ของเครื่อง Server ต้องไปแก้ไขค่า IP ในไฟล์เหล่านี้ให้ตรงกัน:
-1.  **Backend Config**: `src\SignageUnicorn.Api\appsettings.json` (ที่หัวข้อ `ServerSettings` -> `BaseUrl`)
-2.  **Frontend Config**: `src\signage-unicorn-web\.env` (ที่ตัวแปร `NEXT_PUBLIC_API_URL`)
-
-### คำสั่งจัดการ PM2 ที่ควรรู้
-*   `pm2 status` : ดูสถานะของทุกแอป
-*   `pm2 logs` : ดู Log การทำงาน
-*   `pm2 stop all` : หยุดทำงานทุกแอป
-*   `pm2 restart all` : รีสตาร์ททุกแอป
-*   `pm2 delete all` : ลบแอปออกจากรายการ PM2
