@@ -191,8 +191,6 @@ ipcMain.handle('download-update', async (event, { url }) => {
     }
 });
 
-ipcMain.handle('get-app-version', () => app.getVersion());
-
 ipcMain.handle('launch-installer', async (event, filePath) => {
     try {
         await shell.openPath(filePath);

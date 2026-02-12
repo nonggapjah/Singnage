@@ -555,7 +555,17 @@ async function playNext() {
     };
 
     if (media.fileName.toLowerCase().match(/\.(mp4|webm|mov)$/)) {
-        videoEl.src = localFile; videoEl.classList.remove('hidden'); imageEl.classList.add('hidden');
+        // If same file (1-item loop), reset and play explicitly
+        if (videoEl.src === localFile) {
+            videoEl.currentTime = 0;
+            videoEl.play().catch(e => console.warn("Auto-play blocked or failed", e));
+        } else {
+            videoEl.src = localFile;
+            videoEl.load(); // Ensure fresh load
+            videoEl.play().catch(e => console.warn("Auto-play blocked or failed", e));
+        }
+
+        videoEl.classList.remove('hidden'); imageEl.classList.add('hidden');
         videoEl.onended = () => onComplete(false);
         videoEl.onerror = () => {
             const err = videoEl.error ? `Code ${videoEl.error.code}: ${videoEl.error.message}` : 'Unknown Playback Error';
