@@ -121,6 +121,7 @@ builder.Services.AddScoped<SignageUnicorn.Api.Services.AuthService>();
 
 // Background Services
 builder.Services.AddHostedService<SignageUnicorn.Api.Services.Background.MaintenanceWorker>();
+builder.Services.AddHostedService<SignageUnicorn.Api.Services.Background.MediaCleanupWorker>();
 
 
 var app = builder.Build();

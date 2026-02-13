@@ -19,6 +19,7 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({ onUploadSucces
     const [customName, setCustomName] = useState('');
     const [remark1, setRemark1] = useState('');
     const [remark2, setRemark2] = useState('');
+    const [endDate, setEndDate] = useState('');
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
     const [metadata, setMetadata] = useState<{ duration: number, ratio: string } | null>(null);
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -66,6 +67,7 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({ onUploadSucces
             formData.append('Supplier_Code', supplierCode);
             formData.append('Remark1', remark1);
             formData.append('Remark2', remark2);
+            if (endDate) formData.append('EndDate', new Date(endDate).toISOString());
 
             if (!customName.trim()) {
                 alert('Display Name is required / กรุณาระบุชื่อสื่อ');
@@ -110,6 +112,7 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({ onUploadSucces
         setCustomName('');
         setRemark1('');
         setRemark2('');
+        setEndDate('');
         setSelectedFile(null);
         setMetadata(null);
         setPreviewUrl(null);
@@ -246,92 +249,103 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({ onUploadSucces
                                 </div>
                             </div>
                         )}
-                    </div>
-                </div>
 
-                {/* Right Column: Upload */}
-                <div className={`${isEmbed ? 'p-0 pt-6 lg:pt-0 lg:col-span-3' : 'p-8 md:col-span-3'} flex flex-col h-full relative`}>
-                    {!selectedFile ? (
-                        <div
-                            className={`group relative flex flex-grow w-full cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed transition-all duration-300 min-h-[300px] gap-4
-                                ${dragActive
-                                    ? 'border-accent-cyan bg-accent-cyan/10 shadow-[0_0_30px_rgba(34,211,238,0.2)]'
-                                    : 'border-border bg-muted/10 hover:border-accent-cyan/50 hover:bg-muted/20'}`}
-                            onDragEnter={handleDrag}
-                            onDragLeave={handleDrag}
-                            onDragOver={handleDrag}
-                            onDrop={handleDrop}
-                            onClick={() => inputRef.current?.click()}
-                        >
+                        <div>
+                            <label className="block text-[10px] font-black text-muted-foreground uppercase tracking-wider mb-1.5 ml-1">
+                                End Date (Optional)
+                            </label>
                             <input
-                                ref={inputRef}
-                                type="file"
-                                className="hidden"
-                                onChange={(e) => e.target.files && handleFiles(e.target.files)}
-                                accept="image/*,video/*"
+                                type="date"
+                                value={endDate}
+                                onChange={(e) => setEndDate(e.target.value)}
+                                className="w-full bg-muted/20 border border-white/5 rounded-xl px-4 py-2 text-foreground text-xs sm:text-sm outline-none focus:border-accent-cyan transition-colors dark:[color-scheme:dark]"
                             />
-                            <div className="w-20 h-20 rounded-full bg-accent-cyan/10 text-accent-cyan flex items-center justify-center transition-transform duration-300 group-hover:scale-110 border border-accent-cyan/20 group-hover:bg-accent-cyan group-hover:text-black">
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                                </svg>
-                            </div>
-                            <div className="text-center">
-                                <p className="text-xl font-black text-foreground uppercase tracking-tight">Drop media here</p>
-                                <p className="mt-2 text-xs font-bold text-muted-foreground uppercase tracking-widest">or click to browse</p>
-                            </div>
                         </div>
-                    ) : (
-                        <div className="flex-1 flex flex-col justify-center">
-                            <div className="mt-0">
-                                <p className="block text-[10px] font-black text-muted-foreground uppercase tracking-wider mb-3 ml-1">Ready to upload</p>
-                                <div className="flex cursor-default items-center justify-between rounded-2xl border border-border bg-muted/20 p-4 shadow-sm transition-all hover:bg-muted/30 relative overflow-hidden group">
-                                    <div className="flex items-center gap-4 z-10 w-full">
-                                        <div className="relative h-16 w-16 overflow-hidden rounded-xl bg-black shadow-inner flex-shrink-0 border border-border/50">
-                                            {previewUrl && (
-                                                selectedFile.type.includes('video') ? (
-                                                    <video src={previewUrl} className="h-full w-full object-cover opacity-80" />
-                                                ) : (
-                                                    <img src={previewUrl} className="h-full w-full object-cover opacity-80 border-0" alt="Preview" />
-                                                )
-                                            )}
-                                            <div className="absolute inset-0 flex items-center justify-center">
-                                                <div className="flex h-8 w-8 items-center justify-center rounded-full border border-white/20 bg-black/40 backdrop-blur-sm">
-                                                    {selectedFile.type.includes('video') ? (
-                                                        <svg className="ml-0.5 h-4 w-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
-                                                    ) : (
-                                                        <svg className="h-4 w-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div className="min-w-0 flex-1">
-                                            <p className="text-sm font-bold text-foreground truncate">{selectedFile.name}</p>
-                                            <p className="mt-1 text-xs font-mono text-muted-foreground">
-                                                {uploading ? (
-                                                    <span className="text-accent-cyan font-bold animate-pulse">Processing...</span>
-                                                ) : (
-                                                    metadata ? `${metadata.duration}s • ${(selectedFile.size / (1024 * 1024)).toFixed(2)} MB • ${metadata.ratio}` : 'Calculating Metadata...'
-                                                )}
-                                            </p>
-                                        </div>
-                                        <button onClick={resetForm} className="rounded-lg p-2 text-muted-foreground hover:bg-red-500/10 hover:text-red-500 transition-colors">
-                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                            </svg>
-                                        </button>
-                                    </div>
-
-                                    {/* Upload Progress Bar Overlay */}
-                                    {uploading && (
-                                        <div className="absolute bottom-0 left-0 h-1 bg-accent-cyan animate-progress w-full opacity-70 shadow-[0_0_10px_#22d3ee]"></div>
-                                    )}
-                                </div>
-                            </div>
-                        </div>
-                    )}
+                    </div>
                 </div>
             </div>
 
+            {/* Right Column: Upload */}
+            <div className={`${isEmbed ? 'p-0 pt-6 lg:pt-0 lg:col-span-3' : 'p-8 md:col-span-3'} flex flex-col h-full relative`}>
+                {!selectedFile ? (
+                    <div
+                        className={`group relative flex flex-grow w-full cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed transition-all duration-300 min-h-[300px] gap-4
+                                ${dragActive
+                                ? 'border-accent-cyan bg-accent-cyan/10 shadow-[0_0_30px_rgba(34,211,238,0.2)]'
+                                : 'border-border bg-muted/10 hover:border-accent-cyan/50 hover:bg-muted/20'}`}
+                        onDragEnter={handleDrag}
+                        onDragLeave={handleDrag}
+                        onDragOver={handleDrag}
+                        onDrop={handleDrop}
+                        onClick={() => inputRef.current?.click()}
+                    >
+                        <input
+                            ref={inputRef}
+                            type="file"
+                            className="hidden"
+                            onChange={(e) => e.target.files && handleFiles(e.target.files)}
+                            accept="image/*,video/*"
+                        />
+                        <div className="w-20 h-20 rounded-full bg-accent-cyan/10 text-accent-cyan flex items-center justify-center transition-transform duration-300 group-hover:scale-110 border border-accent-cyan/20 group-hover:bg-accent-cyan group-hover:text-black">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                            </svg>
+                        </div>
+                        <div className="text-center">
+                            <p className="text-xl font-black text-foreground uppercase tracking-tight">Drop media here</p>
+                            <p className="mt-2 text-xs font-bold text-muted-foreground uppercase tracking-widest">or click to browse</p>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="flex-1 flex flex-col justify-center">
+                        <div className="mt-0">
+                            <p className="block text-[10px] font-black text-muted-foreground uppercase tracking-wider mb-3 ml-1">Ready to upload</p>
+                            <div className="flex cursor-default items-center justify-between rounded-2xl border border-border bg-muted/20 p-4 shadow-sm transition-all hover:bg-muted/30 relative overflow-hidden group">
+                                <div className="flex items-center gap-4 z-10 w-full">
+                                    <div className="relative h-16 w-16 overflow-hidden rounded-xl bg-black shadow-inner flex-shrink-0 border border-border/50">
+                                        {previewUrl && (
+                                            selectedFile.type.includes('video') ? (
+                                                <video src={previewUrl} className="h-full w-full object-cover opacity-80" />
+                                            ) : (
+                                                <img src={previewUrl} className="h-full w-full object-cover opacity-80 border-0" alt="Preview" />
+                                            )
+                                        )}
+                                        <div className="absolute inset-0 flex items-center justify-center">
+                                            <div className="flex h-8 w-8 items-center justify-center rounded-full border border-white/20 bg-black/40 backdrop-blur-sm">
+                                                {selectedFile.type.includes('video') ? (
+                                                    <svg className="ml-0.5 h-4 w-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                                                ) : (
+                                                    <svg className="h-4 w-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                        <p className="text-sm font-bold text-foreground truncate">{selectedFile.name}</p>
+                                        <p className="mt-1 text-xs font-mono text-muted-foreground">
+                                            {uploading ? (
+                                                <span className="text-accent-cyan font-bold animate-pulse">Processing...</span>
+                                            ) : (
+                                                metadata ? `${metadata.duration}s • ${(selectedFile.size / (1024 * 1024)).toFixed(2)} MB • ${metadata.ratio}` : 'Calculating Metadata...'
+                                            )}
+                                        </p>
+                                    </div>
+                                    <button onClick={resetForm} className="rounded-lg p-2 text-muted-foreground hover:bg-red-500/10 hover:text-red-500 transition-colors">
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                        </svg>
+                                    </button>
+                                </div>
+
+                                {/* Upload Progress Bar Overlay */}
+                                {uploading && (
+                                    <div className="absolute bottom-0 left-0 h-1 bg-accent-cyan animate-progress w-full opacity-70 shadow-[0_0_10px_#22d3ee]"></div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </div>
             {/* Footer Buttons - Hide if embedded or style differently */}
             <div className={`flex items-center justify-end gap-4 border-t border-border ${isEmbed ? 'bg-transparent border-t-0 pt-6 px-0' : 'bg-muted/20 px-8 py-5'}`}>
                 {!isEmbed && (
@@ -366,31 +380,33 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({ onUploadSucces
             </div>
 
             {/* Notification Portal */}
-            {showAsyncNotice && (
-                <div className="fixed inset-0 z-[300] flex items-center justify-center p-6 animate-in fade-in duration-300">
-                    <div className="absolute inset-0 bg-black/80 backdrop-blur-md"></div>
-                    <div className="relative bg-[#121212] border border-white/10 p-8 rounded-3xl max-w-md text-center space-y-6 shadow-2xl skew-y-0">
-                        <div className="w-20 h-20 bg-accent-cyan/10 text-accent-cyan rounded-full flex items-center justify-center mx-auto text-3xl shadow-[0_0_20px_rgba(34,211,238,0.3)] border border-accent-cyan/20">
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
+            {
+                showAsyncNotice && (
+                    <div className="fixed inset-0 z-[300] flex items-center justify-center p-6 animate-in fade-in duration-300">
+                        <div className="absolute inset-0 bg-black/80 backdrop-blur-md"></div>
+                        <div className="relative bg-[#121212] border border-white/10 p-8 rounded-3xl max-w-md text-center space-y-6 shadow-2xl skew-y-0">
+                            <div className="w-20 h-20 bg-accent-cyan/10 text-accent-cyan rounded-full flex items-center justify-center mx-auto text-3xl shadow-[0_0_20px_rgba(34,211,238,0.3)] border border-accent-cyan/20">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                            </div>
+                            <div className="space-y-2">
+                                <h3 className="text-2xl font-black text-white uppercase tracking-tight italic">Background Processing</h3>
+                                <p className="text-gray-400 leading-relaxed text-sm font-medium">
+                                    ระบบกำลังประมวลผลวิดีโอในพื้นหลัง...
+                                    คุณสามารถตรวจสอบสถานะได้ในหน้าคลังสื่อ
+                                </p>
+                            </div>
+                            <button
+                                onClick={() => { setShowAsyncNotice(false); onUploadSuccess(); resetForm(); }}
+                                className="w-full py-4 bg-accent-cyan text-black font-black uppercase tracking-widest rounded-xl hover:bg-cyan-300 transition-all shadow-[0_0_20px_rgba(34,211,238,0.3)] hover:shadow-[0_0_30px_rgba(34,211,238,0.5)]"
+                            >
+                                ACKNOWLEDGE
+                            </button>
                         </div>
-                        <div className="space-y-2">
-                            <h3 className="text-2xl font-black text-white uppercase tracking-tight italic">Background Processing</h3>
-                            <p className="text-gray-400 leading-relaxed text-sm font-medium">
-                                ระบบกำลังประมวลผลวิดีโอในพื้นหลัง...
-                                คุณสามารถตรวจสอบสถานะได้ในหน้าคลังสื่อ
-                            </p>
-                        </div>
-                        <button
-                            onClick={() => { setShowAsyncNotice(false); onUploadSuccess(); resetForm(); }}
-                            className="w-full py-4 bg-accent-cyan text-black font-black uppercase tracking-widest rounded-xl hover:bg-cyan-300 transition-all shadow-[0_0_20px_rgba(34,211,238,0.3)] hover:shadow-[0_0_30px_rgba(34,211,238,0.5)]"
-                        >
-                            ACKNOWLEDGE
-                        </button>
                     </div>
-                </div>
-            )}
-        </div>
+                )
+            }
+        </div >
     );
 };

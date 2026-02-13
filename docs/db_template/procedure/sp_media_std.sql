@@ -25,6 +25,7 @@ CREATE OR ALTER PROCEDURE [dbo].[sp_media_std]
     @p_remark2            NVARCHAR(500) = NULL,
     @p_storage_provider   NVARCHAR(20)  = NULL,
     @p_force_delete       BIT           = 0, -- New parameter for force delete
+    @p_end_date           DATETIME2(7)  = NULL, -- New parameter for expiration
 
     -- Filters (legacy compatible)
     @p_filter_status      NVARCHAR(1)   = NULL, -- kept for compatibility
@@ -104,7 +105,7 @@ BEGIN
         INSERT INTO sn_media_files (
             media_uuid, file_name, display_name, blob_url,
             duration_sec, ratio, file_size_kb, supplier_code,
-            remark1, remark2, storage_provider, file_hash,
+            remark1, remark2, storage_provider, file_hash, end_date, -- Added end_date
             created_at, created_by, is_deleted
         )
         VALUES (
@@ -120,6 +121,7 @@ BEGIN
             @p_remark2,
             ISNULL(@p_storage_provider, 'local'),
             @p_file_hash,
+            @p_end_date, -- Value
             SYSUTCDATETIME(),
             @p_userid,
             0
@@ -140,6 +142,7 @@ BEGIN
             supplier_code = ISNULL(@p_supplier_code, supplier_code),
             remark1 = ISNULL(@p_remark1, remark1),
             remark2 = ISNULL(@p_remark2, remark2),
+            end_date = @p_end_date, -- Update end_date (allows setting to NULL if passed explicitly, or handle in app logic)
             updated_at = SYSUTCDATETIME(),
             updated_by = @p_userid
         WHERE is_deleted = 0
@@ -169,6 +172,7 @@ BEGIN
             file_size_kb  = ISNULL(@p_file_size_kb, file_size_kb),
             file_hash     = ISNULL(@p_file_hash, file_hash),
             storage_provider = ISNULL(@p_storage_provider, storage_provider),
+            end_date      = ISNULL(@p_end_date, end_date), -- Update end_date if provided
             updated_at    = SYSUTCDATETIME(),
             updated_by    = @p_userid
         WHERE is_deleted = 0

@@ -274,13 +274,37 @@ export default function MediaLibraryPage() {
                         ↻
                     </button>
                     <button
+                        onClick={async () => {
+                            if (confirm('Run immediate expiry check? This will delete expired media.')) {
+                                try {
+                                    const res = await mediaApi.runCleanup();
+                                    if (res.success) {
+                                        alert(res.message);
+                                        loadMedia(); // Refresh list
+                                    } else {
+                                        alert('Cleanup failed: ' + res.message);
+                                    }
+                                } catch (e) {
+                                    alert('Error running cleanup');
+                                }
+                            }
+                        }}
+                        className="h-10 px-4 flex items-center justify-center rounded-xl bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-500 border border-yellow-500/20 transition-all font-bold text-xs uppercase tracking-wider gap-2"
+                        title="Media Expiry Check"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        Media Expiry Check
+                    </button>
+                    <button
                         onClick={() => { setShowUpload(!showUpload); setReplacementTarget(null); }}
                         className={`btn-primary shadow-[0_0_20px_rgba(157,0,255,0.3)] whitespace-nowrap ${showUpload ? 'bg-red-500 hover:bg-red-600 shadow-red-500/20' : ''}`}
                     >
                         {showUpload ? '✕ Cancel' : '↑ Upload File'}
                     </button>
                 </div>
-            </header>
+            </header >
 
             {showUpload && (
                 <div className="animate-in slide-in-from-top-4 duration-500 mb-8">
@@ -289,19 +313,22 @@ export default function MediaLibraryPage() {
                         onCancel={() => setShowUpload(false)}
                     />
                 </div>
-            )}
+            )
+            }
 
-            {replacementTarget && (
-                <MediaReplaceModal
-                    targetMedia={replacementTarget}
-                    onClose={() => setReplacementTarget(null)}
-                    onSuccess={() => {
-                        setReplacementTarget(null);
-                        loadMedia();
-                        alert("Media Replaced Successfully!");
-                    }}
-                />
-            )}
+            {
+                replacementTarget && (
+                    <MediaReplaceModal
+                        targetMedia={replacementTarget}
+                        onClose={() => setReplacementTarget(null)}
+                        onSuccess={() => {
+                            setReplacementTarget(null);
+                            loadMedia();
+                            alert("Media Replaced Successfully!");
+                        }}
+                    />
+                )
+            }
 
             {/* --- Toolbar & Controls --- */}
             <div className="glass-panel p-6 rounded-3xl border-white/5 animate-in stagger-1 space-y-6">
@@ -612,7 +639,12 @@ export default function MediaLibraryPage() {
                                         <td className="px-6 py-4 text-xs font-mono text-gray-500 hidden lg:table-cell">{m.ratio}</td>
                                         <td className="px-6 py-4 text-xs font-bold text-gray-500 hidden md:table-cell">{m.durationSec}s</td>
                                         <td className="px-6 py-4 text-xs text-gray-500 hidden lg:table-cell">{(m.fileSizeKb / 1024).toFixed(1)} MB</td>
-                                        <td className="px-6 py-4 text-xs text-gray-500 font-mono hidden xl:table-cell">{m.uploadedAt}</td>
+                                        <td className="px-6 py-4 text-xs text-gray-500 font-mono hidden xl:table-cell">
+                                            <div>{m.uploadedAt?.split('T')[0]}</div>
+                                            {m.endDate && (
+                                                <div className="text-[10px] text-red-400 font-bold mt-0.5" title="Expires On">Exp: {m.endDate.split('T')[0]}</div>
+                                            )}
+                                        </td>
                                         <td className="px-6 py-4 text-right pr-12">
                                             <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                                 <button
@@ -721,253 +753,272 @@ export default function MediaLibraryPage() {
             </div>
 
             {/* --- PREVIEW MODAL --- */}
-            {previewMedia && (
-                <div className="fixed inset-0 bg-black/95 backdrop-blur-xl z-[150] flex items-center justify-center p-4 md:p-10 animate-in fade-in duration-300">
-                    <div className="relative w-full max-w-6xl aspect-video bg-black rounded-3xl overflow-hidden shadow-2xl border border-white/10 flex flex-col">
-                        <div className="absolute top-4 right-4 z-20 flex gap-2">
-                            <button
-                                onClick={() => setPreviewMedia(null)}
-                                className="w-10 h-10 rounded-full bg-black/50 hover:bg-white/20 text-white flex items-center justify-center backdrop-blur-md transition-colors"
-                            >
-                                ✕
-                            </button>
-                        </div>
+            {
+                previewMedia && (
+                    <div className="fixed inset-0 bg-black/95 backdrop-blur-xl z-[150] flex items-center justify-center p-4 md:p-10 animate-in fade-in duration-300">
+                        <div className="relative w-full max-w-6xl aspect-video bg-black rounded-3xl overflow-hidden shadow-2xl border border-white/10 flex flex-col">
+                            <div className="absolute top-4 right-4 z-20 flex gap-2">
+                                <button
+                                    onClick={() => setPreviewMedia(null)}
+                                    className="w-10 h-10 rounded-full bg-black/50 hover:bg-white/20 text-white flex items-center justify-center backdrop-blur-md transition-colors"
+                                >
+                                    ✕
+                                </button>
+                            </div>
 
-                        <div className="flex-1 flex items-center justify-center bg-black relative overflow-hidden">
-                            {previewMedia.blobUrl && previewMedia.fileName.toLowerCase().match(/\.(mp4|webm|mov)$/) ? (
-                                <video
-                                    src={previewMedia.blobUrl}
-                                    className="w-full h-full object-contain bg-black"
-                                    controls
-                                    autoPlay
-                                />
-                            ) : (
-                                <img
-                                    src={previewMedia.blobUrl || ''}
-                                    className="w-full h-full object-contain bg-black"
-                                    alt="Preview"
-                                />
-                            )}
-                        </div>
+                            <div className="flex-1 flex items-center justify-center bg-black relative overflow-hidden">
+                                {previewMedia.blobUrl && previewMedia.fileName.toLowerCase().match(/\.(mp4|webm|mov)$/) ? (
+                                    <video
+                                        src={previewMedia.blobUrl}
+                                        className="w-full h-full object-contain bg-black"
+                                        controls
+                                        autoPlay
+                                    />
+                                ) : (
+                                    <img
+                                        src={previewMedia.blobUrl || ''}
+                                        className="w-full h-full object-contain bg-black"
+                                        alt="Preview"
+                                    />
+                                )}
+                            </div>
 
-                        <div className="p-6 bg-gradient-to-b from-black/80 to-transparent absolute top-0 left-0 w-full pointer-events-none">
-                            <h2 className="text-2xl font-bold text-white mb-1 drop-shadow-md">{previewMedia.displayName}</h2>
-                            <div className="flex gap-4 text-sm text-gray-300 drop-shadow-md">
-                                <span>{previewMedia.fileName}</span>
-                                <span>•</span>
-                                <span>{previewMedia.ratio}</span>
-                                <span>•</span>
-                                <span>{previewMedia.durationSec}s</span>
+                            <div className="p-6 bg-gradient-to-b from-black/80 to-transparent absolute top-0 left-0 w-full pointer-events-none">
+                                <h2 className="text-2xl font-bold text-white mb-1 drop-shadow-md">{previewMedia.displayName}</h2>
+                                <div className="flex gap-4 text-sm text-gray-300 drop-shadow-md">
+                                    <span>{previewMedia.fileName}</span>
+                                    <span>•</span>
+                                    <span>{previewMedia.ratio}</span>
+                                    <span>•</span>
+                                    <span>{previewMedia.durationSec}s</span>
+                                </div>
                             </div>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
 
             {/* Editing Overlay/Modal */}
-            {editingMedia && (
-                <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-6 animate-in fade-in duration-300">
-                    <div className="w-full max-w-2xl p-8 rounded-3xl bg-[var(--background)] border border-[var(--foreground)]/10 shadow-2xl space-y-8 relative overflow-hidden">
-                        {/* Decorative gradient for 'Unicorn' feel even in solid mode */}
-                        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-accent-cyan to-transparent opacity-50"></div>
+            {
+                editingMedia && (
+                    <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[100] flex items-center justify-center p-6 animate-in fade-in duration-300">
+                        <div className="w-full max-w-2xl p-8 rounded-3xl bg-[var(--background)] border border-[var(--foreground)]/10 shadow-2xl space-y-8 relative overflow-hidden">
+                            {/* Decorative gradient for 'Unicorn' feel even in solid mode */}
+                            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-accent-cyan to-transparent opacity-50"></div>
 
-                        <div className="flex justify-between items-center">
-                            <h2 className="text-3xl font-black uppercase italic tracking-tighter text-[var(--foreground)] drop-shadow-sm">Edit Fragment Data</h2>
-                            <button
-                                onClick={() => setEditingMedia(null)}
-                                className="text-[var(--foreground)]/50 hover:text-[var(--foreground)] transition-colors text-2xl"
-                            >
-                                ✕
-                            </button>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div className="space-y-1 col-span-2">
-                                <label className="text-xs font-black text-[var(--foreground)]/60 uppercase tracking-widest ml-1">Display Name</label>
-                                <input
-                                    type="text"
-                                    value={editingMedia.displayName}
-                                    onChange={(e) => setEditingMedia({ ...editingMedia, displayName: e.target.value })}
-                                    className="w-full bg-[var(--foreground)]/5 border border-[var(--foreground)]/10 rounded-xl px-4 py-3 text-lg text-[var(--foreground)] outline-none focus:border-accent-cyan transition-colors"
-                                />
-                            </div>
-                            <div className="space-y-1">
-                                <label className="text-xs font-black text-[var(--foreground)]/60 uppercase tracking-widest ml-1">Supplier Code</label>
-                                <input
-                                    type="text"
-                                    value={editingMedia.supplier_Code || ''}
-                                    onChange={(e) => setEditingMedia({ ...editingMedia, supplier_Code: e.target.value })}
-                                    className="w-full bg-[var(--foreground)]/5 border border-[var(--foreground)]/10 rounded-xl px-4 py-2 text-[var(--foreground)] outline-none focus:border-accent-cyan transition-colors"
-                                />
-                            </div>
-                            <div className="space-y-1">
-                                <label className="text-xs font-black text-[var(--foreground)]/60 uppercase tracking-widest ml-1">Status</label>
-                                <select
-                                    value={editingMedia.active}
-                                    onChange={(e) => setEditingMedia({ ...editingMedia, active: e.target.value as 'Y' | 'N' })}
-                                    className="w-full bg-[var(--foreground)]/5 border border-[var(--foreground)]/10 rounded-xl px-4 py-2 text-[var(--foreground)] outline-none focus:border-accent-cyan transition-colors appearance-none"
+                            <div className="flex justify-between items-center">
+                                <h2 className="text-3xl font-black uppercase italic tracking-tighter text-[var(--foreground)] drop-shadow-sm">Edit Fragment Data</h2>
+                                <button
+                                    onClick={() => setEditingMedia(null)}
+                                    className="text-[var(--foreground)]/50 hover:text-[var(--foreground)] transition-colors text-2xl"
                                 >
-                                    <option value="Y" className="text-black">Active</option>
-                                    <option value="N" className="text-black">Inactive</option>
-                                </select>
+                                    ✕
+                                </button>
                             </div>
-                            <div className="space-y-1">
-                                <label className="text-xs font-black text-[var(--foreground)]/60 uppercase tracking-widest ml-1">Remark 1</label>
-                                <input
-                                    type="text"
-                                    value={editingMedia.remark1 || ''}
-                                    onChange={(e) => setEditingMedia({ ...editingMedia, remark1: e.target.value })}
-                                    className="w-full bg-[var(--foreground)]/5 border border-[var(--foreground)]/10 rounded-xl px-4 py-2 text-[var(--foreground)] outline-none focus:border-accent-cyan transition-colors"
-                                />
-                            </div>
-                            <div className="space-y-1">
-                                <label className="text-xs font-black text-[var(--foreground)]/60 uppercase tracking-widest ml-1">Remark 2</label>
-                                <input
-                                    type="text"
-                                    value={editingMedia.remark2 || ''}
-                                    onChange={(e) => setEditingMedia({ ...editingMedia, remark2: e.target.value })}
-                                    className="w-full bg-[var(--foreground)]/5 border border-[var(--foreground)]/10 rounded-xl px-4 py-2 text-[var(--foreground)] outline-none focus:border-accent-cyan transition-colors"
-                                />
-                            </div>
-                        </div>
 
-                        <div className="flex gap-4 pt-4">
-                            <button
-                                onClick={() => setEditingMedia(null)}
-                                className="flex-1 py-3 rounded-xl bg-[var(--foreground)]/5 text-[var(--foreground)]/70 font-bold hover:bg-[var(--foreground)]/10 transition-all uppercase tracking-widest border border-[var(--foreground)]/10"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                onClick={() => handleUpdateMedia(editingMedia)}
-                                className="flex-[2] py-3 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-black font-black hover:shadow-[0_0_20px_rgba(34,211,238,0.4)] transition-all uppercase tracking-widest"
-                            >
-                                Commit Changes
-                            </button>
-                        </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div className="space-y-1 col-span-2">
+                                    <label className="text-xs font-black text-[var(--foreground)]/60 uppercase tracking-widest ml-1">Display Name</label>
+                                    <input
+                                        type="text"
+                                        value={editingMedia.displayName}
+                                        onChange={(e) => setEditingMedia({ ...editingMedia, displayName: e.target.value })}
+                                        className="w-full bg-[var(--foreground)]/5 border border-[var(--foreground)]/10 rounded-xl px-4 py-3 text-lg text-[var(--foreground)] outline-none focus:border-accent-cyan transition-colors"
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-xs font-black text-[var(--foreground)]/60 uppercase tracking-widest ml-1">Supplier Code</label>
+                                    <input
+                                        type="text"
+                                        value={editingMedia.supplier_Code || ''}
+                                        onChange={(e) => setEditingMedia({ ...editingMedia, supplier_Code: e.target.value })}
+                                        className="w-full bg-[var(--foreground)]/5 border border-[var(--foreground)]/10 rounded-xl px-4 py-2 text-[var(--foreground)] outline-none focus:border-accent-cyan transition-colors"
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-xs font-black text-[var(--foreground)]/60 uppercase tracking-widest ml-1">Status</label>
+                                    <select
+                                        value={editingMedia.active}
+                                        onChange={(e) => setEditingMedia({ ...editingMedia, active: e.target.value as 'Y' | 'N' })}
+                                        className="w-full bg-[var(--foreground)]/5 border border-[var(--foreground)]/10 rounded-xl px-4 py-2 text-[var(--foreground)] outline-none focus:border-accent-cyan transition-colors appearance-none"
+                                    >
+                                        <option value="Y" className="text-black">Active</option>
+                                        <option value="N" className="text-black">Inactive</option>
+                                    </select>
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-xs font-black text-[var(--foreground)]/60 uppercase tracking-widest ml-1">Remark 1</label>
+                                    <input
+                                        type="text"
+                                        value={editingMedia.remark1 || ''}
+                                        onChange={(e) => setEditingMedia({ ...editingMedia, remark1: e.target.value })}
+                                        className="w-full bg-[var(--foreground)]/5 border border-[var(--foreground)]/10 rounded-xl px-4 py-2 text-[var(--foreground)] outline-none focus:border-accent-cyan transition-colors"
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-xs font-black text-[var(--foreground)]/60 uppercase tracking-widest ml-1">Remark 2</label>
+                                    <input
+                                        type="text"
+                                        value={editingMedia.remark2 || ''}
+                                        onChange={(e) => setEditingMedia({ ...editingMedia, remark2: e.target.value })}
+                                        className="w-full bg-[var(--foreground)]/5 border border-[var(--foreground)]/10 rounded-xl px-4 py-2 text-[var(--foreground)] outline-none focus:border-accent-cyan transition-colors"
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-xs font-black text-[var(--foreground)]/60 uppercase tracking-widest ml-1">End Date (Expiry)</label>
+                                    <input
+                                        type="date"
+                                        value={editingMedia.endDate ? new Date(editingMedia.endDate).toISOString().slice(0, 10) : ''}
+                                        onChange={(e) => {
+                                            const val = e.target.value ? new Date(e.target.value).toISOString() : undefined;
+                                            setEditingMedia({ ...editingMedia, endDate: val });
+                                        }}
+                                        className="w-full bg-[var(--foreground)]/5 border border-[var(--foreground)]/10 rounded-xl px-4 py-2 text-[var(--foreground)] outline-none focus:border-accent-cyan transition-colors dark:[color-scheme:dark]"
+                                    />
+                                    <p className="text-[10px] text-[var(--foreground)]/40 font-mono mt-1">* Expire at start of this date</p>
+                                </div>
+                            </div>
 
-                        {/* Special Actions */}
-                        <div className="border-t border-[var(--foreground)]/10 pt-6">
-                            <h4 className="text-xs font-black text-[var(--foreground)]/40 uppercase tracking-widest mb-4">System Configuration</h4>
-                            <div className="flex items-center justify-between bg-yellow-500/5 p-4 rounded-xl border border-yellow-500/10">
-                                <div>
-                                    <div className="text-yellow-500 font-bold uppercase text-xs tracking-wider">Safety Jingle / Fallback</div>
-                                    <div className="text-xs text-gray-500 mt-1">
-                                        Use this media as the default safety jingle/fallback image for all devices.
-                                        {safetyJingleId === editingMedia.mediaId && <span className="ml-2 bg-green-500 text-black px-2 py-0.5 rounded font-black">CURRENTLY ACTIVE</span>}
+                            <div className="flex gap-4 pt-4">
+                                <button
+                                    onClick={() => setEditingMedia(null)}
+                                    className="flex-1 py-3 rounded-xl bg-[var(--foreground)]/5 text-[var(--foreground)]/70 font-bold hover:bg-[var(--foreground)]/10 transition-all uppercase tracking-widest border border-[var(--foreground)]/10"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={() => handleUpdateMedia(editingMedia)}
+                                    className="flex-[2] py-3 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-black font-black hover:shadow-[0_0_20px_rgba(34,211,238,0.4)] transition-all uppercase tracking-widest"
+                                >
+                                    Commit Changes
+                                </button>
+                            </div>
+
+                            {/* Special Actions */}
+                            <div className="border-t border-[var(--foreground)]/10 pt-6">
+                                <h4 className="text-xs font-black text-[var(--foreground)]/40 uppercase tracking-widest mb-4">System Configuration</h4>
+                                <div className="flex items-center justify-between bg-yellow-500/5 p-4 rounded-xl border border-yellow-500/10">
+                                    <div>
+                                        <div className="text-yellow-500 font-bold uppercase text-xs tracking-wider">Safety Jingle / Fallback</div>
+                                        <div className="text-xs text-gray-500 mt-1">
+                                            Use this media as the default safety jingle/fallback image for all devices.
+                                            {safetyJingleId === editingMedia.mediaId && <span className="ml-2 bg-green-500 text-black px-2 py-0.5 rounded font-black">CURRENTLY ACTIVE</span>}
+                                        </div>
                                     </div>
+                                    <button
+                                        onClick={async () => {
+                                            if (confirm('Set this as the Global Safety Jingle? All devices will update on next sync.')) {
+                                                const res = await systemApi.setSetting('safety_jingle_id', editingMedia.mediaId);
+                                                if (res.success) {
+                                                    setSafetyJingleId(editingMedia.mediaId);
+                                                    alert('Safety Jingle Updated!');
+                                                } else {
+                                                    alert('Failed to update setting.');
+                                                }
+                                            }
+                                        }}
+                                        disabled={safetyJingleId === editingMedia.mediaId}
+                                        className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest transition-all ${safetyJingleId === editingMedia.mediaId ? 'bg-green-500/20 text-green-500 cursor-default' : 'bg-yellow-500/20 text-yellow-500 hover:bg-yellow-500 hover:text-black'}`}
+                                    >
+                                        {safetyJingleId === editingMedia.mediaId ? 'Is Active Jingle' : 'Set as Jingle'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
+
+            {/* --- USAGE MODAL --- */}
+            {
+                showUsageModal && (
+                    <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[200] flex items-center justify-center p-6 animate-in fade-in duration-300">
+                        <div className="w-full max-w-2xl glass-panel rounded-3xl border border-white/10 shadow-2xl p-8 space-y-6 relative">
+                            <div className="flex justify-between items-center border-b border-white/5 pb-6">
+                                <div>
+                                    <h3 className="text-2xl font-black text-white uppercase italic tracking-tighter">Media Usage Report</h3>
+                                    <p className="text-xs text-gray-500 font-bold uppercase tracking-widest mt-1">
+                                        File: <span className="text-accent-cyan">{selectedMediaForUsage?.displayName || selectedMediaForUsage?.fileName}</span>
+                                    </p>
                                 </div>
                                 <button
-                                    onClick={async () => {
-                                        if (confirm('Set this as the Global Safety Jingle? All devices will update on next sync.')) {
-                                            const res = await systemApi.setSetting('safety_jingle_id', editingMedia.mediaId);
-                                            if (res.success) {
-                                                setSafetyJingleId(editingMedia.mediaId);
-                                                alert('Safety Jingle Updated!');
-                                            } else {
-                                                alert('Failed to update setting.');
-                                            }
-                                        }
-                                    }}
-                                    disabled={safetyJingleId === editingMedia.mediaId}
-                                    className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest transition-all ${safetyJingleId === editingMedia.mediaId ? 'bg-green-500/20 text-green-500 cursor-default' : 'bg-yellow-500/20 text-yellow-500 hover:bg-yellow-500 hover:text-black'}`}
+                                    onClick={() => setShowUsageModal(false)}
+                                    className="w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 text-white flex items-center justify-center transition-colors"
                                 >
-                                    {safetyJingleId === editingMedia.mediaId ? 'Is Active Jingle' : 'Set as Jingle'}
+                                    ✕
+                                </button>
+                            </div>
+
+                            <div className="max-h-[400px] overflow-y-auto custom-scrollbar pr-2">
+                                {usageLoading ? (
+                                    <div className="py-20 text-center">
+                                        <div className="animate-spin text-4xl mb-4">⌛</div>
+                                        <p className="text-gray-500 font-bold uppercase tracking-widest text-xs">Analyzing network usage...</p>
+                                    </div>
+                                ) : usageList.length > 0 ? (
+                                    <table className="w-full text-left">
+                                        <thead className="text-xs text-gray-500 uppercase font-black tracking-widest">
+                                            <tr className="border-b border-white/5">
+                                                <th className="pb-4 px-2">Playlist Name</th>
+                                                <th className="pb-4 px-2">Status</th>
+                                                <th className="pb-4 px-2 text-center">In Set</th>
+                                                <th className="pb-4 px-2 text-right">Action</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-white/5">
+                                            {usageList.map((usage, idx) => (
+                                                <tr key={idx} className="group hover:bg-white/5 transition-colors">
+                                                    <td className="py-4 px-2">
+                                                        <Link
+                                                            href={`/admin/playlists/${usage.playlistId}`}
+                                                            className="text-sm font-bold text-white group-hover:text-accent-cyan transition-colors"
+                                                        >
+                                                            {usage.playlistName}
+                                                        </Link>
+                                                    </td>
+                                                    <td className="py-4 px-2">
+                                                        <span className={`px-2 py-1 rounded text-xs font-black uppercase ${usage.active === 'Y' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                                                            {usage.active === 'Y' ? 'Active' : 'Inactive'}
+                                                        </span>
+                                                    </td>
+                                                    <td className="py-4 px-2 text-center text-sm font-mono font-bold text-gray-400">
+                                                        {usage.usageCount}
+                                                    </td>
+                                                    <td className="py-4 px-2 text-right">
+                                                        <Link
+                                                            href={`/admin/playlists/${usage.playlistId}`}
+                                                            className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-accent-cyan/10 text-accent-cyan hover:bg-accent-cyan hover:text-black transition-all"
+                                                            title="Edit Playlist"
+                                                        >
+                                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                                            </svg>
+                                                        </Link>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                ) : (
+                                    <div className="py-20 text-center bg-black/20 rounded-2xl border border-white/5">
+                                        <p className="text-4xl mb-4 opacity-20">🍃</p>
+                                        <p className="text-gray-500 font-bold uppercase tracking-widest text-xs">This media is not currently assigned to any playlists.</p>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="pt-4 flex justify-end">
+                                <button
+                                    onClick={() => setShowUsageModal(false)}
+                                    className="px-8 py-3 rounded-xl bg-white/5 text-white font-black uppercase tracking-widest hover:bg-white/10 transition-all border border-white/10"
+                                >
+                                    Close Report
                                 </button>
                             </div>
                         </div>
                     </div>
-                </div>
-            )}
-
-            {/* --- USAGE MODAL --- */}
-            {showUsageModal && (
-                <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[200] flex items-center justify-center p-6 animate-in fade-in duration-300">
-                    <div className="w-full max-w-2xl glass-panel rounded-3xl border border-white/10 shadow-2xl p-8 space-y-6 relative">
-                        <div className="flex justify-between items-center border-b border-white/5 pb-6">
-                            <div>
-                                <h3 className="text-2xl font-black text-white uppercase italic tracking-tighter">Media Usage Report</h3>
-                                <p className="text-xs text-gray-500 font-bold uppercase tracking-widest mt-1">
-                                    File: <span className="text-accent-cyan">{selectedMediaForUsage?.displayName || selectedMediaForUsage?.fileName}</span>
-                                </p>
-                            </div>
-                            <button
-                                onClick={() => setShowUsageModal(false)}
-                                className="w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 text-white flex items-center justify-center transition-colors"
-                            >
-                                ✕
-                            </button>
-                        </div>
-
-                        <div className="max-h-[400px] overflow-y-auto custom-scrollbar pr-2">
-                            {usageLoading ? (
-                                <div className="py-20 text-center">
-                                    <div className="animate-spin text-4xl mb-4">⌛</div>
-                                    <p className="text-gray-500 font-bold uppercase tracking-widest text-xs">Analyzing network usage...</p>
-                                </div>
-                            ) : usageList.length > 0 ? (
-                                <table className="w-full text-left">
-                                    <thead className="text-xs text-gray-500 uppercase font-black tracking-widest">
-                                        <tr className="border-b border-white/5">
-                                            <th className="pb-4 px-2">Playlist Name</th>
-                                            <th className="pb-4 px-2">Status</th>
-                                            <th className="pb-4 px-2 text-center">In Set</th>
-                                            <th className="pb-4 px-2 text-right">Action</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-white/5">
-                                        {usageList.map((usage, idx) => (
-                                            <tr key={idx} className="group hover:bg-white/5 transition-colors">
-                                                <td className="py-4 px-2">
-                                                    <Link
-                                                        href={`/admin/playlists/${usage.playlistId}`}
-                                                        className="text-sm font-bold text-white group-hover:text-accent-cyan transition-colors"
-                                                    >
-                                                        {usage.playlistName}
-                                                    </Link>
-                                                </td>
-                                                <td className="py-4 px-2">
-                                                    <span className={`px-2 py-1 rounded text-xs font-black uppercase ${usage.active === 'Y' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
-                                                        {usage.active === 'Y' ? 'Active' : 'Inactive'}
-                                                    </span>
-                                                </td>
-                                                <td className="py-4 px-2 text-center text-sm font-mono font-bold text-gray-400">
-                                                    {usage.usageCount}
-                                                </td>
-                                                <td className="py-4 px-2 text-right">
-                                                    <Link
-                                                        href={`/admin/playlists/${usage.playlistId}`}
-                                                        className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-accent-cyan/10 text-accent-cyan hover:bg-accent-cyan hover:text-black transition-all"
-                                                        title="Edit Playlist"
-                                                    >
-                                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                                                        </svg>
-                                                    </Link>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            ) : (
-                                <div className="py-20 text-center bg-black/20 rounded-2xl border border-white/5">
-                                    <p className="text-4xl mb-4 opacity-20">🍃</p>
-                                    <p className="text-gray-500 font-bold uppercase tracking-widest text-xs">This media is not currently assigned to any playlists.</p>
-                                </div>
-                            )}
-                        </div>
-
-                        <div className="pt-4 flex justify-end">
-                            <button
-                                onClick={() => setShowUsageModal(false)}
-                                className="px-8 py-3 rounded-xl bg-white/5 text-white font-black uppercase tracking-widest hover:bg-white/10 transition-all border border-white/10"
-                            >
-                                Close Report
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-        </div>
+                )
+            }
+        </div >
     );
 }

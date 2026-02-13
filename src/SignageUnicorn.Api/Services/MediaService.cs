@@ -312,5 +312,54 @@ namespace SignageUnicorn.Api.Services
             }
             return null;
         }
+        public async Task<int> ProcessExpiredMediaAsync(CancellationToken cancellationToken)
+        {
+            var connectionString = _configuration.GetConnectionString("DefaultConnection");
+            int count = 0;
+
+            using (var connection = new Microsoft.Data.SqlClient.SqlConnection(connectionString))
+            {
+                await connection.OpenAsync(cancellationToken);
+
+                // 1. Find Expired Media
+                var expiredMediaSql = @"
+                    SELECT media_id, file_name, display_name 
+                    FROM sn_media_files WITH (NOLOCK)
+                    WHERE is_deleted = 0 
+                      AND end_date IS NOT NULL 
+                      AND end_date <= SYSUTCDATETIME()";
+
+                var expiredMediaList = await Dapper.SqlMapper.QueryAsync<dynamic>(connection, expiredMediaSql);
+
+                foreach (var media in expiredMediaList)
+                {
+                    if (cancellationToken.IsCancellationRequested) break;
+
+                    try
+                    {
+                        long mediaId = (long)media.media_id;
+                        string fileName = (string)media.file_name;
+
+                        // 2. Execute Force Delete via Stored Procedure
+                        var p = new Dapper.DynamicParameters();
+                        p.Add("@p_action", "DELETE");
+                        p.Add("@p_media_id", mediaId);
+                        p.Add("@p_force_delete", 1); // Force delete even if in playlist
+                        p.Add("@p_userid", 1); // System User
+
+                        await Dapper.SqlMapper.ExecuteAsync(connection, "sp_media_std", p, commandType: System.Data.CommandType.StoredProcedure);
+                        
+                        count++;
+                        await _systemLog.LogAsync(null, "INFO", $"[MediaService] EXPIRED_AUTO_DELETE | MediaID: {mediaId} | Name: {fileName}", "SYSTEM", 1);
+                    }
+                    catch (Exception ex)
+                    {
+                        await _systemLog.LogAsync(null, "ERROR", $"[MediaService] EXPIRY_FAILED | MediaID: {media.media_id} | Error: {ex.Message}", "SYSTEM", 1);
+                    }
+                }
+            }
+
+            return count;
+        }
     }
 }

@@ -171,5 +171,26 @@ namespace SignageUnicorn.Api.Controllers
                 return StatusCode(500, ApiResponse<MediaFile>.ErrorResponse(500, $"Internal error during replacement: {ex.Message}"));
             }
         }
+
+        [HttpPost("cleanup")]
+        [Authorize(Roles = UserRoles.Admin)]
+        public async Task<IActionResult> RunCleanup()
+        {
+            try
+            {
+                var userId = GetUserId();
+                await _systemLog.LogAsync(null, "INFO", $"[MediaController] MANUAL_CLEANUP_TRIGGERED", "API", userId);
+
+                var count = await _service.ProcessExpiredMediaAsync(CancellationToken.None);
+                
+                return Ok(ApiResponse<int>.SuccessResponse(count, $"Cleanup complete. Processed {count} expired items."));
+            }
+            catch (Exception ex)
+            {
+                var userId = GetUserId();
+                await _systemLog.LogAsync(null, "ERROR", $"[MediaController] MANUAL_CLEANUP_FAILED | {ex.Message}", "API", userId);
+                return StatusCode(500, ApiResponse<int>.ErrorResponse(500, $"Cleanup failed: {ex.Message}"));
+            }
+        }
     }
 }

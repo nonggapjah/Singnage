@@ -53,4 +53,10 @@ export const mediaApi = {
             body: formData,
         });
     },
+
+    runCleanup: async (): Promise<ApiResponse<number>> => {
+        return await apiFetch<number>('/media/cleanup', {
+            method: 'POST',
+        });
+    },
 };

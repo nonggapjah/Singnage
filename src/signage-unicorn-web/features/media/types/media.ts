@@ -11,6 +11,7 @@ export interface MediaFile {
     remark2?: string;
     uploadedBy: string;
     uploadedAt?: string;
+    endDate?: string;
     active: 'Y' | 'N';
 }
 
@@ -24,6 +25,7 @@ export interface MediaUploadRequest {
     supplier_Code?: string;
     remark1?: string;
     remark2?: string;
+    endDate?: string;
 }
 
 export interface MediaUsage {
