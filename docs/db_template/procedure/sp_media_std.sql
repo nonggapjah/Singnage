@@ -142,9 +142,10 @@ BEGIN
             supplier_code = ISNULL(@p_supplier_code, supplier_code),
             remark1 = ISNULL(@p_remark1, remark1),
             remark2 = ISNULL(@p_remark2, remark2),
-            end_date = @p_end_date, -- Update end_date (allows setting to NULL if passed explicitly, or handle in app logic)
+            end_date = ISNULL(@p_end_date, end_date), -- Update end_date (allows setting to NULL if passed explicitly, or handle in app logic)
             updated_at = SYSUTCDATETIME(),
-            updated_by = @p_userid
+            updated_by = @p_userid,
+			is_deleted = case when @p_filter_status = 'Y' then 0 when @p_filter_status = 'N' then 1 else is_deleted end
         WHERE is_deleted = 0
           AND (media_id = @p_media_id OR media_uuid = @p_media_uuid);
 
@@ -319,13 +320,21 @@ ResultSection:
     BEGIN
         IF @p_action IN ('CREATE','UPDATE','GET_BY_ID', 'REPLACE_FILE', 'REPLACE_USAGE')
         BEGIN
-            SELECT TOP 1 * FROM sn_media_files
+            SELECT TOP 1 media_id,media_uuid,file_name,display_name,blob_url,duration_sec,ratio,file_size_kb
+				,supplier_code,remark1,remark2,storage_provider,file_hash
+				,created_at as UploadedAt,created_by as UploadedBy,updated_at,updated_by,is_deleted,deleted_at,deleted_by
+				,row_version,dateadd(HH,+7,end_date) end_date 
+			FROM sn_media_files
             WHERE media_id = @p_media_id OR media_uuid = @p_media_uuid;
         END
 
         IF @p_action = 'GET_ALL'
         BEGIN
-            SELECT *, CASE WHEN is_deleted = 1 THEN 'N' ELSE 'Y' END AS Active
+            SELECT media_id,media_uuid,file_name,display_name,blob_url,duration_sec,ratio,file_size_kb
+				,supplier_code,remark1,remark2,storage_provider,file_hash
+				,created_at as UploadedAt,created_by as UploadedBy,updated_at,updated_by,is_deleted,deleted_at,deleted_by
+				,row_version,dateadd(HH,+7,end_date) end_date
+				, CASE WHEN is_deleted = 1 THEN 'N' ELSE 'Y' END AS Active
             FROM sn_media_files
             WHERE 
                 (@p_filter_status IS NULL OR
@@ -359,7 +368,10 @@ ResultSection:
 
         IF @p_action = 'GET_ACTIVE'
         BEGIN
-            SELECT *
+            SELECT media_id,media_uuid,file_name,display_name,blob_url,duration_sec,ratio,file_size_kb
+				,supplier_code,remark1,remark2,storage_provider,file_hash
+				,created_at as UploadedAt,created_by as UploadedBy,updated_at,updated_by,is_deleted,deleted_at,deleted_by
+				,row_version,dateadd(HH,+7,end_date) end_date
             FROM sn_media_files
             WHERE is_deleted = 0
               AND (@p_supplier_code IS NULL OR supplier_code = @p_supplier_code)

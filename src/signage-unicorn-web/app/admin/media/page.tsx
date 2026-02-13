@@ -275,7 +275,13 @@ export default function MediaLibraryPage() {
 
             if (res.success) {
                 openAlert('Success', 'Media Updated Successfully!', 'success');
-                loadMedia();
+
+                // Optimistic UI Update: Reflect changes immediately without waiting for network
+                setMediaList(current => current.map(m =>
+                    m.mediaId === updated.mediaId ? { ...m, ...updated } : m
+                ));
+
+                await loadMedia();
                 setEditingMedia(null);
             } else {
                 openAlert('Update Failed', res.message || 'Unknown error', 'danger');
@@ -340,6 +346,24 @@ export default function MediaLibraryPage() {
             console.error("Failed to load usage", error);
         } finally {
             setUsageLoading(false);
+        }
+    };
+
+    const handleEditClick = async (media: MediaFile) => {
+        // Optimistic open (optional) or loading state?
+        // Let's invoke API to get fresh data first
+        try {
+            const res = await mediaApi.getById(media.mediaId);
+            if (res.success && res.data) {
+                setEditingMedia(res.data);
+            } else {
+                // Fallback to cached if fail? or Show error
+                openAlert('Error', 'Failed to fetch latest data. Using cached version.', 'warning');
+                setEditingMedia(media);
+            }
+        } catch (error) {
+            console.error("Failed to fetch media details", error);
+            setEditingMedia(media);
         }
     };
 
@@ -646,7 +670,7 @@ export default function MediaLibraryPage() {
                             >
                                 <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
                                     <button
-                                        onClick={(e) => { e.stopPropagation(); setEditingMedia(m); }}
+                                        onClick={(e) => { e.stopPropagation(); handleEditClick(m); }}
                                         className="p-1.5 bg-black/60 hover:bg-accent-cyan/80 rounded-lg backdrop-blur-md transition-colors"
                                         title="Edit Metadata"
                                     >
@@ -807,7 +831,7 @@ export default function MediaLibraryPage() {
                                         <td className="px-6 py-4 text-right pr-12">
                                             <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                                 <button
-                                                    onClick={(e) => { e.stopPropagation(); setEditingMedia(m); }}
+                                                    onClick={(e) => { e.stopPropagation(); handleEditClick(m); }}
                                                     className="p-1.5 hover:bg-accent-cyan/20 text-gray-400 hover:text-accent-cyan rounded-lg transition-colors"
                                                     title="Edit Metadata"
                                                 >

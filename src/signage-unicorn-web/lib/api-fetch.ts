@@ -75,10 +75,11 @@ export async function apiFetch<T = any>(
         }
 
         if (response.status === 401) {
-            // Handle Unauthorized (e.g., redirect to login)
             if (typeof window !== 'undefined') {
                 localStorage.removeItem('accessToken');
-                // window.location.href = '/login';
+                if (window.location.pathname !== '/login') {
+                    window.location.href = '/login';
+                }
             }
         }
 

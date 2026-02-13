@@ -26,8 +26,15 @@ Media Library คือศูนย์กลางสำหรับเก็บ
     *   Multiple Upload: ควรสามารถอัปโหลดได้หลายไฟล์พร้อมกัน
     *   Auto-tagging: ควรอ่าน Metadata (Width, Height, Duration) อัตโนมัติทันทีที่ไฟล์เข้าสู่ระบบ
 3.  **Delete/Archive Logic:**
-    *   **Hard Delete:** อนุญาตเฉพาะไฟล์ที่ *ยังไม่ถูกใช้งานใน Playlist ใดๆ*
-    *   **Soft Delete (Inactive):** หากไฟล์ถูกใช้ใน Playlist อยู่ ให้แจ้งเตือน หรือเปลี่ยนสถานะเป็น Inactive แทนการลบไฟล์จริง เพื่อป้องกันจอดับ
+    *   **Status Management (Active/Inactive):**
+        *   **Active (`is_deleted = 0`):** สื่อพร้อมใช้งาน สามารถนำไปใช้ใน Playlist ได้ปกติ
+        *   **Inactive (`is_deleted = 1`):** สื่อถูกระงับการใช้งาน (Soft Delete) จะไม่แสดงในรายการ active และไม่ถูกส่งไปยัง Device แต่ไฟล์ยังคงอยู่
+        *   **Restore Capability:** สื่อที่เป็น Inactive สามารถกู้คืน (Restore) สถานะกลับมาเป็น Active ได้
+    *   **Force Delete:** การลบถาวร (Hard Delete) สามารถทำได้โดยผู้ดูแลระบบ (หากไฟล์ถูกใช้งานอยู่ ระบบจะแจ้งเตือนก่อนลบ)
+4.  **Media Expiry (อายุการใช้งานสื่อ):**
+    *   **End Date Configuration:** สามารถกำหนด "วันหมดอายุ" (End Date) ให้กับสื่อแต่ละไฟล์ได้
+    *   **Automated Cleanup:** ระบบมี Background Service (`MediaCleanupWorker`) คอยตรวจสอบสื่อที่หมดอายุ (End Date <= ปัจจุบัน) ทุกๆ 6 ชั่วโมง
+    *   **Expiration Action:** เมื่อสื่อหมดอายุ ระบบจะทำการ Soft Delete (Set Inactive) หรือ Hard Delete (ตามการตั้งค่า) อัตโนมัติ
 
 ### 1.3 Safety Jingle Configuration (ระบบภาพพักหน้าจอฉุกเฉิน)
 *   **Centralized Management:** การตั้งค่า Safety Jingle ทำที่หน้า **Media Library** โดย Admin เท่านั้น

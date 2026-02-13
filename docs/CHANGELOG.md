@@ -3,6 +3,20 @@
 รายการอัปเดตและประวัติการแก้ไขระบบ (Patch Version History)
 
 ---
+## [2.3.0] - 2026-02-13
+### New Features & Enhancements
+- **Media Expiry & Lifecycle Management**:
+    - **Expiration Date**: Added `EndDate` field to media files. Media will automatically expire after this date.
+    - **Automated Cleanup**: Implemented a Background Worker service that checks for expired media every 6 hours and performs cleanup actions.
+    - **Manual Trigger**: Admin can now manually trigger the expiry check process from the Media Library toolbar.
+- **Advanced Media Status Logic**:
+    - **Active/Inactive State**: Redesigned status logic using `is_deleted` flag (0=Active, 1=Inactive/Soft Delete).
+    - **Restore Functionality**: Inactive media can now be restored to Active status directly from the UI, preventing accidental permanent data loss.
+    - **Smart Filtering**: Media Library now defaults to showing only "Active" items, with options to view Inactive or All items.
+- **UI/UX Improvements**:
+    - **Confirm Modal**: Replaced native browser alerts with a custom, theme-consistent `ConfirmModal` for all critical actions (Delete, Restore, Replace, Sync).
+    - **Dynamic Actions**: Action buttons in Media Library now contextually change between "Delete" (for Active items) and "Restore" (for Inactive items).
+
 ## [2.2.1] - 2026-02-12
 ### Critical Fixes & Stability
 - **Playback Loop Reliability**:
