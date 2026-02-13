@@ -363,7 +363,7 @@ ResultSection:
                             file_name LIKE '%.webp'
                     ))
               )
-            ORDER BY created_at DESC;
+            ORDER BY updated_at DESC, created_at DESC;
         END
 
         IF @p_action = 'GET_ACTIVE'

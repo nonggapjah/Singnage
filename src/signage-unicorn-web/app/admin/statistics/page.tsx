@@ -107,7 +107,7 @@ export default function StatisticsPage() {
                     `"${d.branchCode || ''}"`,
                     `"${d.supplierCode || ''}"`,
                     `"${d.playlistId || ''}"`,
-                    `"${d.playlistId ? (playlistMap[d.playlistId] || '') : ''}"`,
+                    `"${d.playlistName || (d.playlistId ? (playlistMap[d.playlistId] || '') : '')}"`,
                     `"${d.mediaId || ''}"`,
                     `"${d.mediaName || ''}"`,
                     `"${d.fileName || ''}"`,
@@ -377,7 +377,7 @@ export default function StatisticsPage() {
                                             <td className="p-4 text-xs font-mono text-muted-foreground">
                                                 {log.playlistId ? (
                                                     <span className="text-accent-purple font-bold">
-                                                        {playlistMap[log.playlistId] || log.playlistId.substring(0, 8) + '...'}
+                                                        {log.playlistName || (log.playlistId ? (playlistMap[log.playlistId] || log.playlistId.substring(0, 8) + '...') : '')}
                                                     </span>
                                                 ) : '-'}
                                             </td>

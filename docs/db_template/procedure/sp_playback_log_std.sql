@@ -1,9 +1,11 @@
+USE [SignageUnicornDB]
+GO
+/****** Object:  StoredProcedure [dbo].[sp_playback_log_std]    Script Date: 02/13/2026 3:13:58 PM ******/
 SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-
-CREATE OR ALTER PROCEDURE [dbo].[sp_playback_log_std]
+ALTER   PROCEDURE [dbo].[sp_playback_log_std]
 (
     @p_action           NVARCHAR(50),
     
@@ -211,6 +213,8 @@ ResultSection:
                 pl.branch_code AS BranchCode,
                 m.supplier_code AS SupplierCode,
                 pl.playlist_id AS PlaylistId,
+				p.playlist_name AS PlaylistName,
+				pl.media_id AS MediaId,
                 m.display_name AS MediaName,
                 m.file_name AS FileName,
                 pl.duration_sec AS DurationSec,
@@ -218,10 +222,10 @@ ResultSection:
             FROM sn_playback_logs pl
             LEFT JOIN sn_devices d ON pl.device_id = d.device_id
             LEFT JOIN sn_media_files m ON pl.media_id = m.media_id
+			LEFT JOIN sn_playlists p ON pl.playlist_id = p.playlist_id
             WHERE (@p_start_time IS NULL OR pl.created_at >= @p_start_time)
               AND (@p_end_time IS NULL OR pl.created_at <= @p_end_time)
             ORDER BY pl.created_at DESC;
         END
     END
 END
-GO

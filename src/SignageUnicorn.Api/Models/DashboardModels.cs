@@ -12,7 +12,7 @@ namespace SignageUnicorn.Api.Models
         public int TotalPlaylists { get; set; }
         public double AverageLatencyMs { get; set; }
         public double DynamicTxSpeedMbps { get; set; }
-        public string SystemVersion { get; set; } = "1.7.6";
+        public string SystemVersion { get; set; } = "2.3.0";
         public IEnumerable<PlaybackSummaryDto> TopMedia { get; set; } = new List<PlaybackSummaryDto>();
         public IEnumerable<SystemLogEntry> RecentAlerts { get; set; } = new List<SystemLogEntry>();
     }

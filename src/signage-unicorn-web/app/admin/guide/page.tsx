@@ -155,19 +155,19 @@ export default function UserGuidePage() {
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                                     <div className="space-y-4">
-                                        <h3 className="text-xl font-bold uppercase tracking-tight">Media Management</h3>
+                                        <h3 className="text-xl font-bold uppercase tracking-tight">Media Lifecycle (v2.3)</h3>
                                         <ul className="space-y-4 text-sm text-muted-foreground">
                                             <li className="flex gap-4">
-                                                <span className="w-6 h-6 rounded-lg bg-accent-cyan/10 border border-accent-cyan/20 flex items-center justify-center text-accent-cyan text-xs font-bold">01</span>
-                                                <p><strong className="text-foreground">Upload:</strong> ระบุ Display Name และ Remark 1 เพื่อความชัดเจน ระบบคำนวณ Ratio อัตโนมัติ</p>
+                                                <span className="w-6 h-6 rounded-lg bg-accent-cyan/10 border border-accent-cyan/20 flex items-center justify-center text-accent-cyan text-xs font-bold shrink-0">01</span>
+                                                <p><strong className="text-foreground">Upload & Expiry:</strong> ระบุ <strong>End Date</strong> (Optional) เมื่ออัปโหลด สื่อจะถูกระงับการใช้งานอัตโนมัติเมื่อถึงกำหนด</p>
                                             </li>
                                             <li className="flex gap-4">
-                                                <span className="w-6 h-6 rounded-lg bg-accent-cyan/10 border border-accent-cyan/20 flex items-center justify-center text-accent-cyan text-xs font-bold">02</span>
-                                                <p><strong className="text-foreground">Status:</strong> ‘Active’ คือพร้อมใช้งาน, ‘Inactive’ คือพักการใช้งานคลิปนั้น</p>
+                                                <span className="w-6 h-6 rounded-lg bg-accent-cyan/10 border border-accent-cyan/20 flex items-center justify-center text-accent-cyan text-xs font-bold shrink-0">02</span>
+                                                <p><strong className="text-foreground">Status Logic:</strong> ‘Active’ คือพร้อมใช้งาน, ‘Inactive’ คือหมดอายุหรือถูกลบ (Soft Delete) สามารถ <strong>Restore</strong> กลับมาได้</p>
                                             </li>
                                             <li className="flex gap-4">
-                                                <span className="w-6 h-6 rounded-lg bg-accent-cyan/10 border border-accent-cyan/20 flex items-center justify-center text-accent-cyan text-xs font-bold">03</span>
-                                                <p><strong className="text-foreground">Delete:</strong> ระบบบล็อกการลบสื่อที่ใช้งานอยู่ (Safe Delete) ป้องกันหน้าจอดำ</p>
+                                                <span className="w-6 h-6 rounded-lg bg-accent-cyan/10 border border-accent-cyan/20 flex items-center justify-center text-accent-cyan text-xs font-bold shrink-0">03</span>
+                                                <p><strong className="text-foreground">Auto-Cleanup:</strong> Background Worker จะตรวจสอบสื่อหมดอายุทุก 6 ชม. หรือสั่ง <strong>"Check Expiry"</strong> ได้ทันทีจาก Toolbar</p>
                                             </li>
                                         </ul>
                                     </div>
@@ -206,10 +206,10 @@ export default function UserGuidePage() {
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     <div className="p-6 bg-accent-purple/5 rounded-3xl border border-accent-purple/20 space-y-4">
                                         <h4 className="text-accent-purple font-black text-xs uppercase tracking-widest flex items-center gap-2">
-                                            <span>Smart Sync & Cache Hub</span>
+                                            <span>SQLite Engine & Robust Sync</span>
                                         </h4>
                                         <p className="text-xs text-muted-foreground leading-relaxed font-medium">
-                                            อุปกรณ์จะทำการ <strong>Download & Cache</strong> สื่อทั้งหมดลงเครื่องทันทีเมื่อได้รับ Playlist เพื่อให้สามารถเล่นได้ต่อเนื่องแม้ไม่มีอินเทอร์เน็ต (Offline Survival)
+                                            เวอร์ชัน 2.0+ ใช้ <strong>Native SQLite</strong> ในการจัดการ Playlist และ Log (รองรับ 100k+ records) พร้อมระบบ <strong>Priority Queue</strong> ดาวน์โหลดสื่ออย่างมีลำดับและ <strong>Background Swap</strong> เปลี่ยนสื่อเมื่อพร้อมเท่านั้น
                                         </p>
                                     </div>
                                     <div className="p-6 bg-primary/5 rounded-3xl border border-primary/20 space-y-4">

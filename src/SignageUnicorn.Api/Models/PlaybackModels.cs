@@ -51,6 +51,8 @@ namespace SignageUnicorn.Api.Models
         public string? FileName { get; set; }
         public string? SupplierCode { get; set; }
         public string? PlaylistId { get; set; }
+        public string? PlaylistName { get; set; }
+        public string? MediaId { get; set; }
         public int DurationSec { get; set; }
         public string? Result { get; set; }
     }

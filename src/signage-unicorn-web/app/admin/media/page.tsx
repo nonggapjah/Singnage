@@ -757,11 +757,26 @@ export default function MediaLibraryPage() {
                                         {m.durationSec > 0 ? `${m.durationSec}s` : m.ratio}
                                     </div>
                                 </div>
-                                <div className="p-4 space-y-1">
-                                    <p className="text-sm font-bold truncate text-[var(--foreground)] group-hover:text-accent-cyan transition-colors">{m.displayName || m.fileName}</p>
-                                    <div className="flex justify-between text-xs text-gray-500 uppercase font-black">
-                                        <span className="truncate mr-2 w-2/3">{m.fileName}</span>
-                                        <span className="whitespace-nowrap">{(m.fileSizeKb / 1024).toFixed(1)} MB</span>
+                                <div className="p-3 space-y-1">
+                                    <div className="flex justify-between items-start gap-2 h-6">
+                                        <p className="text-sm font-bold truncate text-[var(--foreground)] group-hover:text-accent-cyan transition-colors flex-1" title={m.displayName}>{m.displayName || m.fileName}</p>
+                                        {m.endDate && (
+                                            <span className="text-[10px] text-red-400 font-bold whitespace-nowrap bg-red-500/10 px-1.5 py-0.5 rounded uppercase tracking-tighter shrink-0 flex items-center h-5 mt-0.5">
+                                                END: {new Date(m.endDate).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit' })}
+                                            </span>
+                                        )}
+                                    </div>
+                                    <div className="flex justify-between items-center text-[10px] text-gray-500 uppercase font-bold tracking-tight">
+                                        <div className="truncate w-3/4 flex items-center opacity-80" title={`${m.supplier_Code ? m.supplier_Code + ' / ' : ''}${m.fileName}`}>
+                                            {m.supplier_Code && (
+                                                <>
+                                                    <span className="text-accent-cyan whitespace-nowrap mr-1">{m.supplier_Code}</span>
+                                                    <span className="text-gray-600 mr-1">/</span>
+                                                </>
+                                            )}
+                                            <span className="truncate">{m.fileName}</span>
+                                        </div>
+                                        <span className="whitespace-nowrap ml-2 opacity-60">{(m.fileSizeKb / 1024).toFixed(1)} MB</span>
                                     </div>
                                 </div>
                             </div>
@@ -809,8 +824,13 @@ export default function MediaLibraryPage() {
                                             </div>
                                         </td>
                                         <td className="px-6 py-4">
-                                            <p className="text-sm font-bold text-[var(--foreground)] group-hover:text-accent-cyan transition-colors">{m.displayName || m.fileName}</p>
-                                            <p className="text-xs text-gray-500 truncate max-w-[200px]">{m.fileName}</p>
+                                            <p className="text-sm font-bold text-[var(--foreground)] group-hover:text-accent-cyan transition-colors" title={m.displayName}>{m.displayName || m.fileName}</p>
+                                            <p className="text-xs text-gray-500 truncate font-mono opacity-80" title={m.fileName}>{m.fileName}</p>
+                                            {m.supplier_Code && (
+                                                <p className="text-[10px] text-accent-cyan font-mono mt-1 opacity-90 truncate" title="Supplier Code">
+                                                    <span className="opacity-50 mr-1">Supplier code:</span>{m.supplier_Code}
+                                                </p>
+                                            )}
                                         </td>
                                         <td className="px-6 py-4 hidden xl:table-cell">
                                             <div className="flex flex-col gap-0.5">
@@ -825,7 +845,7 @@ export default function MediaLibraryPage() {
                                         <td className="px-6 py-4 text-xs text-gray-500 font-mono hidden xl:table-cell">
                                             <div>{m.uploadedAt?.split('T')[0]}</div>
                                             {m.endDate && (
-                                                <div className="text-[10px] text-red-400 font-bold mt-0.5" title="Expires On">Exp: {m.endDate.split('T')[0]}</div>
+                                                <div className="text-[10px] text-red-400 font-bold mt-0.5" title="Expires On">End: {m.endDate.split('T')[0]}</div>
                                             )}
                                         </td>
                                         <td className="px-6 py-4 text-right pr-12">
@@ -909,8 +929,20 @@ export default function MediaLibraryPage() {
                                     {/* ... Existing Details ... */}
                                     <div className="flex justify-between items-start">
                                         <div>
-                                            <h3 className="text-xl font-black text-[var(--foreground)] group-hover:text-accent-cyan transition-colors">{m.displayName || m.fileName}</h3>
-                                            <p className="text-xs text-gray-400 font-mono tracking-tight mt-1">{m.fileName}</p>
+                                            <h3 className="text-3xl font-black text-[var(--foreground)] group-hover:text-accent-cyan transition-colors tracking-tighter uppercase mb-1">{m.displayName || m.fileName}</h3>
+                                            <p className="text-sm text-gray-400 font-mono tracking-tight flex items-center gap-2 flex-wrap">
+                                                <span className="text-accent-cyan font-bold">Supplier Code: {m.supplier_Code || '-'}</span>
+                                                <span className="text-gray-600">/</span>
+                                                <span className="opacity-80">{m.fileName}</span>
+                                                {m.endDate && (
+                                                    <>
+                                                        <span className="text-gray-600">/</span>
+                                                        <span className="text-red-400 font-bold">
+                                                            enddate: {new Date(m.endDate).toLocaleDateString('en-GB')}
+                                                        </span>
+                                                    </>
+                                                )}
+                                            </p>
                                         </div>
                                     </div>
                                     {/* ... properties ... */}

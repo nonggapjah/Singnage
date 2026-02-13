@@ -96,7 +96,7 @@ namespace SignageUnicorn.Api.Controllers
                     TotalPlaylists = playlists.Count(),
                     AverageLatencyMs = Math.Round(avgLatency, 1),
                     DynamicTxSpeedMbps = Math.Round(txSpeed, 1),
-                    SystemVersion = "2.2.0",
+                    SystemVersion = "2.3.0",
                     TopMedia = latestPlaybackSummary.OrderByDescending(s => s.PlayCount).Take(5),
                     RecentAlerts = filteredLogs
                 };

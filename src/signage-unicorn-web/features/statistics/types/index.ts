@@ -21,6 +21,7 @@ export interface PlaybackLogExport {
     mediaName?: string;
     fileName?: string;
     playlistId?: string;
+    playlistName?: string;
     mediaId?: string;
     durationSec: number;
     result: string;
