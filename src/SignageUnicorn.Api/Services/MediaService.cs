@@ -343,31 +343,61 @@ namespace SignageUnicorn.Api.Services
 
                 var expiredMediaList = await Dapper.SqlMapper.QueryAsync<dynamic>(connection, expiredMediaSql);
 
+                var affectedDeviceIds = new HashSet<string>();
+
                 foreach (var media in expiredMediaList)
                 {
                     if (cancellationToken.IsCancellationRequested) break;
 
                     try
                     {
-                        long mediaId = (long)media.media_id;
-                        string fileName = (string)media.file_name;
+                        string mediaIdStr = media.media_id.ToString();
+                        
+                        // 1. Find affected devices BEFORE deleting (to ensure we notify them)
+                        try 
+                        {
+                            var devices = await _deviceRepository.GetDevicesByMediaIdAsync(mediaIdStr);
+                            foreach (var d in devices) affectedDeviceIds.Add(d.DeviceId);
+                        }
+                        catch (Exception devEx)
+                        {
+                            // Logger not available, fallback to System Log
+                            Console.WriteLine($"[WARN] Failed to resolve devices for expired media: {devEx.Message}");
+                        }
 
                         // 2. Execute Force Delete via Stored Procedure
                         var p = new Dapper.DynamicParameters();
                         p.Add("@p_action", "DELETE");
-                        p.Add("@p_media_id", mediaId);
+                        p.Add("@p_media_id", media.media_id);
                         p.Add("@p_force_delete", 1); // Force delete even if in playlist
                         p.Add("@p_userid", 1); // System User
 
                         await Dapper.SqlMapper.ExecuteAsync(connection, "sp_media_std", p, commandType: System.Data.CommandType.StoredProcedure);
                         
                         count++;
-                        await _systemLog.LogAsync(null, "INFO", $"[MediaService] EXPIRED_AUTO_DELETE | MediaID: {mediaId} | Name: {fileName}", "SYSTEM", 1);
+                        await _systemLog.LogAsync(null, "INFO", $"[MediaService] EXPIRED_AUTO_DELETE | MediaID: {media.media_id} | Name: {media.file_name}", "SYSTEM", 1);
                     }
                     catch (Exception ex)
                     {
                         await _systemLog.LogAsync(null, "ERROR", $"[MediaService] EXPIRY_FAILED | MediaID: {media.media_id} | Error: {ex.Message}", "SYSTEM", 1);
                     }
+                }
+
+                // 3. Notify all affected devices to Sync immediately
+                if (affectedDeviceIds.Count > 0)
+                {
+                    foreach (var devId in affectedDeviceIds)
+                    {
+                        try 
+                        {
+                            await _deviceRepository.AddCommandAsync(devId, "FORCE_SYNC");
+                        }
+                        catch (Exception cmdEx) 
+                        {
+                             Console.WriteLine($"[ERROR] Failed to send FORCE_SYNC to device {devId}: {cmdEx.Message}");
+                        }
+                    }
+                    await _systemLog.LogAsync(null, "INFO", $"[MediaService] EXPIRY_SYNC_SENT | Devices: {affectedDeviceIds.Count}", "SYSTEM", 1);
                 }
             }
 

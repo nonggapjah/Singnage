@@ -751,7 +751,7 @@ document.getElementById('view-patch-history').onclick = async () => {
         // 1. Try API first (Best for latest info)
         if (config && config.serverIp) {
             try {
-                const res = await fetch(`${config.serverIp}/api/v1/system/changelog`);
+                const res = await fetch(`${config.serverIp}/api/v1/changelog`);
                 if (res.ok) {
                     const data = await res.json();
                     if (data.success && data.data) {

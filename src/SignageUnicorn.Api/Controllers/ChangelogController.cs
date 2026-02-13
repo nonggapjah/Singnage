@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 using SignageUnicorn.Api.Models.Responses;
 using System.IO;
 using System.Threading.Tasks;
@@ -7,6 +8,7 @@ namespace SignageUnicorn.Api.Controllers
 {
     [ApiController]
     [Route("api/v1/changelog")]
+    [AllowAnonymous]
     public class ChangelogController : ControllerBase
     {
         private readonly IWebHostEnvironment _env;

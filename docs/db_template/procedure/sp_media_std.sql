@@ -173,7 +173,7 @@ BEGIN
             file_size_kb  = ISNULL(@p_file_size_kb, file_size_kb),
             file_hash     = ISNULL(@p_file_hash, file_hash),
             storage_provider = ISNULL(@p_storage_provider, storage_provider),
-            end_date      = ISNULL(@p_end_date, end_date), -- Update end_date if provided
+            end_date      = @p_end_date, -- Update end_date if provided
             updated_at    = SYSUTCDATETIME(),
             updated_by    = @p_userid
         WHERE is_deleted = 0
