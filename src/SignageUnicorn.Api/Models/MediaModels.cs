@@ -20,6 +20,7 @@ namespace SignageUnicorn.Api.Models
         public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
         public string Active { get; set; } = "Y";
         public string? FileHash { get; set; }
+        public DateTime? EndDate { get; set; }
     }
 
     public class MediaUploadRequest
@@ -41,6 +42,7 @@ namespace SignageUnicorn.Api.Models
         
         public string? Remark1 { get; set; }
         public string? Remark2 { get; set; }
+        public DateTime? EndDate { get; set; }
     }
     public class MediaUsageDto
     {

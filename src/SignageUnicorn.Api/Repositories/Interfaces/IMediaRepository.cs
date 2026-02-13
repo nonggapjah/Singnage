@@ -12,6 +12,7 @@ namespace SignageUnicorn.Api.Repositories.Interfaces
         Task<IEnumerable<MediaUsageDto>> GetMediaUsageAsync(string mediaId);
         Task<RepositoryResult<MediaFile>> SwapMediaAsync(string oldId, string newId, long? userId = null);
         Task<RepositoryResult<MediaFile>> ReplaceAsync(MediaFile media, long? userId = null);
+        Task<RepositoryResult> RestoreAsync(string id, long? userId = null);
         Task<bool> SyncMediaUrls(string targetUrl, string newUrl);
     }
 }

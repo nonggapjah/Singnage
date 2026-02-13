@@ -146,7 +146,8 @@ namespace SignageUnicorn.Api.Services
                 Remark2 = request.Remark2,
                 UploadedBy = "admin", // Legacy, now tracked by userId in DB
                 Active = "Y",
-                FileHash = fileHash
+                FileHash = fileHash,
+                EndDate = request.EndDate
             };
 
             var result = await _repository.CreateAsync(media, userId);
@@ -192,6 +193,16 @@ namespace SignageUnicorn.Api.Services
                 await _systemLog.LogAsync(null, "INFO", $"[MediaService] DELETED | MediaID: {id}", "API", userId);
             }
             return result.Success ? "SUCCESS" : "NOT_FOUND";
+        }
+
+        public async Task<string> RestoreMediaAsync(string id, long? userId = null)
+        {
+            var result = await _repository.RestoreAsync(id, userId);
+            if (result.Success)
+            {
+                 await _systemLog.LogAsync(null, "INFO", $"[MediaService] RESTORED | MediaID: {id}", "API", userId);
+            }
+            return result.Success ? "SUCCESS" : "ERROR";
         }
 
         public async Task<IEnumerable<MediaUsageDto>> GetMediaUsageAsync(string id)
@@ -290,7 +301,8 @@ namespace SignageUnicorn.Api.Services
                 DurationSec = request.DurationSec != 0 ? request.DurationSec : existing.DurationSec,
                 Ratio = request.Ratio ?? existing.Ratio,
                 FileSizeKb = request.FileSizeKb ?? existing.FileSizeKb,
-                FileHash = fileHash
+                FileHash = fileHash,
+                EndDate = request.EndDate ?? existing.EndDate 
             };
 
             var result = await _repository.ReplaceAsync(media, userId);

@@ -261,6 +261,21 @@ BEGIN
     END
 
     /* =============================================
+       RESTORE (Re-Activate)
+    ============================================= */
+    IF @p_action = 'RESTORE'
+    BEGIN
+        UPDATE sn_media_files
+        SET is_deleted = 0,
+            updated_at = SYSUTCDATETIME(),
+            updated_by = @p_userid
+        WHERE media_id = @p_media_id OR media_uuid = @p_media_uuid;
+
+        SET @msg = N'Media restored (Activated).';
+        GOTO ResultSection;
+    END
+
+    /* =============================================
        GET_USAGE (Legacy compatible)
     ============================================= */
     IF @p_action = 'GET_USAGE'
@@ -310,9 +325,14 @@ ResultSection:
 
         IF @p_action = 'GET_ALL'
         BEGIN
-            SELECT TOP 200 *
+            SELECT *, CASE WHEN is_deleted = 1 THEN 'N' ELSE 'Y' END AS Active
             FROM sn_media_files
-            WHERE is_deleted = 0
+            WHERE 
+                (@p_filter_status IS NULL OR
+                 (@p_filter_status = 'Y' AND is_deleted = 0) OR
+                 (@p_filter_status = 'N' AND is_deleted = 1) OR
+                 (@p_filter_status = '') 
+                )
               AND (@p_supplier_code IS NULL OR supplier_code = @p_supplier_code)
               AND (@p_remark1 IS NULL OR remark1 LIKE '%' + @p_remark1 + '%')
               AND (@p_remark2 IS NULL OR remark2 LIKE '%' + @p_remark2 + '%')
@@ -339,7 +359,7 @@ ResultSection:
 
         IF @p_action = 'GET_ACTIVE'
         BEGIN
-            SELECT TOP 200 *
+            SELECT *
             FROM sn_media_files
             WHERE is_deleted = 0
               AND (@p_supplier_code IS NULL OR supplier_code = @p_supplier_code)

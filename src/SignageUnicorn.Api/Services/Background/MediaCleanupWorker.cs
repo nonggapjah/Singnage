@@ -15,7 +15,7 @@ namespace SignageUnicorn.Api.Services.Background
         private readonly ILogger<MediaCleanupWorker> _logger;
         private readonly IServiceProvider _serviceProvider;
         private readonly IConfiguration _configuration;
-        private readonly TimeSpan _checkInterval = TimeSpan.FromHours(1); // Run every hour
+        private readonly TimeSpan _checkInterval = TimeSpan.FromHours(6); // Run every hour
 
         public MediaCleanupWorker(ILogger<MediaCleanupWorker> logger, IServiceProvider serviceProvider, IConfiguration configuration)
         {

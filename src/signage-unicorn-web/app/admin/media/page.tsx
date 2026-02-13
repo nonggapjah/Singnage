@@ -6,6 +6,7 @@ import { mediaApi } from '@/features/media/api/media-api';
 import { MediaFile, MediaUsage } from '@/features/media/types/media';
 import { MediaUploadZone } from '@/features/media/components/MediaUploadZone';
 import { MediaReplaceModal } from '@/features/media/components/MediaReplaceModal';
+import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { systemApi } from '@/features/system/api/system-api';
 
 type ViewMode = 'thumbnail' | 'list' | 'detail';
@@ -21,7 +22,7 @@ export default function MediaLibraryPage() {
         remark1: '',
         remark2: '',
         mediaType: 'all',
-        status: 'all',
+        status: 'Y',
         ratio: 'all',
         durationMin: 0,
         durationMax: 300,
@@ -42,6 +43,77 @@ export default function MediaLibraryPage() {
     const [usageLoading, setUsageLoading] = useState(false);
     const [showUsageModal, setShowUsageModal] = useState(false);
     const [selectedMediaForUsage, setSelectedMediaForUsage] = useState<MediaFile | null>(null);
+
+    // Confirm Modal State
+    const [confirmState, setConfirmState] = useState<{
+        isOpen: boolean;
+        title: string;
+        message: string;
+        onConfirm: () => Promise<void> | void;
+        variant: 'danger' | 'warning' | 'info' | 'success';
+        confirmText?: string;
+        cancelText?: string | null;
+        isLoading: boolean;
+    }>({
+        isOpen: false,
+        title: '',
+        message: '',
+        onConfirm: () => { },
+        variant: 'info',
+        isLoading: false
+    });
+
+    const openConfirm = (
+        title: string,
+        message: string,
+        onConfirm: () => Promise<void> | void,
+        variant: 'danger' | 'warning' | 'info' | 'success' = 'warning',
+        confirmText: string = 'Confirm',
+        cancelText: string | null = 'Cancel'
+    ) => {
+        setConfirmState({
+            isOpen: true,
+            title,
+            message,
+            onConfirm,
+            variant,
+            confirmText,
+            cancelText,
+            isLoading: false
+        });
+    };
+
+    const openAlert = (
+        title: string,
+        message: string,
+        variant: 'danger' | 'warning' | 'info' | 'success' = 'info'
+    ) => {
+        setConfirmState({
+            isOpen: true,
+            title,
+            message,
+            onConfirm: () => { },
+            variant,
+            confirmText: 'OK',
+            cancelText: null, // No cancel button
+            isLoading: false
+        });
+    };
+
+    const handleConfirmAction = async () => {
+        setConfirmState(prev => ({ ...prev, isLoading: true }));
+        try {
+            await confirmState.onConfirm();
+            setConfirmState(prev => ({ ...prev, isOpen: false }));
+        } catch (error) {
+            console.error(error);
+            // Optionally keep it open if error? Or close?
+            // For now, let's close it to avoid stuck state, or user handles error inside onConfirm
+            setConfirmState(prev => ({ ...prev, isOpen: false }));
+        } finally {
+            setConfirmState(prev => ({ ...prev, isLoading: false }));
+        }
+    };
 
     // Initial Config Load
     useEffect(() => {
@@ -71,13 +143,15 @@ export default function MediaLibraryPage() {
     const loadMedia = async () => {
         setLoading(true);
         try {
+            // Check if backend supports filter params, otherwise filter client side or backend handles it?
+            // backend expects: searchTerm, supplierCode, remark1, remark2, status, mediaType
             const res = await mediaApi.getAll({
                 searchTerm: filters.searchTerm,
                 supplierCode: filters.supplierCode,
                 remark1: filters.remark1,
                 remark2: filters.remark2,
-                status: filters.status === 'all' ? undefined : filters.status,
-                mediaType: filters.mediaType === 'all' ? undefined : filters.mediaType
+                status: filters.status, // 'active' | 'inactive' | 'all'
+                mediaType: filters.mediaType // 'video' | 'image' | 'all'
             });
             if (res.success && res.data) {
                 setMediaList(res.data);
@@ -153,19 +227,26 @@ export default function MediaLibraryPage() {
     const handleUploadSuccess = async (newMediaId?: string) => {
         if (replacementTarget && newMediaId) {
             // Perform Replacement
-            if (confirm(`Replace media "${replacementTarget.displayName}" content with new upload in ALL playlists?`)) {
-                try {
-                    const res = await mediaApi.replace(replacementTarget.mediaId, newMediaId, true);
-                    if (res.success) {
-                        alert("Media Replaced Successfully!");
-                    } else {
-                        alert("Replacement Failed: " + res.message);
+            openConfirm(
+                'Replace Media Content?',
+                `This will replace content for "${replacementTarget.displayName}" in ALL playlists. This action cannot be undone.`,
+                async () => {
+                    try {
+                        const res = await mediaApi.replace(replacementTarget.mediaId, newMediaId, true);
+                        if (res.success) {
+                            loadMedia();
+                            openAlert('Success', 'Media Replaced Successfully!', 'success');
+                        } else {
+                            openAlert('Replacement Failed', res.message, 'danger');
+                        }
+                    } catch (e) {
+                        console.error(e);
+                        openAlert('Error', 'An error occurred during replacement', 'danger');
                     }
-                } catch (e) {
-                    console.error(e);
-                    alert("Replacement Error");
-                }
-            }
+                },
+                'warning',
+                'Yes, Replace All'
+            );
         }
 
         setShowUpload(false);
@@ -175,42 +256,74 @@ export default function MediaLibraryPage() {
 
     const handleUpdateMedia = async (updated: MediaFile) => {
         try {
+            // Handle Status Change Logic (Active/Inactive mapped to Restore/Delete)
+            if (updated.active === 'N') {
+                // User wants to deactivate (Soft Delete)
+                const res = await mediaApi.delete(updated.mediaId);
+                if (!res.success) {
+                    openAlert('Update Failed', `Could not set to Inactive: ${res.message}. It might be in use.`, 'danger');
+                    return;
+                }
+            } else {
+                // User wants to activate (Restore) - Ensure it's not deleted first
+                // We call restore just in case it was deleted. If it wasn't, no harm.
+                await mediaApi.restore(updated.mediaId);
+            }
+
+            // Proceed with updating other fields
             const res = await mediaApi.update(updated.mediaId, updated);
+
             if (res.success) {
-                setMediaList(prev => prev.map(m => m.mediaId === updated.mediaId ? updated : m));
+                openAlert('Success', 'Media Updated Successfully!', 'success');
+                loadMedia();
                 setEditingMedia(null);
             } else {
-                alert("Failed to update media: " + (res.message || 'Unknown error'));
+                openAlert('Update Failed', res.message || 'Unknown error', 'danger');
             }
         } catch (error) {
             console.error("Update error", error);
-            alert("An error occurred while updating.");
+            openAlert('Error', 'An error occurred while updating', 'danger');
         }
     };
 
     const handleDeleteMedia = async (id: string, force: boolean = false) => {
+        const title = force ? 'Force Delete Media?' : 'Delete Media?';
         const msg = force
-            ? 'This media is IN USE. Forcing delete will remove it from all playlists. Proceed?'
-            : 'Are you sure you want to delete this asset?';
+            ? 'This media is IN USE. Forcing delete will remove it from all playlists. Proceeding will break existing playlists.'
+            : 'Are you sure you want to delete this asset? It will be moved to trash.';
 
-        if (!confirm(msg)) return;
-
-        try {
-            const res = await mediaApi.delete(id, force);
-            if (res.success) {
-                setMediaList(prev => prev.filter(m => m.mediaId !== id));
-            } else if (res.code === 409 && !force) {
-                // Handle "In Use" error by offering force delete
-                if (confirm(`${res.message}\n\nDo you want to FORCE DELETE it anyway? (It will be hidden from playlists)`)) {
-                    await handleDeleteMedia(id, true);
+        openConfirm(
+            title,
+            msg,
+            async () => {
+                try {
+                    const res = await mediaApi.delete(id, force);
+                    if (res.success) {
+                        setMediaList(prev => prev.filter(m => m.mediaId !== id));
+                    } else if (res.code === 409 && !force) {
+                        // Recursive confirm for force delete
+                        // Close current first? existing state handling might be tricky if not careful
+                        // setTimeout to allow state update
+                        setTimeout(() => {
+                            openConfirm(
+                                'Media In Use',
+                                `${res.message}\n\nDo you want to FORCE DELETE it anyway? (It will be hidden from playlists)`,
+                                () => handleDeleteMedia(id, true),
+                                'danger',
+                                'Force Delete'
+                            );
+                        }, 200);
+                    } else {
+                        openAlert('Delete Failed', res.message || 'Unknown error', 'danger');
+                    }
+                } catch (error) {
+                    console.error("Delete error", error);
+                    openAlert('Error', 'An error occurred while deleting', 'danger');
                 }
-            } else {
-                alert("Failed to delete media: " + (res.message || 'Unknown error'));
-            }
-        } catch (error) {
-            console.error("Delete error", error);
-            alert("An error occurred while deleting.");
-        }
+            },
+            force ? 'danger' : 'warning',
+            force ? 'Force Delete' : 'Delete'
+        );
     };
 
     const handleViewUsage = async (m: MediaFile) => {
@@ -252,21 +365,27 @@ export default function MediaLibraryPage() {
                 <div className="flex items-center gap-3">
                     {/* ... existing sync button ... */}
                     <button
-                        onClick={async () => {
-                            if (confirm('Fix Local Media URLs? This will update all media paths to match the current server IP.')) {
-                                try {
-                                    const res = await systemApi.syncMedia();
-                                    if (res.success) {
-                                        alert('Media URLs Synced!');
-                                        loadMedia();
-                                    } else {
-                                        alert('Sync Failed: ' + res.message);
+                        onClick={() => {
+                            openConfirm(
+                                'Sync Media URLs?',
+                                'This will fix local media URLs by updating all paths to match the current server IP configuration.',
+                                async () => {
+                                    try {
+                                        const res = await systemApi.syncMedia();
+                                        if (res.success) {
+                                            loadMedia();
+                                            openAlert('Sync Complete', 'Media URLs have been synchronized.', 'success');
+                                        } else {
+                                            openAlert('Sync Failed', res.message, 'danger');
+                                        }
+                                    } catch (e) {
+                                        console.error(e);
+                                        openAlert('Error', 'An error occurred during sync', 'danger');
                                     }
-                                } catch (e) {
-                                    console.error(e);
-                                    alert('Sync Error');
-                                }
-                            }
+                                },
+                                'info',
+                                'Start Sync'
+                            );
                         }}
                         className="w-10 h-10 flex items-center justify-center rounded-xl bg-gray-800 hover:bg-gray-700 text-accent-cyan border border-gray-700 hover:border-accent-cyan transition-all shadow-[0_0_15px_rgba(0,0,0,0.3)] text-lg pb-1"
                         title="Fix Local IP / Sync Media URLs"
@@ -274,20 +393,30 @@ export default function MediaLibraryPage() {
                         ↻
                     </button>
                     <button
-                        onClick={async () => {
-                            if (confirm('Run immediate expiry check? This will delete expired media.')) {
-                                try {
-                                    const res = await mediaApi.runCleanup();
-                                    if (res.success) {
-                                        alert(res.message);
-                                        loadMedia(); // Refresh list
-                                    } else {
-                                        alert('Cleanup failed: ' + res.message);
+                        onClick={() => {
+                            openConfirm(
+                                'Run Expiry Check?',
+                                'This will immediately check for expired media and remove them from the system. This action cannot be undone for items that are past their end date.',
+                                async () => {
+                                    try {
+                                        const res = await mediaApi.runCleanup();
+                                        if (res.success) {
+                                            if (res.data === 0) {
+                                                openAlert('Check Complete', 'No expired media found.', 'info');
+                                            } else {
+                                                openAlert('Cleanup Complete', res.message, 'success');
+                                                loadMedia();
+                                            }
+                                        } else {
+                                            openAlert('Cleanup Failed', res.message, 'danger');
+                                        }
+                                    } catch (e) {
+                                        openAlert('Error', 'An error occurred during cleanup', 'danger');
                                     }
-                                } catch (e) {
-                                    alert('Error running cleanup');
-                                }
-                            }
+                                },
+                                'warning',
+                                'Run Check'
+                            );
                         }}
                         className="h-10 px-4 flex items-center justify-center rounded-xl bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-500 border border-yellow-500/20 transition-all font-bold text-xs uppercase tracking-wider gap-2"
                         title="Media Expiry Check"
@@ -394,7 +523,7 @@ export default function MediaLibraryPage() {
                                 onChange={(e) => setFilters({ ...filters, status: e.target.value })}
                                 className="bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs outline-none focus:border-accent-cyan text-[var(--foreground)]"
                             >
-                                <option value="all" className="bg-gray-900">All Status</option>
+                                <option value="" className="bg-gray-900">All Status</option>
                                 <option value="Y" className="bg-gray-900 text-green-400">Active</option>
                                 <option value="N" className="bg-gray-900 text-red-100/50">Inactive</option>
                             </select>
@@ -489,7 +618,7 @@ export default function MediaLibraryPage() {
                                     remark1: '',
                                     remark2: '',
                                     mediaType: 'all',
-                                    status: 'all',
+                                    status: 'Y',
                                     ratio: 'all',
                                     durationMin: 0,
                                     durationMax: 300,
@@ -531,11 +660,41 @@ export default function MediaLibraryPage() {
                                         ⇄
                                     </button>
                                     <button
-                                        onClick={(e) => { e.stopPropagation(); handleDeleteMedia(m.mediaId); }}
-                                        className="p-1.5 bg-black/60 hover:bg-red-500/80 rounded-lg backdrop-blur-md transition-colors"
-                                        title="Delete Asset"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            if (m.active === 'N') {
+                                                // Restore
+                                                openConfirm(
+                                                    'Restore Media',
+                                                    'This will re-activate the media file.',
+                                                    async () => {
+                                                        try {
+                                                            const res = await mediaApi.restore(m.mediaId);
+                                                            if (res.success) {
+                                                                loadMedia();
+                                                                openAlert('Restored', 'Media re-activated successfully', 'success');
+                                                            } else {
+                                                                openAlert('Restore Failed', res.message, 'danger');
+                                                            }
+                                                        } catch (e) {
+                                                            openAlert('Error', 'Restore Failed', 'danger');
+                                                        }
+                                                    },
+                                                    'info',
+                                                    'Yes, Activate'
+                                                );
+                                            } else {
+                                                // Delete
+                                                handleDeleteMedia(m.mediaId, false);
+                                            }
+                                        }}
+                                        className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors group/btn ${m.active === 'N'
+                                            ? 'bg-green-500/10 text-green-500 hover:bg-green-500 hover:text-white'
+                                            : 'bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white'
+                                            }`}
+                                        title={m.active === 'N' ? "Restore / Activate" : "Delete / Deactivate"}
                                     >
-                                        🗑️
+                                        {m.active === 'N' ? '↺' : '✕'}
                                     </button>
                                 </div>
                                 <div className="aspect-video bg-black/40 flex items-center justify-center relative overflow-hidden">
@@ -662,11 +821,39 @@ export default function MediaLibraryPage() {
                                                     ⇄
                                                 </button>
                                                 <button
-                                                    onClick={(e) => { e.stopPropagation(); handleDeleteMedia(m.mediaId); }}
-                                                    className="p-1.5 hover:bg-red-500/10 text-gray-400 hover:text-red-500 rounded-lg transition-colors"
-                                                    title="Delete Asset"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        if (m.active === 'N') {
+                                                            // Restore
+                                                            openConfirm(
+                                                                'Restore Media',
+                                                                'This will re-activate the media file.',
+                                                                async () => {
+                                                                    try {
+                                                                        const res = await mediaApi.restore(m.mediaId);
+                                                                        if (res.success) {
+                                                                            loadMedia();
+                                                                        } else {
+                                                                            openAlert('Restore Failed', res.message, 'danger');
+                                                                        }
+                                                                    } catch (e) {
+                                                                        openAlert('Error', 'Restore Failed', 'danger');
+                                                                    }
+                                                                },
+                                                                'info',
+                                                                'Yes, Activate'
+                                                            );
+                                                        } else {
+                                                            handleDeleteMedia(m.mediaId, false);
+                                                        }
+                                                    }}
+                                                    className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors group/btn ${m.active === 'N'
+                                                        ? 'bg-green-500/10 text-green-500 hover:bg-green-500 hover:text-white'
+                                                        : 'bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white'
+                                                        }`}
+                                                    title={m.active === 'N' ? "Restore / Activate" : "Delete / Deactivate"}
                                                 >
-                                                    🗑️
+                                                    {m.active === 'N' ? '↺' : '✕'}
                                                 </button>
                                             </div>
                                         </td>
@@ -1019,6 +1206,57 @@ export default function MediaLibraryPage() {
                     </div>
                 )
             }
+
+            <ConfirmModal
+                isOpen={confirmState.isOpen}
+                title={confirmState.title}
+                message={confirmState.message}
+                onConfirm={handleConfirmAction}
+                onCancel={() => setConfirmState(prev => ({ ...prev, isOpen: false }))}
+                variant={confirmState.variant}
+                confirmText={confirmState.confirmText}
+                cancelText={confirmState.cancelText}
+                isLoading={confirmState.isLoading}
+            />
         </div >
     );
 }
+
+// Assuming the following state and helper functions are defined within the functional component
+// function MyComponent() {
+//   const [confirmState, setConfirmState] = useState({
+//     isOpen: false,
+//     title: '',
+//     message: '',
+//     onConfirm: () => {},
+//     variant: 'danger',
+//     confirmText: 'Confirm',
+//     cancelText: 'Cancel',
+//     isLoading: false,
+//   });
+
+//   const openConfirm = ({ title, message, onConfirm, variant = 'danger', confirmText = 'Confirm', cancelText = 'Cancel', isLoading = false }) => {
+//     setConfirmState({
+//       isOpen: true,
+//       title,
+//       message,
+//       onConfirm,
+//       variant,
+//       confirmText,
+//       cancelText,
+//       isLoading,
+//     });
+//   };
+
+//   const handleConfirmAction = async () => {
+//     setConfirmState(prev => ({ ...prev, isLoading: true }));
+//     await confirmState.onConfirm();
+//     setConfirmState(prev => ({ ...prev, isLoading: false, isOpen: false }));
+//   };
+
+//   // ... other state and functions like editingMedia, setEditingMedia, safetyJingleId, setSafetyJingleId, systemApi, etc.
+
+//   return (
+//     // ... rest of your component's JSX
+//   );
+// }

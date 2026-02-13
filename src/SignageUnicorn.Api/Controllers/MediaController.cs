@@ -118,6 +118,20 @@ namespace SignageUnicorn.Api.Controllers
             return NotFound(ApiResponse<bool>.ErrorResponse(404, "Media not found"));
         }
 
+        [HttpPost("{id}/restore")]
+        [Authorize(Roles = UserRoles.Admin + "," + UserRoles.Editor)]
+        public async Task<IActionResult> Restore(string id)
+        {
+            var userId = GetUserId();
+            var result = await _service.RestoreMediaAsync(id, userId);
+
+            if (result == "SUCCESS")
+            {
+                return Ok(ApiResponse<bool>.SuccessResponse(true, "Media restored successfully"));
+            }
+            return BadRequest(ApiResponse<bool>.ErrorResponse(400, "Failed to restore media"));
+        }
+
         [HttpGet("{id}/usage")]
         public async Task<IActionResult> GetUsage(string id)
         {

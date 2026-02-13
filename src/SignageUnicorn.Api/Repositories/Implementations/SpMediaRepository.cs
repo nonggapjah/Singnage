@@ -85,6 +85,7 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             p.Add("@p_remark1", media.Remark1);
             p.Add("@p_remark2", media.Remark2);
             p.Add("@p_file_hash", media.FileHash);
+            p.Add("@p_end_date", media.EndDate);
 
             using var multi = await db.QueryMultipleAsync("sp_media_std", p, commandType: CommandType.StoredProcedure);
             var status = await multi.ReadFirstOrDefaultAsync<SpStdResult>();
@@ -113,6 +114,7 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             p.Add("@p_supplier_code", media.Supplier_Code);
             p.Add("@p_remark1", media.Remark1);
             p.Add("@p_remark2", media.Remark2);
+            p.Add("@p_end_date", media.EndDate);
 
             using var multi = await db.QueryMultipleAsync("sp_media_std", p, commandType: CommandType.StoredProcedure);
             var status = await multi.ReadFirstOrDefaultAsync<SpStdResult>();
@@ -143,6 +145,26 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             
             return result != null && !result.err_flag 
                  ? RepositoryResult.Ok(result.msg) 
+                 : RepositoryResult.Fail(result?.err_code ?? -1, result?.msg ?? "Database Error");
+        }
+
+        public async Task<RepositoryResult> RestoreAsync(string id, long? userId = null)
+        {
+            using var db = CreateConnection();
+            var p = new DynamicParameters();
+            p.Add("@p_action", "RESTORE");
+            p.Add("@p_userid", userId);
+
+            if (long.TryParse(id, out var idLong))
+                p.Add("@p_media_id", idLong);
+            else
+                p.Add("@p_media_uuid", id);
+
+            using var multi = await db.QueryMultipleAsync("sp_media_std", p, commandType: CommandType.StoredProcedure);
+            var result = await multi.ReadFirstOrDefaultAsync<SpStdResult>();
+
+            return result != null && !result.err_flag
+                 ? RepositoryResult.Ok(result.msg)
                  : RepositoryResult.Fail(result?.err_code ?? -1, result?.msg ?? "Database Error");
         }
 
@@ -214,6 +236,7 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             p.Add("@p_ratio", media.Ratio);
             p.Add("@p_file_size_kb", media.FileSizeKb);
             p.Add("@p_file_hash", media.FileHash);
+            p.Add("@p_end_date", media.EndDate);
 
             using var multi = await db.QueryMultipleAsync("sp_media_std", p, commandType: CommandType.StoredProcedure);
             var status = await multi.ReadFirstOrDefaultAsync<SpStdResult>();
