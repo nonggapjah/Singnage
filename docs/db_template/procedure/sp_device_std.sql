@@ -70,12 +70,12 @@ BEGIN
     BEGIN
         -- TACTICAL FIX: If the UUID provided looks like a numeric ID (vulnerably saved by old frontend),
         -- try to resolve it back to the proper string UUID of that record.
-        IF TRY_CAST(@p_device_uuid AS BIGINT) IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sn_devices WHERE device_uuid = @p_device_uuid AND is_deleted = 0)
+        IF TRY_CAST(@p_device_uuid AS BIGINT) IS NOT NULL AND NOT EXISTS (SELECT 1 FROM sn_devices WITH (NOLOCK) WHERE device_uuid = @p_device_uuid AND is_deleted = 0)
         BEGIN
-             SELECT TOP 1 @p_device_uuid = device_uuid FROM sn_devices WHERE device_id = TRY_CAST(@p_device_uuid AS BIGINT) AND is_deleted = 0;
+             SELECT TOP 1 @p_device_uuid = device_uuid FROM sn_devices WITH (NOLOCK) WHERE device_id = TRY_CAST(@p_device_uuid AS BIGINT) AND is_deleted = 0;
         END
 
-        IF EXISTS (SELECT 1 FROM sn_devices WHERE device_uuid = @p_device_uuid AND is_deleted = 0)
+        IF EXISTS (SELECT 1 FROM sn_devices WITH (NOLOCK) WHERE device_uuid = @p_device_uuid AND is_deleted = 0)
         BEGIN
             UPDATE sn_devices
             SET last_check_in = SYSUTCDATETIME(),
@@ -115,25 +115,22 @@ BEGIN
     BEGIN
         -- Resolve IDs from UUIDs if provided
         IF @p_current_playlist_id IS NULL AND @p_current_playlist_uuid IS NOT NULL
-           SELECT @p_current_playlist_id = playlist_id FROM sn_playlists WHERE playlist_uuid = @p_current_playlist_uuid;
+           SELECT @p_current_playlist_id = playlist_id FROM sn_playlists WITH (NOLOCK) WHERE playlist_uuid = @p_current_playlist_uuid;
 
         IF @p_current_media_id IS NULL AND @p_current_media_uuid IS NOT NULL
-           SELECT @p_current_media_id = media_id FROM sn_media_files WHERE media_uuid = @p_current_media_uuid;
+           SELECT @p_current_media_id = media_id FROM sn_media_files WITH (NOLOCK) WHERE media_uuid = @p_current_media_uuid;
 
-        -- DATA CLEANUP: If there's a device where UUID = Numeric ID of another record, merge/delete the bad one.
-        -- (This fixes the state shown in the row 5 screenshot)
+        -- DATA CLEANUP: (Existing logic kept for safety)
         IF TRY_CAST(@p_device_uuid AS BIGINT) IS NOT NULL
         BEGIN
              DECLARE @real_uuid NVARCHAR(36);
-             SELECT TOP 1 @real_uuid = device_uuid FROM sn_devices WHERE device_id = TRY_CAST(@p_device_uuid AS BIGINT) AND is_deleted = 0;
+             SELECT TOP 1 @real_uuid = device_uuid FROM sn_devices WITH (NOLOCK) WHERE device_id = TRY_CAST(@p_device_uuid AS BIGINT) AND is_deleted = 0;
              
              IF @real_uuid IS NOT NULL AND @real_uuid <> @p_device_uuid
              BEGIN
-                  -- Mark the bad "numeric uuid" record for deletion if it exists
                   UPDATE sn_devices SET is_deleted = 1, status = 'OFFLINE' WHERE device_uuid = @p_device_uuid;
-                  -- Continue with the "real" UUID instead
                   SET @p_device_uuid = @real_uuid;
-                  SET @p_device_id = TRY_CAST(@real_uuid AS BIGINT); -- Try parse real one if it was numeric as well? Usually won't be.
+                  SET @p_device_id = TRY_CAST(@real_uuid AS BIGINT);
              END
         END
 
@@ -153,8 +150,9 @@ BEGIN
             current_position_sec = ISNULL(@p_position_sec, current_position_sec),
             cache_progress = ISNULL(@p_cache_progress, cache_progress),
             last_playback_at = CASE WHEN @p_position_sec IS NOT NULL THEN SYSUTCDATETIME() ELSE last_playback_at END
-        WHERE (device_id = @p_device_id OR device_uuid = @p_device_uuid)
-          AND is_deleted = 0;
+        WHERE device_id = @p_device_id 
+           OR (@p_device_id IS NULL AND device_uuid = @p_device_uuid)
+           AND is_deleted = 0;
 
         IF @@ROWCOUNT = 0 AND @p_device_uuid IS NOT NULL
         BEGIN
@@ -178,13 +176,9 @@ BEGIN
     ===================================================== */
     IF @p_action = 'GET_ALL'
     BEGIN
-        -- Auto-Sync Status: If silent > 60s (4 Heartbeats), update to 'OFFLINE'
-        UPDATE sn_devices 
-        SET status = 'OFFLINE' 
-        WHERE is_deleted = 0 
-          AND status <> 'OFFLINE'
-          AND (last_check_in IS NULL OR DATEDIFF(SECOND, last_check_in, SYSUTCDATETIME()) > 60);
-
+        -- PERFORMANCE NOTE: Removed synchronous UPDATE of 'OFFLINE' status here.
+        -- Status is calculated dynamically in the ResultSection using DATEDIFF.
+        -- This prevents table locking when dashboard polls frequently.
         GOTO ResultSection;
     END
 
@@ -193,14 +187,7 @@ BEGIN
     ===================================================== */
     IF @p_action IN ('GET_BY_ID','GET_BY_UUID')
     BEGIN
-        -- Sync status for specific device lookup
-        UPDATE sn_devices 
-        SET status = 'OFFLINE' 
-        WHERE is_deleted = 0 
-          AND status <> 'OFFLINE'
-          AND (device_id = @p_device_id OR device_uuid = @p_device_uuid)
-          AND (last_check_in IS NULL OR DATEDIFF(SECOND, last_check_in, SYSUTCDATETIME()) > 60);
-
+         -- PERFORMANCE NOTE: Removed synchronous UPDATE of 'OFFLINE' status.
         GOTO ResultSection;
     END
 
@@ -253,7 +240,7 @@ ResultSection:
     BEGIN
         IF @p_action = 'REGISTER_OR_LOGIN'
         BEGIN
-            SELECT * FROM sn_devices WHERE device_uuid = @p_device_uuid;
+            SELECT * FROM sn_devices WITH (NOLOCK) WHERE device_uuid = @p_device_uuid;
         END
 
         IF @p_action = 'GET_ALL'
@@ -282,7 +269,7 @@ ResultSection:
                 d.last_check_in AS LastCheckIn,
                 'Y' AS Active
 
-            FROM sn_devices d
+            FROM sn_devices d WITH (NOLOCK)
             WHERE d.is_deleted = 0
             ORDER BY d.last_check_in DESC;
         END
@@ -290,7 +277,7 @@ ResultSection:
         IF @p_action IN ('GET_BY_ID','GET_BY_UUID')
         BEGIN
             SELECT TOP 1 *
-            FROM sn_devices
+            FROM sn_devices WITH (NOLOCK)
             WHERE is_deleted = 0
               AND (device_id = @p_device_id OR device_uuid = @p_device_uuid);
         END
@@ -298,7 +285,7 @@ ResultSection:
         IF @p_action = 'COUNT_OFFLINE_ZOMBIES'
         BEGIN
              SELECT Count(*) as Count
-             FROM sn_devices
+             FROM sn_devices WITH (NOLOCK)
              WHERE is_deleted = 0
                AND (last_check_in IS NULL OR last_check_in < DATEADD(DAY, -@p_cleanup_days, SYSUTCDATETIME()));
         END

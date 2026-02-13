@@ -99,7 +99,7 @@ export default function StatisticsPage() {
             const res = await statisticsApi.getExportData(startISO, endISO);
 
             if (res.success && res.data) {
-                const header = ['Played At', 'Device ID', 'Device Name', 'Branch Code', 'Supplier', 'Playlist ID', 'Media Name', 'File Name', 'Duration (s)', 'Result'];
+                const header = ['Played At', 'Device ID', 'Device Name', 'Branch Code', 'Supplier', 'Playlist ID', 'Playlist Name', 'Media ID', 'Media Name', 'File Name', 'Duration (s)', 'Result'];
                 const rows = res.data.map(d => [
                     `"${d.playedAt}"`,
                     `"${d.deviceId || ''}"`,
@@ -107,6 +107,8 @@ export default function StatisticsPage() {
                     `"${d.branchCode || ''}"`,
                     `"${d.supplierCode || ''}"`,
                     `"${d.playlistId || ''}"`,
+                    `"${d.playlistId ? (playlistMap[d.playlistId] || '') : ''}"`,
+                    `"${d.mediaId || ''}"`,
                     `"${d.mediaName || ''}"`,
                     `"${d.fileName || ''}"`,
                     d.durationSec,
