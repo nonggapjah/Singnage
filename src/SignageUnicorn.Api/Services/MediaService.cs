@@ -117,12 +117,16 @@ namespace SignageUnicorn.Api.Services
                     await request.File.CopyToAsync(fileStream);
                 }
 
+                // Auto-Convert to Baseline H.264
+                await ConvertToBaselineFormatAsync(filePath);
+                var fileInfo = new FileInfo(filePath);
+
                 // Save as relative path for portability, transform to absolute on output
                 finalUrl = $"/media/{uniqueFileName}";
                 
                 // Auto-fill metadata if missing
                 if (string.IsNullOrEmpty(request.FileName)) request.FileName = request.File.FileName;
-                if (request.FileSizeKb == null || request.FileSizeKb == 0) request.FileSizeKb = (int)(request.File.Length / 1024);
+                if (request.FileSizeKb == null || request.FileSizeKb == 0) request.FileSizeKb = (int)(fileInfo.Length / 1024);
 
                 // Compute MD5 Hash for integrity check
                 using (var md5 = System.Security.Cryptography.MD5.Create())
@@ -280,10 +284,14 @@ namespace SignageUnicorn.Api.Services
                     await request.File.CopyToAsync(fileStream);
                 }
 
+                // Auto-Convert to Baseline H.264
+                await ConvertToBaselineFormatAsync(filePath);
+                var fileInfo = new FileInfo(filePath);
+
                 finalUrl = $"/media/{uniqueFileName}";
 
                 if (string.IsNullOrEmpty(request.FileName)) request.FileName = request.File.FileName;
-                if (request.FileSizeKb == null || request.FileSizeKb == 0) request.FileSizeKb = (int)(request.File.Length / 1024);
+                if (request.FileSizeKb == null || request.FileSizeKb == 0) request.FileSizeKb = (int)(fileInfo.Length / 1024);
 
                 using (var md5 = System.Security.Cryptography.MD5.Create())
                 using (var stream = File.OpenRead(filePath))
@@ -402,6 +410,56 @@ namespace SignageUnicorn.Api.Services
             }
 
             return count;
+        }
+
+        private async Task<bool> ConvertToBaselineFormatAsync(string filePath)
+        {
+            try
+            {
+                var ext = Path.GetExtension(filePath)?.ToLowerInvariant();
+                if (ext != ".mp4" && ext != ".mov" && ext != ".avi" && ext != ".webm") return true;
+
+                string ffmpegPath = Path.Combine(Directory.GetCurrentDirectory(), "ffmpeg");
+                if (!Directory.Exists(ffmpegPath)) Directory.CreateDirectory(ffmpegPath);
+                
+                Xabe.FFmpeg.FFmpeg.SetExecutablesPath(ffmpegPath);
+                
+                if (!File.Exists(Path.Combine(ffmpegPath, "ffmpeg.exe")))
+                {
+                    Console.WriteLine("[FFmpeg] Downloading FFmpeg executables...");
+                    await Xabe.FFmpeg.Downloader.FFmpegDownloader.GetLatestVersion(Xabe.FFmpeg.Downloader.FFmpegVersion.Official, ffmpegPath);
+                }
+
+                string tempOutputPath = filePath + ".tmp.mp4";
+                var mediaInfo = await Xabe.FFmpeg.FFmpeg.GetMediaInfo(filePath);
+                var conversion = Xabe.FFmpeg.FFmpeg.Conversions.New();
+
+                var videoStream = mediaInfo.VideoStreams.FirstOrDefault();
+                if (videoStream != null) {
+                    conversion.AddStream(videoStream.SetCodec(Xabe.FFmpeg.VideoCodec.h264));
+                    conversion.AddParameter("-profile:v baseline -level 3.0 -pix_fmt yuv420p");
+                }
+
+                var audioStream = mediaInfo.AudioStreams.FirstOrDefault();
+                if (audioStream != null) {
+                    conversion.AddStream(audioStream.SetCodec(Xabe.FFmpeg.AudioCodec.aac).SetBitrate(128000));
+                }
+
+                conversion.SetOutput(tempOutputPath);
+                Console.WriteLine($"[FFmpeg] Starting conversion for {Path.GetFileName(filePath)}");
+                await conversion.Start();
+
+                File.Delete(filePath);
+                File.Move(tempOutputPath, filePath);
+                Console.WriteLine($"[FFmpeg] Conversion successful for {Path.GetFileName(filePath)}");
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[FFmpeg Error] {ex.Message}");
+                return false;
+            }
         }
     }
 }

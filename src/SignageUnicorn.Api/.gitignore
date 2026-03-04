@@ -1,0 +1,4 @@
+ffmpeg/
+FFmpeg/
+.DS_Store
+*.tmp.mp4
