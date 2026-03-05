@@ -118,7 +118,8 @@ namespace SignageUnicorn.Api.Services
                 }
 
                 // Auto-Convert to Baseline H.264
-                await ConvertToBaselineFormatAsync(filePath);
+                filePath = await ConvertToBaselineFormatAsync(filePath);
+                uniqueFileName = Path.GetFileName(filePath);
                 var fileInfo = new FileInfo(filePath);
 
                 // Save as relative path for portability, transform to absolute on output
@@ -285,7 +286,8 @@ namespace SignageUnicorn.Api.Services
                 }
 
                 // Auto-Convert to Baseline H.264
-                await ConvertToBaselineFormatAsync(filePath);
+                filePath = await ConvertToBaselineFormatAsync(filePath);
+                uniqueFileName = Path.GetFileName(filePath);
                 var fileInfo = new FileInfo(filePath);
 
                 finalUrl = $"/media/{uniqueFileName}";
@@ -412,12 +414,12 @@ namespace SignageUnicorn.Api.Services
             return count;
         }
 
-        private async Task<bool> ConvertToBaselineFormatAsync(string filePath)
+        private async Task<string> ConvertToBaselineFormatAsync(string filePath)
         {
             try
             {
                 var ext = Path.GetExtension(filePath)?.ToLowerInvariant();
-                if (ext != ".mp4" && ext != ".mov" && ext != ".avi" && ext != ".webm") return true;
+                if (ext != ".mp4" && ext != ".mov" && ext != ".avi" && ext != ".webm") return filePath;
 
                 string ffmpegPath = Path.Combine(Directory.GetCurrentDirectory(), "ffmpeg");
                 if (!Directory.Exists(ffmpegPath)) Directory.CreateDirectory(ffmpegPath);
@@ -430,35 +432,73 @@ namespace SignageUnicorn.Api.Services
                     await Xabe.FFmpeg.Downloader.FFmpegDownloader.GetLatestVersion(Xabe.FFmpeg.Downloader.FFmpegVersion.Official, ffmpegPath);
                 }
 
-                string tempOutputPath = filePath + ".tmp.mp4";
-                var mediaInfo = await Xabe.FFmpeg.FFmpeg.GetMediaInfo(filePath);
-                var conversion = Xabe.FFmpeg.FFmpeg.Conversions.New();
+                string uploadsFolder = Path.GetDirectoryName(filePath) ?? "";
+                string tempFolder = Path.Combine(uploadsFolder, "temp_conversion");
+                if (!Directory.Exists(tempFolder)) Directory.CreateDirectory(tempFolder);
 
-                var videoStream = mediaInfo.VideoStreams.FirstOrDefault();
-                if (videoStream != null) {
-                    conversion.AddStream(videoStream.SetCodec(Xabe.FFmpeg.VideoCodec.h264));
-                    conversion.AddParameter("-profile:v baseline -level 3.0 -pix_fmt yuv420p");
+                string tempOutputPath = Path.Combine(tempFolder, $"{Guid.NewGuid()}.mp4");
+                
+                try 
+                {
+                    var mediaInfo = await Xabe.FFmpeg.FFmpeg.GetMediaInfo(filePath);
+                    var conversion = Xabe.FFmpeg.FFmpeg.Conversions.New();
+
+                    var videoStream = mediaInfo.VideoStreams.FirstOrDefault();
+                    if (videoStream != null) {
+                        conversion.AddStream(videoStream.SetCodec(Xabe.FFmpeg.VideoCodec.h264));
+                        // Baseline profile + FastStart for better streaming
+                        conversion.AddParameter("-profile:v baseline -level 3.0 -pix_fmt yuv420p -movflags +faststart");
+                    }
+
+                    var audioStream = mediaInfo.AudioStreams.FirstOrDefault();
+                    if (audioStream != null) {
+                        conversion.AddStream(audioStream.SetCodec(Xabe.FFmpeg.AudioCodec.aac).SetBitrate(128000));
+                    }
+
+                    conversion.SetOutput(tempOutputPath);
+                    Console.WriteLine($"[FFmpeg] Starting conversion for {Path.GetFileName(filePath)}");
+                    await conversion.Start();
+
+                    // Robust swap with retry logic
+                    bool swapped = false;
+                    for (int i = 0; i < 3; i++)
+                    {
+                        try
+                        {
+                            if (File.Exists(filePath)) File.Delete(filePath);
+                            File.Move(tempOutputPath, filePath);
+                            swapped = true;
+                            break;
+                        }
+                        catch (IOException)
+                        {
+                            if (i < 2) await Task.Delay(1000);
+                        }
+                    }
+
+                    if (swapped)
+                    {
+                        Console.WriteLine($"[FFmpeg] Conversion successful for {Path.GetFileName(filePath)}");
+                        return filePath;
+                    }
+                    else
+                    {
+                         // Fallback: If original is locked, use the new file with its unique name
+                         string safeName = Path.Combine(uploadsFolder, Path.GetFileName(tempOutputPath));
+                         File.Move(tempOutputPath, safeName);
+                         Console.WriteLine($"[FFmpeg] Warning: Original file locked. Using fallback path: {Path.GetFileName(safeName)}");
+                         return safeName;
+                    }
                 }
-
-                var audioStream = mediaInfo.AudioStreams.FirstOrDefault();
-                if (audioStream != null) {
-                    conversion.AddStream(audioStream.SetCodec(Xabe.FFmpeg.AudioCodec.aac).SetBitrate(128000));
+                finally
+                {
+                    if (File.Exists(tempOutputPath)) File.Delete(tempOutputPath);
                 }
-
-                conversion.SetOutput(tempOutputPath);
-                Console.WriteLine($"[FFmpeg] Starting conversion for {Path.GetFileName(filePath)}");
-                await conversion.Start();
-
-                File.Delete(filePath);
-                File.Move(tempOutputPath, filePath);
-                Console.WriteLine($"[FFmpeg] Conversion successful for {Path.GetFileName(filePath)}");
-
-                return true;
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"[FFmpeg Error] {ex.Message}");
-                return false;
+                return filePath; // Return original on absolute failure
             }
         }
     }
