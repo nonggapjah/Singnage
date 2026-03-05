@@ -17,6 +17,7 @@ export const BatchAssignModal: React.FC<BatchAssignModalProps> = ({ playlistId, 
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
     const [filterBranch, setFilterBranch] = useState('ALL');
+    const [searchTerm, setSearchTerm] = useState('');
 
     useEffect(() => {
         fetchDevices();
@@ -41,9 +42,23 @@ export const BatchAssignModal: React.FC<BatchAssignModalProps> = ({ playlistId, 
     }, [devices]);
 
     const filteredDevices = useMemo(() => {
-        if (filterBranch === 'ALL') return devices;
-        return devices.filter(d => d.branchCode === filterBranch);
-    }, [devices, filterBranch]);
+        let result = devices;
+
+        if (filterBranch !== 'ALL') {
+            result = result.filter(d => d.branchCode === filterBranch);
+        }
+
+        if (searchTerm.trim()) {
+            const lowerSearch = searchTerm.toLowerCase();
+            result = result.filter(d =>
+                (d.deviceName?.toLowerCase() || '').includes(lowerSearch) ||
+                (d.branchCode?.toLowerCase() || '').includes(lowerSearch) ||
+                (d.ipAddress?.toLowerCase() || '').includes(lowerSearch)
+            );
+        }
+
+        return result;
+    }, [devices, filterBranch, searchTerm]);
 
     const handleToggleDevice = (id: string) => {
         setSelectedDeviceIds(prev =>
@@ -92,8 +107,18 @@ export const BatchAssignModal: React.FC<BatchAssignModalProps> = ({ playlistId, 
                         <button onClick={onClose} className="text-gray-500 hover:text-white text-2xl">✕</button>
                     </div>
 
-                    <div className="flex gap-4 mt-8 flex-wrap">
-                        <div className="flex bg-black/40 rounded-xl p-1 border border-white/10">
+                    <div className="flex gap-4 mt-8 flex-wrap items-center">
+                        <div className="relative flex-1 min-w-[200px]">
+                            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500">🔍</span>
+                            <input
+                                type="text"
+                                placeholder="SEARCH DEVICES / IP..."
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                className="w-full bg-black/40 border border-white/10 rounded-xl py-2 pl-12 pr-4 text-xs font-mono focus:border-accent-cyan outline-none transition-all"
+                            />
+                        </div>
+                        <div className="flex bg-black/40 rounded-xl p-1 border border-white/10 h-max">
                             {branches.map(b => (
                                 <button
                                     key={b}
@@ -106,7 +131,7 @@ export const BatchAssignModal: React.FC<BatchAssignModalProps> = ({ playlistId, 
                         </div>
                         <button
                             onClick={handleSelectAllFiltered}
-                            className="px-6 py-2 rounded-xl bg-white/5 border border-white/10 text-xs font-bold hover:bg-white/10 transition-all uppercase tracking-widest"
+                            className="px-6 py-2 rounded-xl bg-white/5 border border-white/10 text-xs font-bold hover:bg-white/10 transition-all uppercase tracking-widest h-[42px]"
                         >
                             Toggle Select Visible
                         </button>
