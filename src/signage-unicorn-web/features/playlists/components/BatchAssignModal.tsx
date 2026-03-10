@@ -91,6 +91,21 @@ export const BatchAssignModal: React.FC<BatchAssignModalProps> = ({ playlistId, 
         }
     };
 
+    const handleBatchCommand = async (command: string, label: string) => {
+        if (selectedDeviceIds.length === 0) return;
+        if (!confirm(`Are you sure you want to send '${label}' to ${selectedDeviceIds.length} devices?`)) return;
+
+        setSubmitting(true);
+        try {
+            await deviceApi.batchSendCommand(selectedDeviceIds, command);
+            alert(`Command '${label}' sent successfully.`);
+        } catch (error) {
+            alert(`Failed to send ${label} command.`);
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-in fade-in duration-300">
             <div className="glass-panel w-full max-w-4xl max-h-[90vh] flex flex-col rounded-3xl border border-white/10 shadow-[0_0_50px_rgba(34,211,238,0.2)] overflow-hidden">
@@ -134,6 +149,24 @@ export const BatchAssignModal: React.FC<BatchAssignModalProps> = ({ playlistId, 
                             className="px-6 py-2 rounded-xl bg-white/5 border border-white/10 text-xs font-bold hover:bg-white/10 transition-all uppercase tracking-widest h-[42px]"
                         >
                             Toggle Select Visible
+                        </button>
+
+                        <div className="h-[30px] w-[1px] bg-white/10 mx-2 hidden md:block"></div>
+
+                        <button
+                            onClick={() => handleBatchCommand('REFRESH', 'RESTART APPS')}
+                            className="px-4 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-500 text-[10px] font-bold hover:bg-amber-500/20 transition-all uppercase tracking-widest h-[42px]"
+                            title="Force all selected players to reload their software"
+                        >
+                            Restart Apps
+                        </button>
+
+                        <button
+                            onClick={() => handleBatchCommand('WIPE_CACHE', 'WIPE CACHE & RELOAD')}
+                            className="px-4 py-2 rounded-xl bg-red-500/10 border border-red-500/20 text-red-500 text-[10px] font-bold hover:bg-red-500/20 transition-all uppercase tracking-widest h-[42px]"
+                            title="Force clear all local video cache and re-download everything"
+                        >
+                            Wipe Cache
                         </button>
                     </div>
                 </div>

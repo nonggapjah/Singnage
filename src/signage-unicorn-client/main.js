@@ -158,7 +158,8 @@ ipcMain.handle('download-media', async (event, { url, filename }) => {
         const response = await axios({
             method: 'GET',
             url: url,
-            responseType: 'stream'
+            responseType: 'stream',
+            timeout: 300000
         });
 
         const writer = fs.createWriteStream(filePath);

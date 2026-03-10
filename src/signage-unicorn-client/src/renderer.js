@@ -343,6 +343,12 @@ async function sync() {
                     const type = cmd.commandType;
                     if (type === 'FORCE_SYNC') { showHUD('REMOTE SYNC'); loadPlaylist(config.lastPlaylistId); }
                     if (type === 'RELOAD' || type === 'REFRESH') { showHUD('RELOADING...'); setTimeout(() => window.location.reload(), 1000); }
+                    if (type === 'WIPE_CACHE') {
+                        showHUD('WIPING CACHE...');
+                        ipcRenderer.invoke('clear-cache').then(() => {
+                            setTimeout(() => window.location.reload(), 1000);
+                        });
+                    }
                     if (type === 'REBOOT') { showHUD('SYSTEM REBOOT...'); ipcRenderer.invoke('reboot-device'); }
                     if (type.startsWith('PLAY_PLAYLIST:')) {
                         const pid = type.split(':')[1];
@@ -400,7 +406,8 @@ async function loadPlaylist(playlistId, resumeIndex = 0) {
 
         if (items.length > 0) {
             // --- Content Hashing (Smart Sync) ---
-            const contentHash = playlistId + '|' + items.map(i => `${i.mediaId}-${i.durationOverride || 0}`).join(',');
+            // Include fileName in hash so renames (like _v2) trigger re-sync
+            const contentHash = playlistId + '|' + items.map(i => `${i.mediaId}-${i.media.fileName}-${i.durationOverride || 0}`).join(',');
             const savedHash = localStorage.getItem('playlist_hash');
 
             dashPlaylistName.innerText = playlistName;
@@ -437,8 +444,12 @@ async function syncPendingAssets() {
         cacheProgress = 0;
 
         for (const item of items) {
-            // If user switched playlist again during sync, abort
-            if (!pendingPlaylist || pendingPlaylist.items !== items) break;
+            // If user switched to a COMPLETELY DIFFERENT playlist during sync, abort.
+            // But if it just swapped to this one as active (pendingPlaylist becomes null), keep going.
+            if (pendingPlaylist && pendingPlaylist.items !== items) {
+                addLog("Sync aborted: New playlist detected.", "warn");
+                break;
+            }
 
             const media = item.media;
             dashReadyStatus.innerText = `SYNCING ${synced + 1}/${items.length}`;
@@ -449,7 +460,12 @@ async function syncPendingAssets() {
                     url: media.blobUrl,
                     filename: media.fileName
                 });
-                synced++;
+
+                if (res && res.success) {
+                    synced++;
+                } else {
+                    addLog(`Download failed for ${media.fileName}: ${res?.error || 'Unknown error'}`, 'warn');
+                }
 
                 // --- IMMEDIATE START IF IDLE ---
                 // If it's the first clip and we aren't playing anything, start NOW
@@ -466,9 +482,10 @@ async function syncPendingAssets() {
             }
         }
 
-        if (pendingPlaylist && pendingPlaylist.items === items) {
-            addLog(`Background Sync Complete. Swap ready on next clip.`);
-            dashReadyStatus.innerText = 'READY (PENDING)';
+        // Final UI update
+        if (!pendingPlaylist || (pendingPlaylist && pendingPlaylist.items === items)) {
+            addLog(`Background Sync Complete (${items.length} clips).`);
+            dashReadyStatus.innerText = 'READY';
             dashReadyStatus.style.color = '#00f2ff';
         }
     } finally {
