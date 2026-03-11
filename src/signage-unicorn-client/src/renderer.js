@@ -350,6 +350,24 @@ async function sync() {
                         });
                     }
                     if (type === 'REBOOT') { showHUD('SYSTEM REBOOT...'); ipcRenderer.invoke('reboot-device'); }
+                    if (type === 'UPDATE_CLIENT') {
+                        showHUD('UPDATING CLIENT...');
+                        addLog('Remote Client Update triggered.', 'info', true);
+                        try {
+                            const dr = await fetch(`${config.serverIp}/api/v1/system/settings/ClientDownloadUrl`).then(r => r.json());
+                            if (dr.data) {
+                                const dl = await ipcRenderer.invoke('download-update', { url: dr.data });
+                                if (dl.success) {
+                                    addLog('Update downloaded. Launching installer...', 'warn', true);
+                                    ipcRenderer.invoke('launch-installer', dl.path);
+                                } else {
+                                    addLog(`Download failed: ${dl.error}`, 'error', true);
+                                }
+                            }
+                        } catch (e) {
+                            addLog(`Update failed to trigger: ${e.message}`, 'error', true);
+                        }
+                    }
                     if (type.startsWith('PLAY_PLAYLIST:')) {
                         const pid = type.split(':')[1];
                         if (pid) { showHUD('REMOTE PLAYLIST'); loadPlaylist(pid); }
@@ -537,6 +555,18 @@ async function playNext() {
     isPlaying = true;
     const item = playlist[currentIndex];
     const media = item.media;
+
+    // Check if file is physically downloaded to prevent trying to play 0-byte/partial files
+    const isReady = await ipcRenderer.invoke('check-media-exists', media.fileName);
+    if (!isReady) {
+        addLog(`Skip: ${media.fileName} (still syncing)`, 'warn');
+        currentIndex = (currentIndex + 1) % playlist.length;
+
+        // Timeout prevents infinite aggressive looping if 100% of files aren't ready
+        setTimeout(playNext, 1000);
+        return;
+    }
+
     const localDir = await ipcRenderer.invoke('get-local-path');
     const localFile = `file://${localDir}/${media.fileName}`;
 
@@ -556,10 +586,9 @@ async function playNext() {
         // --- SMOOTH SWAP LOGIC ---
         if (pendingPlaylist && pendingPlaylist.items.length > 0) {
             const firstMedia = pendingPlaylist.items[0].media;
-            // Native check: Check if file exists in localDir
-            const exists = await ipcRenderer.invoke('download-media', { url: firstMedia.blobUrl, filename: firstMedia.fileName });
+            const isReady = await ipcRenderer.invoke('check-media-exists', firstMedia.fileName);
 
-            if (exists && exists.success) {
+            if (isReady) {
                 swapToPending();
                 return;
             } else {

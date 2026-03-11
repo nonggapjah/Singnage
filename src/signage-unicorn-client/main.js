@@ -146,15 +146,40 @@ ipcMain.handle('clear-cache', async () => {
     }
 });
 
+ipcMain.handle('check-media-exists', async (event, filename) => {
+    try {
+        const filePath = path.join(MEDIA_DIR, filename);
+        if (await fs.pathExists(filePath)) {
+            const stats = await fs.stat(filePath);
+            return stats.size > 0;
+        }
+    } catch (e) { }
+    return false;
+});
+
 ipcMain.handle('download-media', async (event, { url, filename }) => {
     const filePath = path.join(MEDIA_DIR, filename);
+    const tempPath = filePath + '.tmp';
 
     // Check if exists
     if (await fs.pathExists(filePath)) {
-        return { success: true, path: filePath, cached: true };
+        try {
+            const stats = await fs.stat(filePath);
+            if (stats.size > 0) {
+                return { success: true, path: filePath, cached: true };
+            } else {
+                console.warn(`File ${filename} exists but is 0 bytes. Re-downloading.`);
+                await fs.remove(filePath).catch(() => { });
+            }
+        } catch (e) { }
     }
 
     try {
+        // Clean up any stalled temp file
+        if (await fs.pathExists(tempPath)) {
+            await fs.remove(tempPath).catch(() => { });
+        }
+
         const response = await axios({
             method: 'GET',
             url: url,
@@ -162,12 +187,23 @@ ipcMain.handle('download-media', async (event, { url, filename }) => {
             timeout: 300000
         });
 
-        const writer = fs.createWriteStream(filePath);
+        // Write to temp file
+        const writer = fs.createWriteStream(tempPath);
         response.data.pipe(writer);
 
         return new Promise((resolve, reject) => {
-            writer.on('finish', () => resolve({ success: true, path: filePath }));
-            writer.on('error', reject);
+            writer.on('finish', async () => {
+                try {
+                    await fs.rename(tempPath, filePath);
+                    resolve({ success: true, path: filePath });
+                } catch (e) {
+                    reject(e);
+                }
+            });
+            writer.on('error', async (err) => {
+                await fs.remove(tempPath).catch(() => { });
+                reject(err);
+            });
         });
     } catch (err) {
         console.error('Download failed', err);

@@ -2,6 +2,12 @@
 
 รายการอัปเดตและประวัติการแก้ไขระบบ (Patch Version History)
 
+## [2.3.1] - 2026-03-10
+### Critical Fixes
+- **Media Sync EPERM Conflict**: Resolved a critical issue where the background downloader and `playNext` system would fight over reading/writing the same media file exactly when a download was in-progress, causing an `EPERM` crash. Background sync now downloads to `.tmp` files and renames only when 100% complete.
+- **0-Byte Video Skipping Error**: Included a robust protection in `check-media-exists` that validates actual file size > 0 before allowing playback, preventing the player from skipping an unplayable ghost file forever.
+- **Smooth Swap Crash Fix**: Modified background smooth swap condition to safely utilize the new `.tmp` checking logic without triggering simultaneous network requests or false-positive file exist checks.
+
 ---
 ## [2.3.0] - 2026-02-13
 ### New Features & Enhancements
