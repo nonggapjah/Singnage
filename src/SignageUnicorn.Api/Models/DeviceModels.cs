@@ -18,6 +18,7 @@ namespace SignageUnicorn.Api.Models
         public string? CurrentMediaId { get; set; }
         public int? CurrentPositionSec { get; set; }
         public int? CacheProgress { get; set; }
+        public string? AppVersion { get; set; }
         public DateTime? LastCheckIn { get; set; }
         public string? Active { get; set; }
     }

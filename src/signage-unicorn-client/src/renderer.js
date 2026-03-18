@@ -10,6 +10,8 @@ let mediaStartTime = 0;
 let mediaDuration = 0;
 let volume = 50;
 let isMuted = false;
+let isUpdating = false;
+let clockTimer, syncTimer;
 let cacheProgress = 0;
 let pendingPlaylist = null; // Next playlist waiting for smooth swap
 let isSyncing = false;     // Prevent multiple sync loops
@@ -360,8 +362,13 @@ async function sync() {
                     }
                     if (type === 'REBOOT') { showHUD('SYSTEM REBOOT...'); ipcRenderer.invoke('reboot-device'); }
                     if (type === 'UPDATE_CLIENT') {
+                        if (isUpdating) {
+                            addLog('Client update already in progress. Skipping duplicate command.', 'warn');
+                            continue;
+                        }
                         showHUD('UPDATING CLIENT...');
                         addLog('Remote Client Update triggered.', 'info', true);
+                        isUpdating = true;
                         try {
                             const dr = await fetch(`${config.serverIp}/api/v1/system/settings/ClientDownloadUrl`).then(r => r.json());
                             if (dr.data) {
@@ -371,10 +378,14 @@ async function sync() {
                                     ipcRenderer.invoke('launch-installer', dl.path);
                                 } else {
                                     addLog(`Download failed: ${dl.error}`, 'error', true);
+                                    isUpdating = false;
                                 }
+                            } else {
+                                isUpdating = false;
                             }
                         } catch (e) {
                             addLog(`Update failed to trigger: ${e.message}`, 'error', true);
+                            isUpdating = false;
                         }
                     }
                     if (type.startsWith('PLAY_PLAYLIST:')) {
@@ -448,6 +459,12 @@ async function loadPlaylist(playlistId, resumeIndex = 0) {
             }
 
             // --- Background Smooth Sync ---
+            if (pendingPlaylist && pendingPlaylist.hash === contentHash && isSyncing) {
+                // If we are already syncing the SAME playlist version, just keep going
+                addLog(`Sync already active for ${playlistId} version. Continuing...`);
+                return;
+            }
+
             addLog(`Smooth Sync: Queuing ${items.length} items in background...`);
             pendingPlaylist = { id: playlistId, name: playlistName, items, hash: contentHash };
 
@@ -483,6 +500,7 @@ async function syncPendingAssets() {
             dashReadyStatus.style.color = '#f1c40f';
 
             try {
+                // console.log(`Downloader: Start Item ${synced + 1}/${items.length} - ${media.fileName}`);
                 const res = await ipcRenderer.invoke('download-media', {
                     url: media.blobUrl,
                     filename: media.fileName
@@ -490,9 +508,15 @@ async function syncPendingAssets() {
 
                 if (res && res.success) {
                     synced++;
+                    // console.log(`Downloader: Success Item ${synced}/${items.length}`);
                 } else {
                     addLog(`Download failed for ${media.fileName}: ${res?.error || 'Unknown error'}`, 'warn');
                 }
+
+                // Update UI progress while moving
+                cacheProgress = Math.round((synced / items.length) * 100);
+                dashCachedCount.innerText = synced;
+                dashSyncBar.style.width = cacheProgress + '%';
 
                 // --- IMMEDIATE START IF IDLE ---
                 // If it's the first clip and we aren't playing anything, start NOW
@@ -500,20 +524,24 @@ async function syncPendingAssets() {
                     addLog("Idle Player: First clip ready, starting playback.");
                     swapToPending();
                 }
-
-                cacheProgress = Math.round((synced / items.length) * 100);
-                dashCachedCount.innerText = synced;
-                dashSyncBar.style.width = cacheProgress + '%';
             } catch (e) {
                 addLog(`Sync error for ${media.fileName}: ${e.message}`, 'warn');
             }
         }
 
-        // Final UI update
+        // Final UI update: Only set to READY if we actually finished downloading everything
+        // and we haven't started a NEW sync for a different playlist.
         if (!pendingPlaylist || (pendingPlaylist && pendingPlaylist.items === items)) {
-            addLog(`Background Sync Complete (${items.length} clips).`);
-            dashReadyStatus.innerText = 'READY';
-            dashReadyStatus.style.color = '#00f2ff';
+            const isFullySynced = synced === items.length;
+            if (isFullySynced) {
+                addLog(`Background Sync Complete (${items.length} clips).`);
+                dashReadyStatus.innerText = 'READY';
+                dashReadyStatus.style.color = '#00f2ff';
+            } else {
+                addLog(`Sync finished with gaps: ${synced}/${items.length} ready.`, 'warn');
+                dashReadyStatus.innerText = 'PARTIAL';
+                dashReadyStatus.style.color = '#f1c40f';
+            }
         }
     } finally {
         isSyncing = false;
@@ -531,7 +559,7 @@ async function swapToPending() {
 
     dashPlaylistName.innerText = pendingPlaylist.name;
     dashTotalCount.innerText = playlist.length;
-    dashReadyStatus.innerText = 'READY';
+    // dashReadyStatus.innerText = 'READY'; // BUG: Removed! Don't set READY until syncPendingAssets actually finishes.
 
     pendingPlaylist = null;
     currentIndex = 0;
@@ -894,15 +922,28 @@ window.addEventListener('keydown', async e => {
 });
 
 document.getElementById('check-update-btn').onclick = async () => {
+    if (isUpdating) { alert("An update is already in progress."); return; }
     const msg = document.getElementById('update-status-msg'); msg.innerText = "Checking...";
     const cur = await ipcRenderer.invoke('get-app-version');
     const res = await fetch(`${config.serverIp}/api/v1/system/settings/LatestClientVersion`).then(r => r.json());
     if (res.data && res.data !== cur) {
         msg.innerText = `New: ${res.data}`;
         if (confirm(`Download v${res.data}?`)) {
-            const dr = await fetch(`${config.serverIp}/api/v1/system/settings/ClientDownloadUrl`).then(r => r.json());
-            const dl = await ipcRenderer.invoke('download-update', { url: dr.data });
-            if (dl.success) ipcRenderer.invoke('launch-installer', dl.path);
+            isUpdating = true;
+            try {
+                const dr = await fetch(`${config.serverIp}/api/v1/system/settings/ClientDownloadUrl`).then(r => r.json());
+                const dl = await ipcRenderer.invoke('download-update', { url: dr.data });
+                if (dl.success) {
+                    ipcRenderer.invoke('launch-installer', dl.path);
+                } else {
+                    alert(`Download failed: ${dl.error}`);
+                    isUpdating = false;
+                    msg.innerText = "Try again.";
+                }
+            } catch (err) {
+                alert(`Update check failed: ${err.message}`);
+                isUpdating = false;
+            }
         }
     } else msg.innerText = "Up to date.";
 };

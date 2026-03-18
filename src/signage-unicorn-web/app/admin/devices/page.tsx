@@ -29,7 +29,7 @@ export default function DevicesPage() {
     // Filter State
     const [searchQuery, setSearchQuery] = useState('');
     const [filterStatus, setFilterStatus] = useState<'ALL' | 'ONLINE' | 'OFFLINE'>('ALL');
-    const [sortBy, setSortBy] = useState<'NAME' | 'STATUS' | 'CHECKIN' | 'BRANCH'>('NAME');
+    const [sortBy, setSortBy] = useState<'NAME' | 'STATUS' | 'CHECKIN' | 'BRANCH' | 'VERSION'>('NAME');
     const [viewMode, setViewMode] = useState<'GRID' | 'LIST'>('GRID');
 
     // Modal State
@@ -269,6 +269,9 @@ export default function DevicesPage() {
             if (sortBy === 'CHECKIN') {
                 return new Date(b.lastCheckIn || 0).getTime() - new Date(a.lastCheckIn || 0).getTime();
             }
+            if (sortBy === 'VERSION') {
+                return (b.appVersion || '').localeCompare(a.appVersion || '');
+            }
             return 0;
         });
 
@@ -344,6 +347,7 @@ export default function DevicesPage() {
                         <option value="STATUS">Sort by Status</option>
                         <option value="CHECKIN">Sort by Recent</option>
                         <option value="BRANCH">Sort by Branch</option>
+                        <option value="VERSION">Sort by Version</option>
                     </select>
 
                     {/* View Mode Toggle */}
@@ -403,6 +407,7 @@ export default function DevicesPage() {
                                         <h3 className="text-lg font-black text-foreground truncate w-full" title={device.deviceName}>{device.deviceName}</h3>
                                         <p className="text-xs text-muted-foreground font-mono mt-0.5 flex items-center gap-2 truncate">
                                             #{displayId}
+                                            {device.appVersion && <span className="text-white/40 ml-1">[{device.appVersion}]</span>}
                                             {device.currentPlaylistId && <span className="text-accent-cyan font-bold">: ACTIVE</span>}
                                         </p>
                                     </div>
@@ -540,7 +545,7 @@ export default function DevicesPage() {
                                             </td>
                                             <td className="p-4">
                                                 <div className="font-bold text-foreground text-sm">{device.deviceName}</div>
-                                                <div className="text-[10px] text-muted-foreground font-mono mt-0.5">{process.env.NEXT_PUBLIC_SYSTEM_VERSION || 'v1.7'}</div>
+                                                <div className="text-[10px] text-muted-foreground font-mono mt-0.5">{device.appVersion || 'v2.3.x'}</div>
                                             </td>
                                             <td className="p-4">
                                                 <span className="font-mono text-xs text-accent-cyan bg-accent-cyan/10 px-2 py-1 rounded border border-accent-cyan/20">

@@ -2,6 +2,22 @@
 
 รายการอัปเดตและประวัติการแก้ไขระบบ (Patch Version History)
 
+## [2.3.6] - 2026-03-18
+### Fixed
+- **Sync Engine Stability**: Resolved a critical race condition where periodic heartbeats from the server could cause an active media sync to abort prematurely (e.g., stopping at 1/31 items).
+- **Correct Readiness Status**: Fixed a UI bug where the dashboard would incorrectly display 'READY' while files were still being downloaded in the background.
+- **Improved Network Resilience**: Added better error handling for interrupted responses in the main process to prevent the downloader from hanging indefinitely.
+
+## [2.3.5] - 2026-03-18
+### Fixed
+- **Update Process Robustness**: Fixed a critical issue where overlapping update commands (simultaneous manual and remote triggers) could crash the installer downloader or cause "reply was never sent" errors due to file locking.
+- **Improved Downloader**: Added timeouts (10 minutes) and per-transaction unique filenames for the installer to ensure more reliable updates on slow/intermittent networks.
+- **Throttling**: Added logic to prevent multiple update downloads from running at the same time in the same client.
+
+## [2.3.4] - 2026-03-18
+### Added
+- **Exclusive Top-Layer Mode**: Upgraded the client to use `screen-saver` priority level for Always-On-Top. This ensures the signage content stays above almost all Windows windows, including TeamViewer session dialogs, system notifications, and other background tools.
+
 ## [2.3.3] - 2026-03-17
 ### Added
 - **Auto-Retry Heartbeat Sync**: Added logic to automatically retry loading the last playlist if the player is in an IDLE state during heartbeat. This ensures that machines that boot up before a network connection is established (e.g., 4G modem latency) will successfully recover and start playing once the connection is stable.

@@ -266,6 +266,7 @@ ResultSection:
                 d.current_media_id AS CurrentMediaId,
                 d.current_position_sec AS CurrentPositionSec,
                 d.cache_progress AS CacheProgress,
+                d.app_version AS AppVersion,
                 d.last_check_in AS LastCheckIn,
                 'Y' AS Active
 

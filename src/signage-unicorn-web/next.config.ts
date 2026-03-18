@@ -20,10 +20,6 @@ const nextConfig: NextConfig = {
       {
         source: '/media/:path*',
         destination: 'http://127.0.0.1:8862/media/:path*' // Proxy to Backend Static Files
-      },
-      {
-        source: '/setup/:path*',
-        destination: 'http://127.0.0.1:8862/setup/:path*' // Proxy to Backend Installers
       }
     ]
   }

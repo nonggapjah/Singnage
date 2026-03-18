@@ -10,6 +10,7 @@ export interface Device {
     currentPlaylistItemId?: string;
     currentMediaId?: string;
     currentPositionSec?: number;
+    appVersion?: string;
     lastCheckIn?: string;
     active: string;
 }

@@ -69,6 +69,10 @@ async function createWindow() {
         backgroundColor: '#000000'
     });
 
+    // Force top-most level even above system dialogs and taskbars
+    mainWindow.setAlwaysOnTop(true, 'screen-saver');
+    mainWindow.setKiosk(true);
+
     mainWindow.loadFile('index.html');
 
     // Create media directory
@@ -204,8 +208,16 @@ ipcMain.handle('download-media', async (event, { url, filename }) => {
                 }
             });
             writer.on('error', async (err) => {
+                writer.close(); // Ensure writer is closed
                 await fs.remove(tempPath).catch(() => { });
                 reject(err);
+            });
+
+            // Handle network/stream errors after connection started
+            response.data.on('error', async (err) => {
+                writer.close();
+                await fs.remove(tempPath).catch(() => { });
+                reject(new Error('Download stream broken: ' + err.message));
             });
         });
     } catch (err) {
@@ -216,13 +228,15 @@ ipcMain.handle('download-media', async (event, { url, filename }) => {
 
 ipcMain.handle('download-update', async (event, { url }) => {
     const tempDir = app.getPath('temp');
-    const filePath = path.join(tempDir, 'SignageUnicornSetup.exe');
+    // Use unique name to avoid file lock conflicts if multiple downloads are triggered
+    const filePath = path.join(tempDir, `SignageUnicornSetup_${Date.now()}.exe`);
 
     try {
         const response = await axios({
             method: 'GET',
             url: url,
-            responseType: 'stream'
+            responseType: 'stream',
+            timeout: 600000 // 10 minutes timeout for slow networks
         });
 
         const writer = fs.createWriteStream(filePath);
@@ -230,10 +244,20 @@ ipcMain.handle('download-update', async (event, { url }) => {
 
         return new Promise((resolve, reject) => {
             writer.on('finish', () => resolve({ success: true, path: filePath }));
-            writer.on('error', (err) => resolve({ success: false, error: err.message }));
+            writer.on('error', async (err) => {
+                writer.close();
+                await fs.remove(filePath).catch(() => { });
+                resolve({ success: false, error: 'Write error: ' + err.message });
+            });
+            // Handle network/stream errors after connection started
+            response.data.on('error', async (err) => {
+                writer.close();
+                await fs.remove(filePath).catch(() => { });
+                resolve({ success: false, error: 'Download stream broken: ' + err.message });
+            });
         });
     } catch (err) {
-        return { success: false, error: err.message };
+        return { success: false, error: 'Request failed: ' + err.message };
     }
 });
 
