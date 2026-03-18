@@ -15,11 +15,15 @@ const nextConfig: NextConfig = {
     return [
       {
         source: '/api/:path*',
-        destination: 'http://localhost:8862/api/:path*' // Proxy to Backend
+        destination: 'http://127.0.0.1:8862/api/:path*' // Proxy to Backend
       },
       {
         source: '/media/:path*',
-        destination: 'http://localhost:8862/media/:path*' // Proxy to Backend Static Files
+        destination: 'http://127.0.0.1:8862/media/:path*' // Proxy to Backend Static Files
+      },
+      {
+        source: '/setup/:path*',
+        destination: 'http://127.0.0.1:8862/setup/:path*' // Proxy to Backend Installers
       }
     ]
   }

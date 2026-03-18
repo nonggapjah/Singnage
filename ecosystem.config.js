@@ -3,7 +3,7 @@ module.exports = {
         {
             name: "signage-api",
             script: "dotnet",
-            args: "run --no-launch-profile --urls http://0.0.0.0:8862",
+            args: "bin/Debug/net8.0/SignageUnicorn.Api.dll --urls http://127.0.0.1:8862",
             cwd: "./src/SignageUnicorn.Api",
             watch: false,
             shell: true,

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using SignageUnicorn.Api.Models;
@@ -13,7 +14,7 @@ namespace SignageUnicorn.Api.Services
         private readonly Microsoft.AspNetCore.Hosting.IWebHostEnvironment _env;
         
         // Simple in-memory tracker to reduce heartbeat log noise
-        private static readonly Dictionary<string, (string Status, string PlaylistId, string MediaId)> _lastReportedState = new();
+        private static readonly ConcurrentDictionary<string, (string Status, string PlaylistId, string MediaId)> _lastReportedState = new();
 
         public DeviceService(IDeviceRepository deviceRepository, ISystemLogRepository logRepo, Microsoft.AspNetCore.Hosting.IWebHostEnvironment env)
         {
@@ -76,19 +77,17 @@ namespace SignageUnicorn.Api.Services
 
              // ... (Logic same as before)
              // Re-implementing simplified for replacement context
-             if (!_lastReportedState.ContainsKey(request.DeviceId))
+             if (!_lastReportedState.TryGetValue(request.DeviceId, out var last))
              {
                  stateChanged = true;
-                 _lastReportedState[request.DeviceId] = (currentStatus, currentPid, currentMid);
              }
              else
              {
-                 var last = _lastReportedState[request.DeviceId];
                  if (last.Status != currentStatus || last.PlaylistId != currentPid) stateChanged = true;
                  if (last.MediaId != currentMid) mediaChanged = true;
-                 
-                 if (stateChanged || mediaChanged) _lastReportedState[request.DeviceId] = (currentStatus, currentPid, currentMid);
              }
+                 
+             if (stateChanged || mediaChanged) _lastReportedState[request.DeviceId] = (currentStatus, currentPid, currentMid);
 
              if (stateChanged)
              {

@@ -50,7 +50,7 @@ function initDb() {
 
 async function createWindow() {
     const primaryDisplay = screen.getPrimaryDisplay();
-    const { width, height } = primaryDisplay.workAreaSize;
+    const { width, height } = primaryDisplay.size;
 
     mainWindow = new BrowserWindow({
         width,
@@ -58,6 +58,9 @@ async function createWindow() {
         fullscreen: true,
         kiosk: true,
         frame: false,
+        alwaysOnTop: true,
+        skipTaskbar: true,
+        autoHideMenuBar: true,
         webPreferences: {
             nodeIntegration: true,
             contextIsolation: false,
@@ -236,8 +239,12 @@ ipcMain.handle('download-update', async (event, { url }) => {
 
 ipcMain.handle('launch-installer', async (event, filePath) => {
     try {
-        await shell.openPath(filePath);
-        app.quit(); // Close app so installer can run
+        const cmd = `"${filePath}" /S`;
+        console.log('Launching Silent Installer:', cmd);
+        exec(cmd, (error) => {
+            if (error) console.error('Silent Install Failed:', error);
+        });
+        setTimeout(() => app.quit(), 2000); // Give it time to start
         return { success: true };
     } catch (err) {
         return { success: false, error: err.message };

@@ -312,6 +312,15 @@ async function sync() {
             cacheProgress: cacheProgress
         };
 
+        // --- AUTO-RETRY LOGIC (v2.3.3) ---
+        // If we have a playlist ID but nothing is playing and no items are loaded, retry load.
+        // This fixes the "starting morning with jingle only" issue if net was down at boot.
+        if (!isPlaying && playlist.length === 0 && config.lastPlaylistId) {
+            addLog(`Auto-Retry: No playlist active, attempting to load ${config.lastPlaylistId}...`, 'warn');
+            const savedIndex = parseInt(localStorage.getItem('last_playlist_index') || '0');
+            loadPlaylist(config.lastPlaylistId, savedIndex);
+        }
+
         // Boot Report: enrich first heartbeat with device metadata
         if (!isBootReportSent) {
             const version = await ipcRenderer.invoke('get-app-version');

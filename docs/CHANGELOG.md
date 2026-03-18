@@ -2,6 +2,17 @@
 
 รายการอัปเดตและประวัติการแก้ไขระบบ (Patch Version History)
 
+## [2.3.3] - 2026-03-17
+### Added
+- **Auto-Retry Heartbeat Sync**: Added logic to automatically retry loading the last playlist if the player is in an IDLE state during heartbeat. This ensures that machines that boot up before a network connection is established (e.g., 4G modem latency) will successfully recover and start playing once the connection is stable.
+- **Silent Update Improvements**: Enhanced the zero-touch update mechanism for more reliable background installation.
+
+## [2.3.2] - 2026-03-17
+### Fixed
+- **Startup Fullscreen Bug**: Fixed an issue where the app would not cover the Windows taskbar on startup.
+- **Improved Display Metrics**: Switched from `workAreaSize` to `size` to ensure the player uses the full physical resolution.
+- **Kiosk Layering**: Added `alwaysOnTop` and `skipTaskbar` flag to force the app above the Windows Shell.
+
 ## [2.3.1] - 2026-03-10
 ### Critical Fixes
 - **Media Sync EPERM Conflict**: Resolved a critical issue where the background downloader and `playNext` system would fight over reading/writing the same media file exactly when a download was in-progress, causing an `EPERM` crash. Background sync now downloads to `.tmp` files and renames only when 100% complete.
