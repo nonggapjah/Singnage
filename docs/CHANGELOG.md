@@ -2,6 +2,9 @@
 
 รายการอัปเดตและประวัติการแก้ไขระบบ (Patch Version History)
 
+## [2.3.7] - 2026-03-19
+- **Fix**: Update Installer "File in Use" Error. Changed `launch-installer` to use detached `spawn` and faster app shutdown to release file locks during silent updates.
+
 ## [2.3.6] - 2026-03-18
 ### Fixed
 - **Sync Engine Stability**: Resolved a critical race condition where periodic heartbeats from the server could cause an active media sync to abort prematurely (e.g., stopping at 1/31 items).

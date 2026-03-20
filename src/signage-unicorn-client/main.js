@@ -2,7 +2,7 @@ const { app, BrowserWindow, ipcMain, screen, shell, powerSaveBlocker } = require
 const path = require('path');
 const fs = require('fs-extra');
 const axios = require('axios');
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
 const Database = require('better-sqlite3');
 
 let mainWindow;
@@ -263,14 +263,21 @@ ipcMain.handle('download-update', async (event, { url }) => {
 
 ipcMain.handle('launch-installer', async (event, filePath) => {
     try {
-        const cmd = `"${filePath}" /S`;
-        console.log('Launching Silent Installer:', cmd);
-        exec(cmd, (error) => {
-            if (error) console.error('Silent Install Failed:', error);
+        console.log('Launching Silent Installer (Detached):', filePath);
+
+        // Use spawn with detached: true to start the installer as a separate parent-less process.
+        // This allows the current app to quit immediately and release file locks.
+        const child = spawn(filePath, ['/S'], {
+            detached: true,
+            stdio: 'ignore'
         });
-        setTimeout(() => app.quit(), 2000); // Give it time to start
+        child.unref();
+
+        // Use app.exit(0) for immediate shutdown to release file locks instantly.
+        app.exit(0);
         return { success: true };
     } catch (err) {
+        console.error('Launch installer failed:', err);
         return { success: false, error: err.message };
     }
 });

@@ -4,6 +4,7 @@ using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.AspNetCore.StaticFiles;
 
 using Microsoft.OpenApi.Models;
 
@@ -139,7 +140,15 @@ app.UseForwardedHeaders(new ForwardedHeadersOptions
     ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto
 });
 
-app.UseStaticFiles();
+
+var provider = new FileExtensionContentTypeProvider();
+// Allow downloading .exe files for client installers
+provider.Mappings[".exe"] = "application/vnd.microsoft.portable-executable";
+
+app.UseStaticFiles(new StaticFileOptions
+{
+    ContentTypeProvider = provider
+});
 app.UseCors("AllowAll"); // Enable CORS
 
 app.UseAuthentication();

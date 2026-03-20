@@ -1,15 +1,17 @@
 param(
-    [Parameter(Mandatory=$true, HelpMessage="Version number, e.g., 2.4.0")]
+    [Parameter(Mandatory = $true, HelpMessage = "Version number, e.g., 2.4.0")]
     [string]$Version,
     
-    [Parameter(HelpMessage="Path to the installer, defaults to the built 2.3.1 test. Only override if custom.")]
+    [Parameter(HelpMessage = "Path to the installer, defaults to the built 2.3.1 test. Only override if custom.")]
     [string]$SourceFile = "c:\git\Signage-Unicorn\src\signage-unicorn-client\dist\Signage Unicorn Setup $Version.exe"
 )
 
 $ServerUrl = "https://signage.aith123.com"
 $TargetDir = "c:\git\Signage-Unicorn\src\SignageUnicorn.Api\wwwroot\setup"
+$WebPublicDir = "c:\git\Signage-Unicorn\src\signage-unicorn-web\public\setup"
 $TargetFileName = "Signage_Unicorn_Setup_$Version.exe"
 $TargetPath = Join-Path $TargetDir $TargetFileName
+$WebTargetPath = Join-Path $WebPublicDir $TargetFileName
 $DownloadUrl = "$ServerUrl/setup/$TargetFileName"
 
 Write-Host "=========================================="
@@ -27,9 +29,12 @@ if (!(Test-Path $SourceFile)) {
 Write-Host "1. Copying installer to web server dir..."
 try {
     if (!(Test-Path $TargetDir)) { New-Item -ItemType Directory -Path $TargetDir | Out-Null }
+    if (!(Test-Path $WebPublicDir)) { New-Item -ItemType Directory -Path $WebPublicDir | Out-Null }
     Copy-Item -Path $SourceFile -Destination $TargetPath -Force
-    Write-Host "   -> OK: Uploaded to $TargetPath" -ForegroundColor Green
-} catch {
+    Copy-Item -Path $SourceFile -Destination $WebTargetPath -Force
+    Write-Host "   -> OK: Uploaded to $TargetPath and $WebTargetPath" -ForegroundColor Green
+}
+catch {
     Write-Host "   -> FAILED: $($_.Exception.Message)" -ForegroundColor Red
     exit
 }
@@ -65,7 +70,8 @@ try {
     Invoke-SqlExec "UPDATE sn_system_settings SET config_value = '$DownloadUrl' WHERE config_key = 'ClientDownloadUrl'"
     
     Write-Host "   -> OK: System Settings Updated to v$Version" -ForegroundColor Green
-} catch {
+}
+catch {
     Write-Host "   -> FAILED: $($_.Exception.Message)" -ForegroundColor Red
     exit
 }
@@ -87,7 +93,8 @@ try {
         $count++
     }
     Write-Host "   -> OK: Queued remote update command for $count devices." -ForegroundColor Green
-} catch {
+}
+catch {
     Write-Host "   -> FAILED: $($_.Exception.Message)" -ForegroundColor Red
 }
 
