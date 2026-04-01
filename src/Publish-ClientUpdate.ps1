@@ -76,10 +76,11 @@ catch {
     exit
 }
 
-# 4. Trigger Update Command for all Active Devices
-Write-Host "3. Triggering UPDATE_CLIENT for all active devices..."
+# 4. Trigger Update Command for a Canary Group (Max 5 Devices)
+Write-Host "3. Triggering UPDATE_CLIENT for CANARY group (Max 5 devices)..."
 try {
-    $devices = Invoke-SqlQuery "SELECT device_id FROM sn_devices WHERE is_deleted = 0 AND status IN ('PLAYING', 'IDLE')"
+    # CRITICAL RULE: Never update all devices at once. Select 1 active device.
+    $devices = Invoke-SqlQuery "SELECT TOP 1 device_id FROM sn_devices WHERE is_deleted = 0 AND status IN ('PLAYING', 'IDLE') AND (app_version IS NULL OR app_version NOT LIKE '%$Version%') ORDER BY last_check_in DESC"
     $count = 0
     foreach ($row in $devices) {
         $devId = $row.device_id
@@ -92,12 +93,17 @@ try {
         Invoke-SqlExec $sql
         $count++
     }
-    Write-Host "   -> OK: Queued remote update command for $count devices." -ForegroundColor Green
+    Write-Host "   -> OK: Queued remote update command for $count pilot devices." -ForegroundColor Green
+    
+    if ($count -gt 0) {
+        Write-Host "   -> IMPORTANT: You MUST verify these $count devices update successfully before expanding the rollout." -ForegroundColor Yellow
+    }
 }
 catch {
     Write-Host "   -> FAILED: $($_.Exception.Message)" -ForegroundColor Red
 }
 
 Write-Host "=========================================="
-Write-Host " Update Release Completed Successfully!" -ForegroundColor Cyan
-Write-Host " All v2.3.1+ clients will download and install it during their next heartbeat." -ForegroundColor Yellow
+Write-Host " Canary Update Release Queued Successfully!" -ForegroundColor Cyan
+Write-Host " Monitor the 5 updated devices to ensure they come back online with v$Version." -ForegroundColor Yellow
+Write-Host " Check UPDATE_RULES.md for official update policy." -ForegroundColor White

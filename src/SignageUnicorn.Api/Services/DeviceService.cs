@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using SignageUnicorn.Api.Models;
+using SignageUnicorn.Api.Models.Domain;
 using SignageUnicorn.Api.Repositories.Interfaces;
 
 namespace SignageUnicorn.Api.Services
@@ -12,15 +13,72 @@ namespace SignageUnicorn.Api.Services
         private readonly IDeviceRepository _deviceRepository;
         private readonly ISystemLogRepository _logRepo;
         private readonly Microsoft.AspNetCore.Hosting.IWebHostEnvironment _env;
+        private readonly IServiceProvider _serviceProvider;
         
         // Simple in-memory tracker to reduce heartbeat log noise
         private static readonly ConcurrentDictionary<string, (string Status, string PlaylistId, string MediaId)> _lastReportedState = new();
 
-        public DeviceService(IDeviceRepository deviceRepository, ISystemLogRepository logRepo, Microsoft.AspNetCore.Hosting.IWebHostEnvironment env)
+        public DeviceService(IDeviceRepository deviceRepository, ISystemLogRepository logRepo, Microsoft.AspNetCore.Hosting.IWebHostEnvironment env, IServiceProvider serviceProvider)
         {
             _deviceRepository = deviceRepository;
             _logRepo = logRepo;
             _env = env;
+            _serviceProvider = serviceProvider;
+        }
+
+        public async Task<IEnumerable<DevicePlaylistDto>> GetAssignedPlaylistsAsync(string deviceId)
+        {
+            return await _deviceRepository.GetAssignedPlaylistsAsync(deviceId);
+        }
+
+        public async Task UpdateAssignedPlaylistsAsync(string deviceId, List<DevicePlaylistDto> playlists)
+        {
+            await _deviceRepository.UpdateAssignedPlaylistsAsync(deviceId, playlists);
+        }
+
+        public async Task<SignageUnicorn.Api.Models.Domain.PlaylistDto> GetDeviceScheduleAsync(string deviceId)
+        {
+            // Resolve PlaylistService dynamically to avoid circular references if any
+            var playlistService = _serviceProvider.GetService(typeof(SignageUnicorn.Api.Services.Application.PlaylistService)) as SignageUnicorn.Api.Services.Application.PlaylistService;
+            
+            var schedule = new SignageUnicorn.Api.Models.Domain.PlaylistDto
+            {
+                PlaylistId = "SCHEDULE-" + deviceId,
+                PlaylistName = "Device Schedule",
+                Active = "Y",
+                Items = new List<SignageUnicorn.Api.Models.Domain.PlaylistItemDto>()
+            };
+
+            var assignments = await GetAssignedPlaylistsAsync(deviceId);
+            int currentOrder = 1;
+
+            var now = DateTime.UtcNow;
+
+            foreach (var assignment in assignments)
+            {
+                // Check Schedule Dates
+                if (assignment.StartDate.HasValue && now < assignment.StartDate.Value) continue;
+                if (assignment.EndDate.HasValue && now > assignment.EndDate.Value) continue;
+
+                var playlist = await playlistService.GetPlaylistByIdAsync(assignment.PlaylistId);
+                
+                if (playlist != null && playlist.Active == "Y" && playlist.Items != null)
+                {
+                    foreach (var item in playlist.Items)
+                    {
+                        item.PositionOrder = currentOrder++;
+                        schedule.Items.Add(item);
+                        
+                        if (item.Media != null)
+                        {
+                            schedule.TotalDuration += item.Media.DurationSec;
+                        }
+                    }
+                }
+            }
+
+            schedule.ItemCount = schedule.Items.Count;
+            return schedule;
         }
 
         public async Task<DeviceDto> RegisterDeviceAsync(DeviceRegisterRequest request)

@@ -3,6 +3,12 @@
 รายการอัปเดตและประวัติการแก้ไขระบบ (Patch Version History)
 
 ---
+## [2.5.0] - 2026-03-XX
+### Feature: Multi-Playlist Scheduling
+- **Dynamic Content Timelines**: The player now supports rendering a mathematically merged sequence of continuous playback combining multiple playlists.
+- **Smart Validation**: Gracefully skips expired or inactive content automatically during sync and playback checks without manual intervention.
+- **Schedule Sync Engine**: Integrated the `SYNC_SCHEDULE` directive to fetch unified daily playlogs directly from the unified backend infrastructure.
+
 ## [2.2.1] - 2026-02-12
 ### Critical Fixes & Stability
 - **Playback Loop Reliability**:

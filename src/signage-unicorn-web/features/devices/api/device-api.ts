@@ -62,5 +62,16 @@ export const deviceApi = {
 
     fixDb: async () => {
         return await apiFetch('/devices/fix-devices-db');
+    },
+
+    getAssignedPlaylists: async (deviceId: string) => {
+        return await apiFetch<any[]>(`/devices/${deviceId}/playlists`, { method: 'GET' });
+    },
+
+    updateAssignedPlaylists: async (deviceId: string, playlists: { playlistId: string; startDate?: string; endDate?: string }[]) => {
+        return await apiFetch<{ success: boolean }>(`/devices/${deviceId}/playlists`, {
+            method: 'POST',
+            body: JSON.stringify(playlists),
+        });
     }
 };

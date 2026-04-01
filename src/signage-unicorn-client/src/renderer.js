@@ -388,6 +388,11 @@ async function sync() {
                             isUpdating = false;
                         }
                     }
+                    if (type === 'SYNC_SCHEDULE') {
+                        showHUD('REMOTE SCHEDULE');
+                        addLog('Remote Schedule Sync triggered.', 'info', true);
+                        loadPlaylist('SCHEDULE');
+                    }
                     if (type.startsWith('PLAY_PLAYLIST:')) {
                         const pid = type.split(':')[1];
                         if (pid) { showHUD('REMOTE PLAYLIST'); loadPlaylist(pid); }
@@ -417,7 +422,11 @@ async function loadPlaylist(playlistId, resumeIndex = 0) {
         let playlistName = 'Standard Loop';
 
         try {
-            const res = await fetch(`${config.serverIp}/api/v1/playlists/${playlistId}`);
+            const apiPath = playlistId === 'SCHEDULE'
+                ? `/api/v1/devices/${config.deviceId}/schedule`
+                : `/api/v1/playlists/${playlistId}`;
+
+            const res = await fetch(`${config.serverIp}${apiPath}`);
             const data = await res.json();
             if (data.success && data.data.items) {
                 // Ensure items are sorted by positionOrder

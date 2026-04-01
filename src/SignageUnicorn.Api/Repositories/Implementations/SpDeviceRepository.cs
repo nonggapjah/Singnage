@@ -6,6 +6,7 @@ using Dapper;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using SignageUnicorn.Api.Models;
+using SignageUnicorn.Api.Models.Domain;
 using SignageUnicorn.Api.Repositories.Interfaces;
 
 namespace SignageUnicorn.Api.Repositories.Implementations
@@ -306,6 +307,61 @@ namespace SignageUnicorn.Api.Repositories.Implementations
              using var connection = new SqlConnection(_connectionString);
              string sql = @"SELECT * FROM sn_devices WHERE is_deleted = 0 AND (current_playlist_id = @id OR current_playlist_id = (SELECT playlist_id FROM sn_playlists WHERE playlist_uuid = @id))";
              return await connection.QueryAsync<DeviceDto>(sql, new { id = playlistId });
+        }
+
+        public async Task<IEnumerable<DevicePlaylistDto>> GetAssignedPlaylistsAsync(string deviceId)
+        {
+            using var connection = new SqlConnection(_connectionString);
+            string sql = @"
+                SELECT dp.id as Id, dp.device_id as DeviceId, dp.playlist_id as PlaylistId, p.playlist_name as PlaylistName,
+                       dp.start_date as StartDate, dp.end_date as EndDate, dp.is_active as IsActive
+                FROM sn_device_playlists dp
+                JOIN sn_playlists p ON dp.playlist_id = p.playlist_id
+                WHERE dp.device_id = (SELECT top 1 device_id FROM sn_devices WHERE device_id = @id OR device_uuid = @id)
+                  AND dp.is_active = 1
+                ORDER BY dp.id ASC";
+            return await connection.QueryAsync<DevicePlaylistDto>(sql, new { id = deviceId });
+        }
+
+        public async Task UpdateAssignedPlaylistsAsync(string deviceId, List<DevicePlaylistDto> playlists)
+        {
+            using var connection = new SqlConnection(_connectionString);
+            await connection.OpenAsync();
+            using var transaction = connection.BeginTransaction();
+            try
+            {
+                long devId = await connection.ExecuteScalarAsync<long>(
+                    "SELECT top 1 device_id FROM sn_devices WHERE device_id = @id OR device_uuid = @id", 
+                    new { id = deviceId }, transaction);
+
+                // Clear existing active mappings for device
+                await connection.ExecuteAsync("UPDATE sn_device_playlists SET is_active = 0 WHERE device_id = @devId", new { devId }, transaction);
+
+                // Insert new mappings
+                if (playlists != null && playlists.Count > 0)
+                {
+                    string insertSql = @"
+                        INSERT INTO sn_device_playlists (device_id, playlist_id, start_date, end_date) 
+                        VALUES (@devId, @playlistId, @startDate, @endDate)";
+                    
+                    foreach (var p in playlists)
+                    {
+                        await connection.ExecuteAsync(insertSql, new { 
+                            devId = devId, 
+                            playlistId = p.PlaylistId, 
+                            startDate = p.StartDate, 
+                            endDate = p.EndDate 
+                        }, transaction);
+                    }
+                }
+                
+                transaction.Commit();
+            }
+            catch
+            {
+                transaction.Rollback();
+                throw;
+            }
         }
 
         public async Task ExecuteSqlAsync(string sql)

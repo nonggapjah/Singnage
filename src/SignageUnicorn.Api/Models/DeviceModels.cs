@@ -107,4 +107,15 @@ namespace SignageUnicorn.Api.Models
         [JsonPropertyName("command")]
         public string Command { get; set; } = string.Empty;
     }
+
+    public class DevicePlaylistDto
+    {
+        public int Id { get; set; }
+        public string DeviceId { get; set; } = string.Empty;
+        public string PlaylistId { get; set; } = string.Empty;
+        public string? PlaylistName { get; set; }
+        public DateTime? StartDate { get; set; }
+        public DateTime? EndDate { get; set; }
+        public bool IsActive { get; set; } = true;
+    }
 }

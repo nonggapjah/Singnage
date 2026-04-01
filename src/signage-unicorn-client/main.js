@@ -13,7 +13,84 @@ const CONFIG_PATH = path.join(app.getPath('userData'), 'config.json');
 const MEDIA_DIR = path.join(app.getPath('userData'), 'media_cache');
 const DB_PATH = path.join(app.getPath('userData'), 'player_offline.db');
 
-function initDb() {
+async function migrateData() {
+    const parentRoaming = app.getPath('appData');
+    const newUserData = app.getPath('userData');
+    const systemUsersDir = 'C:\\Users';
+
+    // 1. Gather all possible parent AppData/Roaming and AppData/Local folders
+    let possibleParents = [parentRoaming, path.join(parentRoaming, '..', 'Local')];
+
+    try {
+        if (await fs.pathExists(systemUsersDir)) {
+            const users = await fs.readdir(systemUsersDir);
+            for (const user of users) {
+                if (user === 'Public' || user === 'Default' || user === 'Default User') continue;
+                possibleParents.push(`C:\\Users\\${user}\\AppData\\Roaming`);
+                possibleParents.push(`C:\\Users\\${user}\\AppData\\Local`);
+            }
+        }
+    } catch (e) { }
+
+    // Deduplicate array
+    possibleParents = [...new Set(possibleParents)];
+
+    // 2. Generate candidates
+    const folderNames = ['signage-unicorn-client', 'Signage Unicorn', 'signage-unicorn', 'signage-unicorn-client-updater'];
+    let candidates = [];
+    for (const parent of possibleParents) {
+        for (const fName of folderNames) {
+            candidates.push(path.join(parent, fName));
+        }
+    }
+
+    let hasValidConfig = false;
+    try {
+        if (await fs.pathExists(CONFIG_PATH)) {
+            const current = await fs.readJson(CONFIG_PATH);
+            if (current && current.deviceId && current.serverIp) hasValidConfig = true;
+        }
+    } catch (e) { }
+
+    // Only migrate if we don't have a valid ID in the new location
+    if (!hasValidConfig) {
+        for (const oldUserData of candidates) {
+            const oldConfig = path.join(oldUserData, 'config.json');
+
+            // Skip if this is exactly the current path where we are saving
+            if (oldUserData.toLowerCase() === newUserData.toLowerCase()) continue;
+
+            if (await fs.pathExists(oldConfig)) {
+                console.log(`MIGRATION: Scrutinizing potential old config in [${oldUserData}]...`);
+                try {
+                    const oldData = await fs.readJson(oldConfig);
+                    // Check if it's actually valid data
+                    if (oldData && oldData.deviceId && parseInt(oldData.deviceId) > 0 && oldData.serverIp) {
+                        console.log(`MIGRATION: Valid identity found in [${oldUserData}]. Restoring...`);
+                        await fs.ensureDir(path.dirname(CONFIG_PATH));
+                        await fs.copy(oldConfig, CONFIG_PATH);
+
+                        const oldDb = path.join(oldUserData, 'player_offline.db');
+                        if (await fs.pathExists(oldDb)) {
+                            await fs.copy(oldDb, DB_PATH, { overwrite: true });
+                        }
+
+                        const oldMedia = path.join(oldUserData, 'media_cache');
+                        if (await fs.pathExists(oldMedia)) {
+                            await fs.copy(oldMedia, MEDIA_DIR, { overwrite: true });
+                        }
+                        console.log('MIGRATION: Completely recovered identity across profiles.');
+                        return; // Done
+                    }
+                } catch (e) {
+                    console.error(`MIGRATION: Error copying from [${oldUserData}]:`, e);
+                }
+            }
+        }
+    }
+}
+
+async function initDb() {
     try {
         db = new Database(DB_PATH);
         db.pragma('journal_mode = WAL');
@@ -78,12 +155,47 @@ async function createWindow() {
     // Create media directory
     await fs.ensureDir(MEDIA_DIR);
 
-    // Prevent Sleep
+    // Prevent Sleep & Force Disable Windows Screensaver via Registry
     sleepBlockerId = powerSaveBlocker.start('prevent-display-sleep');
+    try {
+        exec('reg add "HKEY_CURRENT_USER\\Control Panel\\Desktop" /v ScreenSaveActive /t REG_SZ /d 0 /f');
+        // Force Auto-Start on Boot
+        exec(`reg add "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v "SignageUnicorn" /d "\\"${process.execPath}\\"" /f`);
+
+        console.log('Windows Screensaver disabled. Auto-Start registered.');
+    } catch (e) { }
     console.log('Power save blocker started:', sleepBlockerId);
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+    // --- Global Crash Recovery Engine ---
+    process.on('uncaughtException', (err) => {
+        console.error('FATAL SYSTEM ERROR:', err);
+        app.relaunch();
+        app.exit(1);
+    });
+
+    process.on('unhandledRejection', (reason, promise) => {
+        console.error('Unhandled Promisse Rejection:', reason);
+        // Do not crash for promise errors, just log them to prevent exit
+    });
+
+    app.on('render-process-gone', (event, webContents, details) => {
+        console.error('RENDERER CRASHED (OOM or UI Fatal):', details.reason);
+        app.relaunch();
+        app.exit(1);
+    });
+
+    app.on('child-process-gone', (event, details) => {
+        console.warn('Sub-Process Failed:', details.type, details.reason);
+        if (details.type === 'GPU' && details.reason !== 'clean-exit') {
+            console.error('GPU KERNEL PANIC. Restarting player.');
+            app.relaunch();
+            app.exit(1);
+        }
+    });
+
+    await migrateData();
     initDb();
     createWindow();
 });
@@ -263,17 +375,35 @@ ipcMain.handle('download-update', async (event, { url }) => {
 
 ipcMain.handle('launch-installer', async (event, filePath) => {
     try {
-        console.log('Launching Silent Installer (Detached):', filePath);
+        console.log('Launching Silent Installer via Batch Script:', filePath);
 
-        // Use spawn with detached: true to start the installer as a separate parent-less process.
-        // This allows the current app to quit immediately and release file locks.
-        const child = spawn(filePath, ['/S'], {
+        // To ensure the app opens after silent update, we generate a bat file
+        const batPath = path.join(app.getPath('temp'), `update_launcher_${Date.now()}.bat`);
+        const appExePath = process.execPath; // Path of the currently running Signage Unicorn.exe
+
+        const batContent = `
+@echo off
+echo Waiting for app to close...
+timeout /t 3 /nobreak >nul
+echo Running Installer...
+"${filePath}" /S
+echo Installer finished. Starting app again...
+timeout /t 2 /nobreak >nul
+start "" "${appExePath}"
+del "%~f0"
+        `.trim();
+
+        await fs.writeFile(batPath, batContent, 'utf8');
+
+        // Execute the batch script detached
+        const child = spawn('cmd.exe', ['/c', batPath], {
             detached: true,
-            stdio: 'ignore'
+            stdio: 'ignore',
+            windowsHide: true
         });
         child.unref();
 
-        // Use app.exit(0) for immediate shutdown to release file locks instantly.
+        // Immediate shutdown to release file locks
         app.exit(0);
         return { success: true };
     } catch (err) {

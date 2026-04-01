@@ -1,4 +1,5 @@
 using SignageUnicorn.Api.Models;
+using SignageUnicorn.Api.Models.Domain;
 
 namespace SignageUnicorn.Api.Repositories.Interfaces
 {
@@ -14,6 +15,8 @@ namespace SignageUnicorn.Api.Repositories.Interfaces
         Task<RepositoryResult<int>> GetOfflineDeviceCountAsync(int days = 14);
         Task<IEnumerable<DeviceDto>> GetDevicesByMediaIdAsync(string mediaId);
         Task<IEnumerable<DeviceDto>> GetDevicesByPlaylistIdAsync(string playlistId);
+        Task<IEnumerable<DevicePlaylistDto>> GetAssignedPlaylistsAsync(string deviceId);
+        Task UpdateAssignedPlaylistsAsync(string deviceId, List<DevicePlaylistDto> playlists);
         Task ExecuteSqlAsync(string sql);
     }
 }

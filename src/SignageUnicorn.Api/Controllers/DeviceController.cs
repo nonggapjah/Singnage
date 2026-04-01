@@ -5,6 +5,7 @@ using SignageUnicorn.Api.Services;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
 using SignageUnicorn.Api.Constants;
+using SignageUnicorn.Api.Models.Domain;
 
 namespace SignageUnicorn.Api.Controllers
 {
@@ -137,6 +138,32 @@ namespace SignageUnicorn.Api.Controllers
         {
             var count = await _deviceService.GetOfflineCountAsync(days);
             return Ok(ApiResponse<int>.SuccessResponse(count, $"Found {count} devices offline for > {days} days."));
+        }
+
+        [HttpGet("{id}/schedule")]
+        [AllowAnonymous]
+        public async Task<IActionResult> GetDeviceSchedule(string id)
+        {
+            var schedule = await _deviceService.GetDeviceScheduleAsync(id);
+            if (schedule == null) return NotFound(ApiResponse<PlaylistDto>.ErrorResponse(404, "No active schedule found"));
+            return Ok(ApiResponse<PlaylistDto>.SuccessResponse(schedule));
+        }
+
+        [HttpGet("{id}/playlists")]
+        [Authorize(Roles = UserRoles.Admin)]
+        public async Task<IActionResult> GetAssignedPlaylists(string id)
+        {
+            var playlists = await _deviceService.GetAssignedPlaylistsAsync(id);
+            return Ok(ApiResponse<IEnumerable<DevicePlaylistDto>>.SuccessResponse(playlists));
+        }
+
+        [HttpPost("{id}/playlists")]
+        [Authorize(Roles = UserRoles.Admin)]
+        public async Task<IActionResult> UpdateAssignedPlaylists(string id, [FromBody] List<DevicePlaylistDto> playlists)
+        {
+            await _deviceService.UpdateAssignedPlaylistsAsync(id, playlists);
+            await _deviceService.SendCommandAsync(id, "SYNC_SCHEDULE");
+            return Ok(ApiResponse<object>.SuccessResponse(null, "Playlists updated and sync command sent."));
         }
 
         [HttpGet("fix-devices-db")]

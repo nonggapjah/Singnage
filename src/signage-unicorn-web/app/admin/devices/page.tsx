@@ -6,6 +6,7 @@ import { playlistApi } from '@/features/playlists/api/playlist-api';
 import { Device } from '@/features/devices/types';
 import { Playlist, PlaylistItem } from '@/features/playlists/types/playlist';
 import { useUI } from '@/features/ui/context/UIContext';
+import { DevicePlaylistModal } from '@/features/devices/components/DevicePlaylistModal';
 
 const formatDuration = (seconds?: number) => {
     if (!seconds) return '00:00:00';
@@ -642,35 +643,15 @@ export default function DevicesPage() {
                 </div>
             )}
 
-            {/* Assign Modal */}
-            {isAssignModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-                    <div className="w-full max-w-md p-8 rounded-3xl border border-border shadow-[0_0_50px_rgba(0,0,0,0.5)] relative overflow-hidden bg-card-solid">
-                        <div className="mb-6 relative z-10">
-                            <div className="text-4xl mb-2">📡</div>
-                            <h3 className="text-2xl font-black text-foreground uppercase tracking-tighter">Assign Protocol</h3>
-                            <p className="text-xs text-muted-foreground font-mono mt-1">SELECT TRANSMISSION SEQUENCE</p>
-                        </div>
-                        <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar relative z-10">
-                            {playlists.filter(p => p.active === 'Y').map(p => (
-                                <button
-                                    key={p.playlistId}
-                                    onClick={() => setSelectedPlaylistId(p.playlistId)}
-                                    className={`w-full text-left p-4 rounded-xl border transition-all group relative overflow-hidden ${selectedPlaylistId === p.playlistId ? 'bg-accent-purple/10 border-accent-purple text-foreground shadow-[0_0_20px_rgba(157,0,255,0.2)]' : 'bg-card hover:bg-muted border-border text-muted-foreground hover:text-foreground'}`}
-                                >
-                                    <div className="relative z-10">
-                                        <div className="font-bold text-sm uppercase tracking-wide group-hover:text-accent-cyan transition-colors">{p.playlistName}</div>
-                                        <div className="text-[10px] opacity-70 mt-1 font-mono">{p.itemCount || 0} ITEMS • {formatDuration(p.totalDuration)}</div>
-                                    </div>
-                                </button>
-                            ))}
-                        </div>
-                        <div className="flex gap-4 mt-8 relative z-10 pt-4 border-t border-border/50">
-                            <button onClick={() => setIsAssignModalOpen(false)} className="flex-1 py-4 rounded-xl bg-muted/20 text-muted-foreground font-bold hover:bg-muted/40 hover:text-foreground transition-all uppercase tracking-widest text-xs">Abort</button>
-                            <button onClick={handleAssignPlaylist} disabled={!selectedPlaylistId} className="flex-[2] py-4 rounded-xl bg-accent-cyan text-black font-black uppercase tracking-[0.2em] hover:bg-cyan-300 disabled:opacity-20 disabled:cursor-not-allowed transition-all shadow-[0_0_30px_rgba(34,211,238,0.3)] hover:shadow-[0_0_50px_rgba(34,211,238,0.5)] transform hover:-translate-y-1 text-xs">Initiate</button>
-                        </div>
-                    </div>
-                </div>
+            {/* Assign Modal - Replaced with the Multi-Playlist Scheduling Component */}
+            {isAssignModalOpen && selectedDeviceId && (
+                <DevicePlaylistModal
+                    isOpen={isAssignModalOpen}
+                    onClose={() => setIsAssignModalOpen(false)}
+                    deviceId={selectedDeviceId}
+                    deviceName={devices.find(d => d.deviceId === selectedDeviceId)?.deviceName || 'Unknown Device'}
+                    availablePlaylists={playlists}
+                />
             )}
         </div>
     );
