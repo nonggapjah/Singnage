@@ -25,17 +25,29 @@ export const DevicePlaylistModal: React.FC<DevicePlaylistModalProps> = ({ isOpen
         }
     }, [isOpen, deviceId]);
 
+    const parseUtcToLocalInput = (utcStr?: string) => {
+        if (!utcStr) return undefined;
+        // Force treat as UTC by appending 'Z' if missing
+        const d = new Date(utcStr + (utcStr.endsWith('Z') ? '' : 'Z'));
+        const pad = (n: number) => n.toString().padStart(2, '0');
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    };
+
+    const parseLocalInputToUtc = (localStr?: string) => {
+        if (!localStr) return undefined;
+        return new Date(localStr).toISOString();
+    };
+
     const fetchAssignments = async () => {
         setLoading(true);
         try {
             const res = await deviceApi.getAssignedPlaylists(deviceId);
             if (res.success && res.data) {
-                // Ensure dates are parsed to local input string 'YYYY-MM-DDTHH:mm'
                 const formatted = res.data.map(a => ({
                     id: a.id,
                     playlistId: a.playlistId,
-                    startDate: a.startDate ? new Date(a.startDate).toISOString().slice(0, 16) : undefined,
-                    endDate: a.endDate ? new Date(a.endDate).toISOString().slice(0, 16) : undefined,
+                    startDate: parseUtcToLocalInput(a.startDate),
+                    endDate: parseUtcToLocalInput(a.endDate),
                 }));
                 setAssignments(formatted);
             }
@@ -49,11 +61,10 @@ export const DevicePlaylistModal: React.FC<DevicePlaylistModalProps> = ({ isOpen
     const handleSave = async () => {
         setSaving(true);
         try {
-            // Map dates back to ISO strings or nulls
             const payload = assignments.map(a => ({
                 playlistId: a.playlistId,
-                startDate: a.startDate ? new Date(a.startDate).toISOString() : undefined,
-                endDate: a.endDate ? new Date(a.endDate).toISOString() : undefined,
+                startDate: parseLocalInputToUtc(a.startDate),
+                endDate: parseLocalInputToUtc(a.endDate),
             }));
 
             const res = await deviceApi.updateAssignedPlaylists(deviceId, payload);
@@ -106,44 +117,67 @@ export const DevicePlaylistModal: React.FC<DevicePlaylistModalProps> = ({ isOpen
                                         <th className="p-3 font-bold w-1/3">Playlist</th>
                                         <th className="p-3 font-bold">Start Date (Optional)</th>
                                         <th className="p-3 font-bold">End Date (Optional)</th>
+                                        <th className="p-3 font-bold text-center">Status</th>
                                         <th className="p-3 font-bold w-16"></th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {assignments.map((assignment, idx) => (
-                                        <tr key={idx} className="border-b border-white/5 hover:bg-white/5 transition-colors">
-                                            <td className="p-2">
-                                                <select
-                                                    value={assignment.playlistId}
-                                                    onChange={e => updateRow(idx, 'playlistId', e.target.value)}
-                                                    className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-accent-cyan"
-                                                >
-                                                    {availablePlaylists.filter(p => p.active === 'Y').map(p => (
-                                                        <option key={p.playlistId} value={p.playlistId}>{p.playlistName}</option>
-                                                    ))}
-                                                </select>
-                                            </td>
-                                            <td className="p-2">
-                                                <input
-                                                    type="datetime-local"
-                                                    value={assignment.startDate || ''}
-                                                    onChange={e => updateRow(idx, 'startDate', e.target.value)}
-                                                    className="w-full bg-muted/20 border border-border/50 rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-accent-cyan"
-                                                />
-                                            </td>
-                                            <td className="p-2">
-                                                <input
-                                                    type="datetime-local"
-                                                    value={assignment.endDate || ''}
-                                                    onChange={e => updateRow(idx, 'endDate', e.target.value)}
-                                                    className="w-full bg-muted/20 border border-border/50 rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-red-500/50"
-                                                />
-                                            </td>
-                                            <td className="p-2 text-center">
-                                                <button onClick={() => removeRow(idx)} className="text-red-500 hover:bg-red-500/10 p-2 rounded transition-colors text-xl">✕</button>
-                                            </td>
-                                        </tr>
-                                    ))}
+                                    {assignments.map((assignment, idx) => {
+                                        const now = new Date();
+                                        const st = assignment.startDate ? new Date(assignment.startDate) : null;
+                                        const nd = assignment.endDate ? new Date(assignment.endDate) : null;
+
+                                        let statusStr = "ACTIVE";
+                                        let statusColor = "text-green-500 bg-green-500/10 border-green-500/30";
+
+                                        if (st && st > now) {
+                                            statusStr = "WAITING";
+                                            statusColor = "text-amber-500 bg-amber-500/10 border-amber-500/30";
+                                        } else if (nd && nd < now) {
+                                            statusStr = "EXPIRED";
+                                            statusColor = "text-red-500 bg-red-500/10 border-red-500/30";
+                                        }
+
+                                        return (
+                                            <tr key={idx} className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                                                <td className="p-2">
+                                                    <select
+                                                        value={assignment.playlistId}
+                                                        onChange={e => updateRow(idx, 'playlistId', e.target.value)}
+                                                        className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-accent-cyan"
+                                                    >
+                                                        {availablePlaylists.filter(p => p.active === 'Y').map(p => (
+                                                            <option key={p.playlistId} value={p.playlistId}>{p.playlistName}</option>
+                                                        ))}
+                                                    </select>
+                                                </td>
+                                                <td className="p-2">
+                                                    <input
+                                                        type="datetime-local"
+                                                        value={assignment.startDate || ''}
+                                                        onChange={e => updateRow(idx, 'startDate', e.target.value)}
+                                                        className="w-full bg-muted/20 border border-border/50 rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-accent-cyan"
+                                                    />
+                                                </td>
+                                                <td className="p-2">
+                                                    <input
+                                                        type="datetime-local"
+                                                        value={assignment.endDate || ''}
+                                                        onChange={e => updateRow(idx, 'endDate', e.target.value)}
+                                                        className="w-full bg-muted/20 border border-border/50 rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-red-500/50"
+                                                    />
+                                                </td>
+                                                <td className="p-2 text-center">
+                                                    <span className={`text-[10px] font-bold px-2 py-1 rounded border ${statusColor} uppercase tracking-widest`}>
+                                                        {statusStr}
+                                                    </span>
+                                                </td>
+                                                <td className="p-2 text-center">
+                                                    <button onClick={() => removeRow(idx)} className="text-red-500 hover:bg-red-500/10 p-2 rounded transition-colors text-xl">✕</button>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
                                     {assignments.length === 0 && (
                                         <tr>
                                             <td colSpan={4} className="p-8 text-center text-muted-foreground font-mono text-sm uppercase tracking-widest border-b border-white/5">No Playlists Assigned To Schedule</td>

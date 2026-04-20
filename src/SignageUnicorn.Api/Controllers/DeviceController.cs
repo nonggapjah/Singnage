@@ -166,6 +166,34 @@ namespace SignageUnicorn.Api.Controllers
             return Ok(ApiResponse<object>.SuccessResponse(null, "Playlists updated and sync command sent."));
         }
 
+        [HttpPost("batch-add-playlist")]
+        [Authorize(Roles = UserRoles.Admin)]
+        public async Task<IActionResult> BatchAddPlaylistToSchedule([FromBody] BatchAddScheduleRequest request)
+        {
+            foreach (var deviceId in request.DeviceIds)
+            {
+                var current = await _deviceService.GetAssignedPlaylistsAsync(deviceId);
+                var updated = current.ToList();
+
+                // Remove existing mapping of the same playlist just in case
+                updated.RemoveAll(x => x.PlaylistId == request.PlaylistId);
+
+                updated.Add(new DevicePlaylistDto
+                {
+                    DeviceId = deviceId,
+                    PlaylistId = request.PlaylistId,
+                    StartDate = request.StartDate,
+                    EndDate = request.EndDate,
+                    IsActive = true
+                });
+
+                await _deviceService.UpdateAssignedPlaylistsAsync(deviceId, updated);
+                await _deviceService.SendCommandAsync(deviceId, "SYNC_SCHEDULE");
+            }
+
+            return Ok(ApiResponse<object>.SuccessResponse(null, $"Added playlist to {request.DeviceIds.Count} devices."));
+        }
+
         [HttpGet("fix-devices-db")]
         [Authorize(Roles = UserRoles.Admin)]
         public async Task<IActionResult> FixDb()

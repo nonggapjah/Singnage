@@ -26,8 +26,10 @@ namespace SignageUnicorn.Api.Models
     public class DeviceCommandDto
     {
         public string CommandId { get; set; } = string.Empty;
+        public string? DeviceCommandId { get; set; } // Holds the UUID for client ACK
         public string DeviceId { get; set; } = string.Empty;
         public string? CommandType { get; set; } // RESTART, REFRESH, UPDATE_PLAYLIST
+        public string? Payload { get; set; }
         public string? Status { get; set; } // PENDING, COMPLETED
         public DateTime CreatedAt { get; set; }
     }
@@ -117,5 +119,20 @@ namespace SignageUnicorn.Api.Models
         public DateTime? StartDate { get; set; }
         public DateTime? EndDate { get; set; }
         public bool IsActive { get; set; } = true;
+    }
+
+    public class BatchAddScheduleRequest
+    {
+        [JsonPropertyName("deviceIds")]
+        public List<string> DeviceIds { get; set; } = new List<string>();
+
+        [JsonPropertyName("playlistId")]
+        public string PlaylistId { get; set; } = string.Empty;
+
+        [JsonPropertyName("startDate")]
+        public DateTime? StartDate { get; set; }
+
+        [JsonPropertyName("endDate")]
+        public DateTime? EndDate { get; set; }
     }
 }

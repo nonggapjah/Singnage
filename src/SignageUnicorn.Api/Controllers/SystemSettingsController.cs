@@ -1,8 +1,10 @@
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using SignageUnicorn.Api.Constants;
 using SignageUnicorn.Api.Models.Responses;
 using SignageUnicorn.Api.Repositories.Interfaces;
+using System.IO;
 using System.Threading.Tasks;
 
 namespace SignageUnicorn.Api.Controllers
@@ -13,10 +15,12 @@ namespace SignageUnicorn.Api.Controllers
     public class SystemSettingsController : ControllerBase
     {
         private readonly ISystemSettingsRepository _repository;
+        private readonly IWebHostEnvironment _env;
 
-        public SystemSettingsController(ISystemSettingsRepository repository)
+        public SystemSettingsController(ISystemSettingsRepository repository, IWebHostEnvironment env)
         {
             _repository = repository;
+            _env = env;
         }
 
         [HttpGet("{key}")]
@@ -25,6 +29,17 @@ namespace SignageUnicorn.Api.Controllers
         {
             var value = await _repository.GetSettingAsync(key);
             return Ok(ApiResponse<string>.SuccessResponse(value));
+        }
+
+        [HttpGet("setup/download")]
+        [AllowAnonymous]
+        public async Task<IActionResult> DownloadSetup()
+        {
+            var path = Path.Combine(_env.ContentRootPath, "wwwroot", "setup", "Signage_Unicorn_Setup_latest.exe");
+            if (!System.IO.File.Exists(path)) return NotFound(ApiResponse<string>.ErrorResponse(404, "Setup file not found"));
+            
+            var bytes = await System.IO.File.ReadAllBytesAsync(path);
+            return File(bytes, "application/vnd.microsoft.portable-executable", "Signage_Unicorn_Setup_2.5.1.exe");
         }
 
         [HttpPost]

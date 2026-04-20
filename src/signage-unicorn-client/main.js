@@ -375,36 +375,57 @@ ipcMain.handle('download-update', async (event, { url }) => {
 
 ipcMain.handle('launch-installer', async (event, filePath) => {
     try {
-        console.log('Launching Silent Installer via Batch Script:', filePath);
+        console.log('Launching Silent Installer:', filePath);
+
+        if (!await fs.pathExists(filePath)) {
+            console.error('Installer file not found at path:', filePath);
+            return { success: false, error: 'Installer file not found at ' + filePath };
+        }
 
         // To ensure the app opens after silent update, we generate a bat file
         const batPath = path.join(app.getPath('temp'), `update_launcher_${Date.now()}.bat`);
-        const appExePath = process.execPath; // Path of the currently running Signage Unicorn.exe
+        const appExePath = process.execPath;
 
-        const batContent = `
-@echo off
+        // Use a more robust batch content with logging to temp file for debugging if needed
+        const batContent = `@echo off
 echo Waiting for app to close...
-timeout /t 3 /nobreak >nul
-echo Running Installer...
+timeout /t 5 /nobreak >nul
+echo Running Installer: "${filePath}"
 "${filePath}" /S
+if %ERRORLEVEL% NEQ 0 (
+    echo Installer failed with code %ERRORLEVEL%
+    timeout /t 10
+    exit /b %ERRORLEVEL%
+)
 echo Installer finished. Starting app again...
-timeout /t 2 /nobreak >nul
+timeout /t 3 /nobreak >nul
 start "" "${appExePath}"
 del "%~f0"
-        `.trim();
+`;
 
         await fs.writeFile(batPath, batContent, 'utf8');
 
-        // Execute the batch script detached
+        // Execute the batch script detached. 
+        // Using shell: true helps resolve paths and cmd.exe on Windows.
         const child = spawn('cmd.exe', ['/c', batPath], {
             detached: true,
             stdio: 'ignore',
-            windowsHide: true
+            windowsHide: true,
+            shell: false
         });
+
+        if (!child) {
+            throw new Error("Failed to spawn update process.");
+        }
+
         child.unref();
 
-        // Immediate shutdown to release file locks
-        app.exit(0);
+        // Delay exit slightly to ensure spawn command is registered by OS
+        setTimeout(() => {
+            app.isQuitting = true;
+            app.quit();
+        }, 1000);
+
         return { success: true };
     } catch (err) {
         console.error('Launch installer failed:', err);

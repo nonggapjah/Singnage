@@ -73,5 +73,12 @@ export const deviceApi = {
             method: 'POST',
             body: JSON.stringify(playlists),
         });
+    },
+
+    batchAddSchedule: async (deviceIds: string[], playlistId: string, startDate?: string, endDate?: string) => {
+        return await apiFetch<{ success: boolean }>('/devices/batch-add-playlist', {
+            method: 'POST',
+            body: JSON.stringify({ deviceIds, playlistId, startDate, endDate }),
+        });
     }
 };

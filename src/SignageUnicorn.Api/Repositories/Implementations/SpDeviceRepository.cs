@@ -120,22 +120,8 @@ namespace SignageUnicorn.Api.Repositories.Implementations
                 p.Add("@p_ratio", request.Ratio);
                 p.Add("@p_mac_address", request.MacAddress);
 
-                await connection.ExecuteAsync("sp_device_std", p, commandType: CommandType.StoredProcedure);
-
-                // 2. Poll Pending Commands
-                var pPoll = new DynamicParameters();
-                pPoll.Add("@p_action", "POLL_PENDING");
-                if (long.TryParse(request.DeviceId, out var devIdPoll))
-                {
-                    pPoll.Add("@p_device_id", devIdPoll);
-                }
-                else
-                {
-                    pPoll.Add("@p_device_uuid", request.DeviceId);
-                }
-
-                // Polling now returns Status (1) then Data (2)
-                using var multi = await connection.QueryMultipleAsync("sp_device_command_std", pPoll, commandType: CommandType.StoredProcedure);
+                // Polling now returns Status (1) then Data (2) OUT OF sp_device_std directly!
+                using var multi = await connection.QueryMultipleAsync("sp_device_std", p, commandType: CommandType.StoredProcedure);
                 var status = await multi.ReadFirstOrDefaultAsync<SpStdResult>();
                 
                 if (status != null && status.err_flag) return Enumerable.Empty<DeviceCommandDto>();

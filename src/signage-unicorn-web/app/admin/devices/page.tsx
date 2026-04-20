@@ -41,6 +41,9 @@ export default function DevicesPage() {
     const [mediaMap, setMediaMap] = useState<Record<string, string>>({});
     const [playlistItemsMap, setPlaylistItemsMap] = useState<Record<string, PlaylistItem[]>>({});
 
+    // Selection State
+    const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
     const showNotify = (title: string, message: string, type: 'INFO' | 'SUCCESS' | 'ERROR' = 'INFO') => {
         showModal({ title, message, type });
     };
@@ -112,6 +115,39 @@ export default function DevicesPage() {
             }
         );
     }
+
+    async function handleBatchCommand(command: string) {
+        if (selectedIds.length === 0) return;
+        showConfirm(
+            'BATCH SYSTEM COMMAND',
+            `Are you sure you want to send ${command} to ${selectedIds.length} selected devices?`,
+            async () => {
+                try {
+                    const res = await deviceApi.batchSendCommand(selectedIds, command);
+                    if (res.success) {
+                        showNotify('BATCH SUCCESS', `Command ${command} sent to ${selectedIds.length} devices!`, 'SUCCESS');
+                        setSelectedIds([]);
+                    } else {
+                        showNotify('BATCH FAILED', res.message || 'Unknown error', 'ERROR');
+                    }
+                } catch (error) {
+                    showNotify('CRITICAL ERROR', 'A critical error occurred while sending batch command.', 'ERROR');
+                }
+            }
+        );
+    }
+
+    const toggleSelection = (id: string) => {
+        setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+    };
+
+    const toggleSelectAll = () => {
+        if (selectedIds.length === filteredDevices.length) {
+            setSelectedIds([]);
+        } else {
+            setSelectedIds(filteredDevices.map(d => d.deviceId));
+        }
+    };
 
     async function handleDeleteDevice(deviceId: string) {
         showConfirm(
@@ -369,6 +405,9 @@ export default function DevicesPage() {
                 </div>
 
                 <div className="flex gap-2">
+                    <button onClick={toggleSelectAll} className={`px-3 py-2 rounded-lg border border-border text-xs font-bold uppercase transition-all ${selectedIds.length > 0 ? 'bg-accent-cyan text-black border-accent-cyan' : 'text-muted-foreground hover:bg-muted/10'}`}>
+                        {selectedIds.length === filteredDevices.length && filteredDevices.length > 0 ? 'Deselect All' : 'Select All'}
+                    </button>
                     <button onClick={handleRefresh} className={`text-xl p-2 rounded-lg border border-border hover:bg-muted/10 transition-all ${refreshing ? 'animate-spin text-accent-cyan' : 'text-muted-foreground'}`}>↻</button>
                     <button onClick={handleInitDb} disabled={initDbLoading} className="p-2 rounded-lg border border-border hover:bg-muted/10 text-xs font-bold uppercase text-muted-foreground">{initDbLoading ? 'Wait...' : 'Init DB'}</button>
                     <button onClick={handleCleanupZombies} className="px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-xs font-bold uppercase text-red-500 hover:bg-red-500 hover:text-white transition-all">Cleanup Zombies</button>
@@ -391,8 +430,20 @@ export default function DevicesPage() {
                             ? device.deviceUuid
                             : device.deviceId;
 
+                        const isSelected = selectedIds.includes(device.deviceId);
+
                         return (
-                            <div key={`grid-dev-${device.deviceId || 'unknown'}-${index}`} className="glass-card p-6 rounded-2xl border border-border group relative overflow-hidden transition-all hover:-translate-y-1 flex flex-col bg-card/50">
+                            <div key={`grid-dev-${device.deviceId || 'unknown'}-${index}`} className={`glass-card p-6 rounded-2xl border ${isSelected ? 'border-accent-cyan bg-accent-cyan/5 shadow-[0_0_20px_rgba(34,211,238,0.2)]' : 'border-border'} group relative overflow-hidden transition-all hover:-translate-y-1 flex flex-col bg-card/50`}>
+                                {/* Selection Checkbox */}
+                                <div className="absolute top-4 right-4 z-20">
+                                    <input
+                                        type="checkbox"
+                                        checked={isSelected}
+                                        onChange={() => toggleSelection(device.deviceId)}
+                                        className="w-5 h-5 rounded border-white/20 bg-black/40 checked:bg-accent-cyan transition-all cursor-pointer"
+                                    />
+                                </div>
+
                                 {/* Status Line */}
                                 <div className={`absolute top-0 left-0 w-full h-1 ${isOnline
                                     ? 'bg-gradient-to-r from-transparent via-green-500 to-transparent shadow-[0_0_10px_#22c55e]'
@@ -490,8 +541,9 @@ export default function DevicesPage() {
                                     )}
                                 </div>
 
-                                <div className="grid grid-cols-2 gap-2 mt-auto">
-                                    <button onClick={() => openAssignModal(device.deviceId)} className="col-span-2 py-3 mb-1 rounded-lg bg-accent-cyan/10 hover:bg-accent-cyan/20 border border-accent-cyan/20 text-xs font-black text-accent-cyan uppercase tracking-wider transition-all">Assign Protocol</button>
+                                <div className="grid grid-cols-3 gap-2 mt-auto">
+                                    <button onClick={() => openAssignModal(device.deviceId)} className="col-span-3 py-3 mb-1 rounded-lg bg-accent-cyan/10 hover:bg-accent-cyan/20 border border-accent-cyan/20 text-xs font-black text-accent-cyan uppercase tracking-wider transition-all">Assign Protocol</button>
+                                    <button onClick={() => handleCommand(device.deviceId, 'RELOAD')} className="py-2 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 text-xs font-bold text-amber-500 uppercase tracking-wider">Reset</button>
                                     <button onClick={() => handleCommand(device.deviceId, 'REFRESH')} className="py-2 rounded-lg bg-muted/20 hover:bg-muted/40 border border-border text-xs font-bold text-muted-foreground hover:text-foreground uppercase tracking-wider">Refresh</button>
                                     {isOnline ? (
                                         <button onClick={() => handleCommand(device.deviceId, 'RESTART')} className="py-2 rounded-lg bg-muted/20 hover:bg-red-900/20 border border-border text-xs font-bold text-muted-foreground hover:text-red-500 uppercase tracking-wider">Reboot</button>
@@ -517,6 +569,14 @@ export default function DevicesPage() {
                         <table className="w-full text-left border-collapse">
                             <thead>
                                 <tr className="border-b border-white/10 text-xs text-muted-foreground uppercase tracking-wider bg-white/5">
+                                    <th className="p-4 font-bold w-12 text-center">
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedIds.length === filteredDevices.length && filteredDevices.length > 0}
+                                            onChange={toggleSelectAll}
+                                            className="w-4 h-4 rounded border-white/20 bg-black/40 checked:bg-accent-cyan transition-all cursor-pointer"
+                                        />
+                                    </th>
                                     <th className="p-4 font-bold w-12 text-center">Status</th>
                                     <th className="p-4 font-bold">Device Name</th>
                                     <th className="p-4 font-bold">Branch</th>
@@ -537,8 +597,18 @@ export default function DevicesPage() {
                                         ? device.deviceUuid
                                         : device.deviceId;
 
+                                    const isSelected = selectedIds.includes(device.deviceId);
+
                                     return (
-                                        <tr key={`list-dev-${device.deviceId || 'unknown'}-${index}`} className="hover:bg-white/5 transition-colors group">
+                                        <tr key={`list-dev-${device.deviceId || 'unknown'}-${index}`} className={`hover:bg-white/5 transition-colors group ${isSelected ? 'bg-accent-cyan/10' : ''}`}>
+                                            <td className="p-4 text-center">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={isSelected}
+                                                    onChange={() => toggleSelection(device.deviceId)}
+                                                    className="w-4 h-4 rounded border-white/20 bg-black/40 checked:bg-accent-cyan transition-all cursor-pointer"
+                                                />
+                                            </td>
                                             <td className="p-4 text-center">
                                                 <div className={`w-3 h-3 rounded flex items-center justify-center mx-auto ${isOnline ? 'bg-green-500/20 border border-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]' : 'bg-red-500/10 border border-red-900/50'}`}>
                                                     <div className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-green-500 animate-pulse' : 'bg-red-900'}`}></div>
@@ -613,6 +683,12 @@ export default function DevicesPage() {
                                                     Assign
                                                 </button>
                                                 <button
+                                                    onClick={() => handleCommand(device.deviceId, 'RELOAD')}
+                                                    className="text-[10px] text-amber-500 hover:text-amber-400 hover:bg-amber-500/10 border border-transparent hover:border-amber-500/20 px-3 py-1.5 rounded transition-all uppercase font-bold tracking-wider"
+                                                >
+                                                    Reset
+                                                </button>
+                                                <button
                                                     onClick={() => handleCommand(device.deviceId, 'REFRESH')}
                                                     className="text-[10px] bg-white/5 hover:bg-white/10 border border-white/10 px-3 py-1.5 rounded transition-all uppercase font-bold tracking-wider text-muted-foreground hover:text-white"
                                                 >
@@ -652,6 +728,41 @@ export default function DevicesPage() {
                     deviceName={devices.find(d => d.deviceId === selectedDeviceId)?.deviceName || 'Unknown Device'}
                     availablePlaylists={playlists}
                 />
+            )}
+
+            {/* Batch Action Bar */}
+            {selectedIds.length > 0 && (
+                <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 bg-black/80 backdrop-blur-xl border border-accent-cyan/30 px-8 py-4 rounded-2xl shadow-[0_0_50px_rgba(0,0,0,0.8)] flex items-center gap-8 animate-in slide-in-from-bottom duration-300">
+                    <div className="border-r border-white/10 pr-8">
+                        <span className="text-xl font-black text-accent-cyan">{selectedIds.length}</span>
+                        <span className="ml-2 text-xs font-bold text-muted-foreground uppercase tracking-widest">Selected</span>
+                    </div>
+
+                    <div className="flex gap-3">
+                        <button
+                            onClick={() => handleBatchCommand('RELOAD')}
+                            className="px-6 py-2 rounded-xl bg-amber-500 text-black font-black uppercase tracking-widest text-[10px] hover:bg-amber-400 transition-all hover:scale-105 shadow-[0_0_20px_rgba(245,158,11,0.3)]"
+                        >
+                            Batch Reset
+                        </button>
+                        <button
+                            onClick={() => handleBatchCommand('REFRESH')}
+                            className="px-6 py-2 rounded-xl bg-white/10 text-white font-bold uppercase tracking-widest text-[10px] hover:bg-white/20 transition-all"
+                        >
+                            Batch Refresh
+                        </button>
+                        <button
+                            onClick={() => handleBatchCommand('RESTART')}
+                            className="px-6 py-2 rounded-xl bg-red-600 text-white font-black uppercase tracking-widest text-[10px] hover:bg-red-500 transition-all"
+                        >
+                            Batch Reboot
+                        </button>
+                    </div>
+
+                    <div className="border-l border-white/10 pl-8">
+                        <button onClick={() => setSelectedIds([])} className="text-[10px] font-bold text-muted-foreground hover:text-white uppercase tracking-widest underline underline-offset-4">Cancel</button>
+                    </div>
+                </div>
             )}
         </div>
     );

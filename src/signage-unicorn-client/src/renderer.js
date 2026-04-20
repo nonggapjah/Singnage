@@ -397,6 +397,22 @@ async function sync() {
                         const pid = type.split(':')[1];
                         if (pid) { showHUD('REMOTE PLAYLIST'); loadPlaylist(pid); }
                     }
+
+                    // --- ACK: Report command as EXECUTED ---
+                    try {
+                        const ackUrl = `${config.serverIp}/api/v1/devices/${config.deviceId}/command/ack`;
+                        await fetch(ackUrl, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                commandId: cmd.deviceCommandId || cmd.commandId,
+                                status: 'EXECUTED'
+                            })
+                        });
+                        addLog(`Command ${type} acknowledged.`, 'info', true);
+                    } catch (e) {
+                        addLog(`Failed to ACK command: ${e.message}`, 'warn', true);
+                    }
                 }
             }
             syncPlaybackLogs();
@@ -627,6 +643,7 @@ async function playNext() {
     addLog(`Playing: ${media.displayName || media.fileName} (${currentIndex + 1}/${playlist.length})`);
 
     const onComplete = async (skipLog = false) => {
+        if (currentItemTimer) clearTimeout(currentItemTimer);
         if (!skipLog) recordPlayback(item, Date.now() - mediaStartTime);
 
         // --- SMOOTH SWAP LOGIC ---
@@ -647,6 +664,8 @@ async function playNext() {
     };
 
     if (media.fileName.toLowerCase().match(/\.(mp4|webm|mov)$/)) {
+        if (currentItemTimer) clearTimeout(currentItemTimer);
+
         // If same file (1-item loop), reset and play explicitly
         if (videoEl.src === localFile) {
             videoEl.currentTime = 0;
@@ -658,8 +677,22 @@ async function playNext() {
         }
 
         videoEl.classList.remove('hidden'); imageEl.classList.add('hidden');
-        videoEl.onended = () => onComplete(false);
+        videoEl.onended = () => {
+            if (currentItemTimer) clearTimeout(currentItemTimer);
+            onComplete(false);
+        };
+
+        // --- WATCHDOG: Force next video if it hangs longer than duration + 60s (SAFE BUFFER) ---
+        // Only set watchdog if we actually have a duration > 0
+        if (mediaDuration > 0) {
+            currentItemTimer = setTimeout(() => {
+                addLog(`Watchdog: Video ${media.fileName} hung. Forcing next.`, 'warn');
+                onComplete(true); // Treat as error skip
+            }, mediaDuration + 60000);
+        }
+
         videoEl.onerror = () => {
+            if (currentItemTimer) clearTimeout(currentItemTimer);
             const err = videoEl.error ? `Code ${videoEl.error.code}: ${videoEl.error.message}` : 'Unknown Playback Error';
             console.error('Video Error:', err, localFile);
             recordPlayback(item, 0, 'error', err);
@@ -670,6 +703,7 @@ async function playNext() {
         if (currentItemTimer) clearTimeout(currentItemTimer);
         currentItemTimer = setTimeout(() => onComplete(false), mediaDuration);
         imageEl.onerror = () => {
+            if (currentItemTimer) clearTimeout(currentItemTimer);
             const err = 'Image Load Failed';
             console.error(err, localFile);
             recordPlayback(item, 0, 'error', err);
@@ -941,7 +975,11 @@ document.getElementById('check-update-btn').onclick = async () => {
             isUpdating = true;
             try {
                 const dr = await fetch(`${config.serverIp}/api/v1/system/settings/ClientDownloadUrl`).then(r => r.json());
-                const dl = await ipcRenderer.invoke('download-update', { url: dr.data });
+                const downloadUrl = (dr.data && dr.data.startsWith('http'))
+                    ? dr.data
+                    : `${config.serverIp}${dr.data || '/setup/Signage_Unicorn_Setup_latest.exe'}`;
+
+                const dl = await ipcRenderer.invoke('download-update', { url: downloadUrl });
                 if (dl.success) {
                     ipcRenderer.invoke('launch-installer', dl.path);
                 } else {

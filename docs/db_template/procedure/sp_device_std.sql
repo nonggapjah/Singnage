@@ -55,6 +55,18 @@ BEGIN
     DECLARE @err_flag BIT = 0;
     DECLARE @msg NVARCHAR(4000) = N'';
     
+    -- Table Variable for Command Polling (Used in HEARTBEAT)
+    DECLARE @PollTbl TABLE (
+        CommandId BIGINT,
+        CommandUuid NVARCHAR(36),
+        DeviceCommandId NVARCHAR(36),
+        DeviceId BIGINT,
+        CommandType NVARCHAR(50),
+        Payload NVARCHAR(MAX),
+        Status NVARCHAR(20),
+        CreatedAt DATETIME2
+    );
+
     IF @p_cleanup_days IS NULL SET @p_cleanup_days = 14; 
 
     IF @p_action IS NULL OR @p_action = ''
@@ -168,6 +180,27 @@ BEGIN
              SET @msg = N'Heartbeat processed.';
         END
 
+        -- Execute Command Polling Logic BEFORE ResultSection!
+        DECLARE @actual_id BIGINT;
+        SELECT TOP 1 @actual_id = device_id 
+        FROM sn_devices WITH (NOLOCK) 
+        WHERE is_deleted = 0 AND (device_id = @p_device_id OR device_uuid = @p_device_uuid);
+
+        UPDATE sn_device_commands
+        SET status = 'POLLING',
+            updated_at = SYSUTCDATETIME()
+        OUTPUT 
+            INSERTED.command_id AS CommandId,
+            INSERTED.command_uuid AS CommandUuid,
+            INSERTED.command_uuid AS DeviceCommandId, -- Alias for DTO
+            INSERTED.device_id AS DeviceId,
+            INSERTED.command_type AS CommandType,
+            INSERTED.payload AS Payload,
+            INSERTED.status AS Status,
+            INSERTED.created_at AS CreatedAt
+        INTO @PollTbl
+        WHERE device_id = @actual_id AND status = 'PENDING';
+
         GOTO ResultSection;
     END
 
@@ -241,6 +274,21 @@ ResultSection:
         IF @p_action = 'REGISTER_OR_LOGIN'
         BEGIN
             SELECT * FROM sn_devices WITH (NOLOCK) WHERE device_uuid = @p_device_uuid;
+        END
+
+        IF @p_action = 'HEARTBEAT'
+        BEGIN
+            SELECT 
+                CAST(CommandId AS NVARCHAR(36)) AS CommandId,
+                CommandUuid,
+                DeviceCommandId,
+                CAST(DeviceId AS NVARCHAR(36)) AS DeviceId,
+                CommandType,
+                Payload,
+                Status,
+                CreatedAt
+            FROM @PollTbl 
+            ORDER BY CreatedAt ASC;
         END
 
         IF @p_action = 'GET_ALL'

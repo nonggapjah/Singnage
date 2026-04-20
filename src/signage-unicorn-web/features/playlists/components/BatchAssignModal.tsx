@@ -18,6 +18,8 @@ export const BatchAssignModal: React.FC<BatchAssignModalProps> = ({ playlistId, 
     const [submitting, setSubmitting] = useState(false);
     const [filterBranch, setFilterBranch] = useState('ALL');
     const [searchTerm, setSearchTerm] = useState('');
+    const [startDate, setStartDate] = useState('');
+    const [endDate, setEndDate] = useState('');
 
     useEffect(() => {
         fetchDevices();
@@ -81,11 +83,16 @@ export const BatchAssignModal: React.FC<BatchAssignModalProps> = ({ playlistId, 
         if (selectedDeviceIds.length === 0) return;
         setSubmitting(true);
         try {
-            const command = `PLAY_PLAYLIST:${playlistId}`;
-            await deviceApi.batchSendCommand(selectedDeviceIds, command);
-            onSuccess();
+            const st = startDate ? new Date(startDate).toISOString() : undefined;
+            const ed = endDate ? new Date(endDate).toISOString() : undefined;
+            const res = await deviceApi.batchAddSchedule(selectedDeviceIds, playlistId, st, ed);
+            if (res.success) {
+                onSuccess();
+            } else {
+                alert('Failed to batch assign schedule.');
+            }
         } catch (error) {
-            alert('Failed to batch assign playlist.');
+            alert('Failed to batch assign schedule.');
         } finally {
             setSubmitting(false);
         }
@@ -114,7 +121,7 @@ export const BatchAssignModal: React.FC<BatchAssignModalProps> = ({ playlistId, 
                 <div className="p-8 border-b border-white/5 bg-white-[0.02]">
                     <div className="flex justify-between items-start">
                         <div>
-                            <h3 className="text-3xl font-black neon-text uppercase tracking-tighter">Batch Deployment</h3>
+                            <h3 className="text-3xl font-black neon-text uppercase tracking-tighter">Batch Deployment Schedule</h3>
                             <p className="text-sm text-gray-400 font-mono mt-1">
                                 TARGETING: <span className="text-accent-cyan font-bold">{playlistName}</span>
                             </p>
@@ -150,59 +157,73 @@ export const BatchAssignModal: React.FC<BatchAssignModalProps> = ({ playlistId, 
                         >
                             Toggle Select Visible
                         </button>
-
-                        <div className="h-[30px] w-[1px] bg-white/10 mx-2 hidden md:block"></div>
-
-                        <button
-                            onClick={() => handleBatchCommand('REFRESH', 'RESTART APPS')}
-                            className="px-4 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-500 text-[10px] font-bold hover:bg-amber-500/20 transition-all uppercase tracking-widest h-[42px]"
-                            title="Force all selected players to reload their software"
-                        >
-                            Restart Apps
-                        </button>
-
-                        <button
-                            onClick={() => handleBatchCommand('WIPE_CACHE', 'WIPE CACHE & RELOAD')}
-                            className="px-4 py-2 rounded-xl bg-red-500/10 border border-red-500/20 text-red-500 text-[10px] font-bold hover:bg-red-500/20 transition-all uppercase tracking-widest h-[42px]"
-                            title="Force clear all local video cache and re-download everything"
-                        >
-                            Wipe Cache
-                        </button>
                     </div>
                 </div>
 
-                {/* Device List */}
-                <div className="flex-1 overflow-y-auto p-8 custom-scrollbar bg-black/20">
-                    {loading ? (
-                        <div className="text-center py-20 animate-pulse text-gray-500 font-mono uppercase tracking-[0.3em]">Scanning Network...</div>
-                    ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                            {filteredDevices.map(device => (
-                                <div
-                                    key={device.deviceId}
-                                    onClick={() => handleToggleDevice(device.deviceId)}
-                                    className={`p-4 rounded-2xl border cursor-pointer transition-all flex items-center justify-between group ${selectedDeviceIds.includes(device.deviceId)
-                                        ? 'bg-accent-cyan/10 border-accent-cyan shadow-[0_0_15px_rgba(34,211,238,0.1)]'
-                                        : 'bg-white/5 border-white/5 hover:border-white/10'
-                                        }`}
-                                >
-                                    <div className="flex items-center gap-3">
-                                        <div className={`w-3 h-3 rounded-full ${['ONLINE', 'PLAYING', 'IDLE'].includes(device.status?.toUpperCase() || '') ? 'bg-green-500' : 'bg-red-900'}`} />
-                                        <div>
-                                            <div className="text-sm font-bold truncate max-w-[150px]">{device.deviceName}</div>
-                                            <div className="text-[0.625rem] text-gray-500 font-mono">{device.branchCode} • {device.ipAddress}</div>
+                {/* Device List & Schedule Option */}
+                <div className="flex-1 overflow-y-auto p-8 custom-scrollbar bg-black/20 flex flex-col md:flex-row gap-6">
+                    <div className="flex-1">
+                        <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">Select Grid Nodes</h4>
+                        {loading ? (
+                            <div className="text-center py-20 animate-pulse text-gray-500 font-mono uppercase tracking-[0.3em]">Scanning Network...</div>
+                        ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                {filteredDevices.map(device => (
+                                    <div
+                                        key={device.deviceId}
+                                        onClick={() => handleToggleDevice(device.deviceId)}
+                                        className={`p-4 rounded-2xl border cursor-pointer transition-all flex items-center justify-between group ${selectedDeviceIds.includes(device.deviceId)
+                                            ? 'bg-accent-cyan/10 border-accent-cyan shadow-[0_0_15px_rgba(34,211,238,0.1)]'
+                                            : 'bg-white/5 border-white/5 hover:border-white/10'
+                                            }`}
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <div className={`w-3 h-3 rounded-full ${['ONLINE', 'PLAYING', 'IDLE'].includes(device.status?.toUpperCase() || '') ? 'bg-green-500' : 'bg-red-900'}`} />
+                                            <div>
+                                                <div className="text-sm font-bold truncate max-w-[150px]">{device.deviceName}</div>
+                                                <div className="text-[0.625rem] text-gray-500 font-mono">{device.branchCode} • {device.ipAddress}</div>
+                                            </div>
+                                        </div>
+                                        <div className={`w-5 h-5 rounded-md border flex items-center justify-center transition-all ${selectedDeviceIds.includes(device.deviceId)
+                                            ? 'bg-accent-cyan border-accent-cyan text-black'
+                                            : 'border-white/20'
+                                            }`}>
+                                            {selectedDeviceIds.includes(device.deviceId) && '✓'}
                                         </div>
                                     </div>
-                                    <div className={`w-5 h-5 rounded-md border flex items-center justify-center transition-all ${selectedDeviceIds.includes(device.deviceId)
-                                        ? 'bg-accent-cyan border-accent-cyan text-black'
-                                        : 'border-white/20'
-                                        }`}>
-                                        {selectedDeviceIds.includes(device.deviceId) && '✓'}
-                                    </div>
-                                </div>
-                            ))}
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Schedule Column */}
+                    <div className="w-full md:w-64 space-y-4">
+                        <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">Schedule Runtime</h4>
+                        <div className="glass-panel p-4 rounded-xl border border-white/5 bg-white/5 space-y-4">
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Status</label>
+                                <span className="bg-green-500/20 text-green-500 border border-green-500/30 text-xs px-2 py-1 rounded">ACTIVE</span>
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Start Date (Optional)</label>
+                                <input
+                                    type="datetime-local"
+                                    className="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-xs font-mono outline-none focus:border-accent-cyan"
+                                    value={startDate}
+                                    onChange={(e) => setStartDate(e.target.value)}
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">End Date (Optional)</label>
+                                <input
+                                    type="datetime-local"
+                                    className="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-xs font-mono outline-none focus:border-red-500/50"
+                                    value={endDate}
+                                    onChange={(e) => setEndDate(e.target.value)}
+                                />
+                            </div>
                         </div>
-                    )}
+                    </div>
                 </div>
 
                 {/* Footer */}
@@ -217,7 +238,7 @@ export const BatchAssignModal: React.FC<BatchAssignModalProps> = ({ playlistId, 
                             onClick={handleAssign}
                             className="px-10 py-3 rounded-xl bg-accent-cyan text-black font-black uppercase tracking-[0.2em] shadow-[0_0_30px_rgba(34,211,238,0.3)] hover:scale-105 disabled:opacity-20 disabled:scale-100 transition-all text-xs"
                         >
-                            {submitting ? 'EXECUTING...' : 'INITIATE BROADCAST'}
+                            {submitting ? 'EXECUTING...' : 'INITIATE SCHEDULE'}
                         </button>
                     </div>
                 </div>

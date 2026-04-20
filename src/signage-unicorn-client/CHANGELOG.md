@@ -3,6 +3,16 @@
 รายการอัปเดตและประวัติการแก้ไขระบบ (Patch Version History)
 
 ---
+## [2.5.2] - 2026-04-03
+### Critical Stability: Race Condition Fix
+- **Atomic Completion**: Solidified `onComplete` logic to ensure only one item-end event can trigger a transition, preventing dual-skips.
+- **Enhanced Watchdog Reliability**: Re-synchronizing hardware timers on media swap.
+
+## [2.5.1] - 2026-04-03
+### Critical Stability: Playback Watchdog
+- **Watchdog Timer**: Added a server-grade playback watchdog to the video engine. If a video hangs for more than duration + 5s, the system forces a jump to the next item.
+- **Enhanced Error Recovery**: Improved cleanup of background timers and error handling for corrupt video files to prevent black screens.
+
 ## [2.5.0] - 2026-03-XX
 ### Feature: Multi-Playlist Scheduling
 - **Dynamic Content Timelines**: The player now supports rendering a mathematically merged sequence of continuous playback combining multiple playlists.
