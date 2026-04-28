@@ -273,7 +273,26 @@ ResultSection:
     BEGIN
         IF @p_action = 'REGISTER_OR_LOGIN'
         BEGIN
-            SELECT * FROM sn_devices WITH (NOLOCK) WHERE device_uuid = @p_device_uuid;
+            SELECT 
+                CAST(d.device_id AS NVARCHAR(36)) AS DeviceId, 
+                d.device_uuid AS DeviceUuid, 
+                d.device_uuid AS DeviceKey,
+                d.device_name AS DeviceName, 
+                d.location AS Location, 
+                d.ratio AS Ratio,
+                d.branch_code AS BranchCode,
+                d.ip_address AS IpAddress,
+                d.status AS Status,
+                CAST(d.current_playlist_id AS NVARCHAR(36)) AS CurrentPlaylistId,
+                CAST(d.current_playlist_item_id AS NVARCHAR(36)) AS CurrentPlaylistItemId,
+                CAST(d.current_media_id AS NVARCHAR(36)) AS CurrentMediaId,
+                d.current_position_sec AS CurrentPositionSec,
+                d.cache_progress AS CacheProgress,
+                d.app_version AS AppVersion,
+                d.last_check_in AS LastCheckIn,
+                'Y' AS Active
+            FROM sn_devices d WITH (NOLOCK) 
+            WHERE d.device_uuid = @p_device_uuid;
         END
 
         IF @p_action = 'HEARTBEAT'
@@ -294,7 +313,7 @@ ResultSection:
         IF @p_action = 'GET_ALL'
         BEGIN
             SELECT 
-                d.device_id AS DeviceId, 
+                CAST(d.device_id AS NVARCHAR(36)) AS DeviceId, 
                 d.device_uuid AS DeviceUuid, 
                 d.device_uuid AS DeviceKey,
                 d.device_name AS DeviceName, 
@@ -309,9 +328,9 @@ ResultSection:
                     ELSE d.status
                 END AS Status,
 
-                d.current_playlist_id AS CurrentPlaylistId,
-                d.current_playlist_item_id AS CurrentPlaylistItemId,
-                d.current_media_id AS CurrentMediaId,
+                CAST(d.current_playlist_id AS NVARCHAR(36)) AS CurrentPlaylistId,
+                CAST(d.current_playlist_item_id AS NVARCHAR(36)) AS CurrentPlaylistItemId,
+                CAST(d.current_media_id AS NVARCHAR(36)) AS CurrentMediaId,
                 d.current_position_sec AS CurrentPositionSec,
                 d.cache_progress AS CacheProgress,
                 d.app_version AS AppVersion,
@@ -325,10 +344,27 @@ ResultSection:
 
         IF @p_action IN ('GET_BY_ID','GET_BY_UUID')
         BEGIN
-            SELECT TOP 1 *
-            FROM sn_devices WITH (NOLOCK)
-            WHERE is_deleted = 0
-              AND (device_id = @p_device_id OR device_uuid = @p_device_uuid);
+            SELECT TOP 1 
+                CAST(d.device_id AS NVARCHAR(36)) AS DeviceId, 
+                d.device_uuid AS DeviceUuid, 
+                d.device_uuid AS DeviceKey,
+                d.device_name AS DeviceName, 
+                d.location AS Location, 
+                d.ratio AS Ratio,
+                d.branch_code AS BranchCode,
+                d.ip_address AS IpAddress,
+                d.status AS Status,
+                CAST(d.current_playlist_id AS NVARCHAR(36)) AS CurrentPlaylistId,
+                CAST(d.current_playlist_item_id AS NVARCHAR(36)) AS CurrentPlaylistItemId,
+                CAST(d.current_media_id AS NVARCHAR(36)) AS CurrentMediaId,
+                d.current_position_sec AS CurrentPositionSec,
+                d.cache_progress AS CacheProgress,
+                d.app_version AS AppVersion,
+                d.last_check_in AS LastCheckIn,
+                'Y' AS Active
+            FROM sn_devices d WITH (NOLOCK)
+            WHERE d.is_deleted = 0
+              AND (d.device_id = @p_device_id OR d.device_uuid = @p_device_uuid);
         END
         
         IF @p_action = 'COUNT_OFFLINE_ZOMBIES'

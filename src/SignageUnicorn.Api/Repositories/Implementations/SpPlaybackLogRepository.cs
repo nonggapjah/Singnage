@@ -47,8 +47,7 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             p.Add("@p_start_time", log.PlayedAt);
 
             // Just fire and check status
-            using var multi = await db.QueryMultipleAsync("sp_playback_log_std", p, commandType: CommandType.StoredProcedure);
-            var status = await multi.ReadFirstOrDefaultAsync<SpStdResult>();
+            var status = await db.QueryFirstOrDefaultAsync<SpStdResult>("sp_playback_log_std", p, commandType: CommandType.StoredProcedure);
         }
 
         public async Task<IEnumerable<PlaybackLogDto>> GetLatestLogsAsync(int top)

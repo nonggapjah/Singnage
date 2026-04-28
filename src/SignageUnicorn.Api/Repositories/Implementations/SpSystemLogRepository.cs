@@ -113,7 +113,7 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             using var db = CreateConnection();
             var p = new DynamicParameters();
             p.Add("@p_action", "CLEANUP");
-            p.Add("@p_retention_days", 30);
+            p.Add("@p_retention_days", 1);
 
             var status = await db.QueryFirstOrDefaultAsync<SpStdResult>("sp_system_log_std", p, commandType: CommandType.StoredProcedure);
         }

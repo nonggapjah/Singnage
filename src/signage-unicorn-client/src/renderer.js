@@ -178,7 +178,16 @@ function highlightShortcut(btnId) {
 }
 
 function saveSystemQueue() {
-    localStorage.setItem('system_log_queue', JSON.stringify(systemLogQueue));
+    try {
+        if (systemLogQueue.length > 500) {
+            systemLogQueue = systemLogQueue.slice(-500); // Prevent infinite growth
+        }
+        localStorage.setItem('system_log_queue', JSON.stringify(systemLogQueue));
+    } catch (err) {
+        console.error("Local Storage quota exceeded, wiping queue", err);
+        systemLogQueue = [];
+        localStorage.setItem('system_log_queue', '[]');
+    }
 }
 
 async function syncSystemLogs() {
