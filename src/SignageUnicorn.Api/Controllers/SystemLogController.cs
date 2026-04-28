@@ -98,24 +98,16 @@ namespace SignageUnicorn.Api.Controllers
         [HttpPost]
         public async Task<IActionResult> CreateLog([FromBody] SystemLogDto log)
         {
-            if (log == null || string.IsNullOrEmpty(log.Message))
-                return BadRequest(ApiResponse<bool>.ErrorResponse(400, "Log message is required"));
-
-            await _repo.LogAsync(log.DeviceId, log.LogType, log.Message, log.Source ?? "Player", null, log.CreatedAt);
-            return Ok(ApiResponse<bool>.SuccessResponse(true, "Log captured"));
+            // DISABLED: Stopped logging to DB to prevent disk/pool queue exhaustion
+            return Ok(ApiResponse<bool>.SuccessResponse(true, "Log captured (Disabled)"));
         }
 
         [AllowAnonymous]
         [HttpPost("batch")]
         public async Task<IActionResult> CreateBatch([FromBody] List<SystemLogDto> logs)
         {
-            if (logs == null || logs.Count == 0) return Ok(ApiResponse<bool>.SuccessResponse(true, "No logs to sync"));
-            
-            foreach (var log in logs)
-            {
-                await _repo.LogAsync(log.DeviceId, log.LogType, log.Message, log.Source ?? "Player", null, log.CreatedAt);
-            }
-            return Ok(ApiResponse<int>.SuccessResponse(logs.Count, "Batch captured"));
+            // DISABLED: Stopped logging to DB to prevent disk/pool queue exhaustion
+            return Ok(ApiResponse<int>.SuccessResponse(logs?.Count ?? 0, "Batch captured (Disabled)"));
         }
 
         [HttpDelete]
