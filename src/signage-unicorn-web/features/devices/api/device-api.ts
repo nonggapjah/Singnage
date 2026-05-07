@@ -80,5 +80,12 @@ export const deviceApi = {
             method: 'POST',
             body: JSON.stringify({ deviceIds, playlistId, startDate, endDate }),
         });
+    },
+
+    batchClearSchedule: async (deviceIds: string[], playlistIds?: string[]) => {
+        return await apiFetch<{ success: boolean }>('/devices/batch-clear-schedule', {
+            method: 'POST',
+            body: JSON.stringify({ deviceIds, playlistIds }),
+        });
     }
 };

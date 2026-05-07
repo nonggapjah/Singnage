@@ -298,15 +298,21 @@ namespace SignageUnicorn.Api.Repositories.Implementations
         public async Task<IEnumerable<DevicePlaylistDto>> GetAssignedPlaylistsAsync(string deviceId)
         {
             using var connection = new SqlConnection(_connectionString);
+            
+            long? devId = null;
+            string? devUuid = null;
+            if (long.TryParse(deviceId, out var parsed)) devId = parsed;
+            else devUuid = deviceId;
+
             string sql = @"
                 SELECT dp.id as Id, dp.device_id as DeviceId, dp.playlist_id as PlaylistId, p.playlist_name as PlaylistName,
                        dp.start_date as StartDate, dp.end_date as EndDate, dp.is_active as IsActive
                 FROM sn_device_playlists dp
                 JOIN sn_playlists p ON dp.playlist_id = p.playlist_id
-                WHERE dp.device_id = (SELECT top 1 device_id FROM sn_devices WHERE device_id = @id OR device_uuid = @id)
+                WHERE dp.device_id = (SELECT top 1 device_id FROM sn_devices WHERE device_id = @devId OR device_uuid = @devUuid)
                   AND dp.is_active = 1
                 ORDER BY dp.id ASC";
-            return await connection.QueryAsync<DevicePlaylistDto>(sql, new { id = deviceId });
+            return await connection.QueryAsync<DevicePlaylistDto>(sql, new { devId, devUuid });
         }
 
         public async Task UpdateAssignedPlaylistsAsync(string deviceId, List<DevicePlaylistDto> playlists)
@@ -316,9 +322,14 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             using var transaction = connection.BeginTransaction();
             try
             {
+                long? parsedId = null;
+                string? parsedUuid = null;
+                if (long.TryParse(deviceId, out var parsedVal)) parsedId = parsedVal;
+                else parsedUuid = deviceId;
+
                 long devId = await connection.ExecuteScalarAsync<long>(
-                    "SELECT top 1 device_id FROM sn_devices WHERE device_id = @id OR device_uuid = @id", 
-                    new { id = deviceId }, transaction);
+                    "SELECT top 1 device_id FROM sn_devices WHERE device_id = @parsedId OR device_uuid = @parsedUuid", 
+                    new { parsedId, parsedUuid }, transaction);
 
                 // Clear existing active mappings for device
                 await connection.ExecuteAsync("UPDATE sn_device_playlists SET is_active = 0 WHERE device_id = @devId", new { devId }, transaction);

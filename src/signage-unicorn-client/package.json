@@ -1,6 +1,6 @@
 {
   "name": "signage-unicorn-client",
-  "version": "2.5.5",
+  "version": "2.5.7",
   "description": "Standalone Player for Signage Unicorn",
   "main": "main.js",
   "author": "Signage Unicorn Team",

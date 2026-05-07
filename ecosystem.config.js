@@ -7,6 +7,9 @@ module.exports = {
             cwd: "./src/SignageUnicorn.Api",
             watch: false,
             shell: true,
+            max_memory_restart: "1G",
+            restart_delay: 3000,
+            exp_backoff_restart_delay: 100,
             env: {
                 ASPNETCORE_ENVIRONMENT: "Development"
             }
@@ -17,6 +20,9 @@ module.exports = {
             args: "start -p 8865",
             cwd: "./src/signage-unicorn-web",
             watch: false,
+            max_memory_restart: "1G",
+            restart_delay: 3000,
+            exp_backoff_restart_delay: 100,
             env: {
                 NODE_ENV: "production",
                 PORT: "8865",

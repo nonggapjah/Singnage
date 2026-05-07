@@ -194,6 +194,29 @@ namespace SignageUnicorn.Api.Controllers
             return Ok(ApiResponse<object>.SuccessResponse(null, $"Added playlist to {request.DeviceIds.Count} devices."));
         }
 
+        [HttpPost("batch-clear-schedule")]
+        [Authorize(Roles = UserRoles.Admin)]
+        public async Task<IActionResult> BatchClearSchedule([FromBody] BatchCommandRequest request)
+        {
+            foreach (var deviceId in request.DeviceIds)
+            {
+                if (request.PlaylistIds == null || request.PlaylistIds.Count == 0)
+                {
+                    // Send empty list to clear all schedules
+                    await _deviceService.UpdateAssignedPlaylistsAsync(deviceId, new List<DevicePlaylistDto>());
+                }
+                else
+                {
+                    // Remove only selected playlists
+                    var current = await _deviceService.GetAssignedPlaylistsAsync(deviceId);
+                    var updated = current.Where(x => !request.PlaylistIds.Contains(x.PlaylistId)).ToList();
+                    await _deviceService.UpdateAssignedPlaylistsAsync(deviceId, updated);
+                }
+                await _deviceService.SendCommandAsync(deviceId, "SYNC_SCHEDULE");
+            }
+            return Ok(ApiResponse<object>.SuccessResponse(null, $"Updated schedule for {request.DeviceIds.Count} devices."));
+        }
+
         [HttpGet("fix-devices-db")]
         [Authorize(Roles = UserRoles.Admin)]
         public async Task<IActionResult> FixDb()

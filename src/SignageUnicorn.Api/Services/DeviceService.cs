@@ -147,6 +147,7 @@ namespace SignageUnicorn.Api.Services
                  
              if (stateChanged || mediaChanged) _lastReportedState[request.DeviceId] = (currentStatus, currentPid, currentMid);
 
+             /* 
              if (stateChanged)
              {
                  try { await _logRepo.LogAsync(request.DeviceId, "INFO", $"[DeviceService] STATUS_CHANGE | Status: {currentStatus} | Playlist: {currentPid}", "API"); } catch { }
@@ -156,6 +157,7 @@ namespace SignageUnicorn.Api.Services
              {
                  try { await _logRepo.LogAsync(request.DeviceId, "INFO", $"[DeviceService] MEDIA_CHANGE | Media: {currentMid} | Item: {request.CurrentPlaylistItemId ?? "None"}", "API"); } catch { }
              }
+             */
 
              var commands = await _deviceRepository.HeartbeatAsync(request);
              
@@ -186,7 +188,7 @@ namespace SignageUnicorn.Api.Services
             if (command.ToUpper() == "RESTART")
             {
                 var devices = await _deviceRepository.GetAllDevicesAsync();
-                var dev = ((List<DeviceDto>)devices).Find(d => d.DeviceId == deviceId);
+                var dev = devices.FirstOrDefault(d => d.DeviceId == deviceId);
                 if (dev != null && !string.IsNullOrEmpty(dev.CurrentMediaId))
                 {
                     // Format: RESTART:MediaId:PositionSec
@@ -208,9 +210,34 @@ namespace SignageUnicorn.Api.Services
         public async Task BatchSendCommandAsync(List<string> deviceIds, string command)
         {
             await _logRepo.LogAsync(null, "INFO", $"[DeviceService] BATCH_COMMAND_START | Command: {command} | Count: {deviceIds.Count}", "API");
+            
+            List<DeviceDto> allDevices = null;
+            if (command.ToUpper() == "RESTART")
+            {
+                allDevices = (await _deviceRepository.GetAllDevicesAsync()).ToList();
+            }
+
             foreach (var id in deviceIds)
             {
-                await SendCommandAsync(id, command); 
+                string finalCommand = command;
+                if (finalCommand.ToUpper() == "RESTART" && allDevices != null)
+                {
+                    var dev = allDevices.FirstOrDefault(d => d.DeviceId == id);
+                    if (dev != null && !string.IsNullOrEmpty(dev.CurrentMediaId))
+                    {
+                        finalCommand = $"RESTART:{dev.CurrentMediaId}:{dev.CurrentPositionSec ?? 0}";
+                    }
+                }
+
+                var result = await _deviceRepository.AddCommandAsync(id, finalCommand);
+                if (result.Success)
+                {
+                     await _logRepo.LogAsync(id, "INFO", $"[DeviceService] COMMAND_SENT | Command: {finalCommand}", "API");
+                }
+                else
+                {
+                     await _logRepo.LogAsync(id, "ERROR", $"[DeviceService] COMMAND_FAILED | Code: {result.ErrorCode} | Msg: {result.Message}", "API");
+                }
             }
         }
 

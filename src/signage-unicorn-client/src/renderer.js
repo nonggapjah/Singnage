@@ -370,6 +370,16 @@ async function sync() {
                         });
                     }
                     if (type === 'REBOOT') { showHUD('SYSTEM REBOOT...'); ipcRenderer.invoke('reboot-device'); }
+                    if (type.startsWith('RESTART')) {
+                        const parts = type.split(':');
+                        if (parts.length >= 3) {
+                            localStorage.setItem('resume_media_id', parts[1]);
+                            localStorage.setItem('resume_pos_sec', parts[2]);
+                            addLog(`Saved resume state: Media ${parts[1]} at ${parts[2]}s`);
+                        }
+                        showHUD('SYSTEM REBOOT...');
+                        ipcRenderer.invoke('reboot-device');
+                    }
                     if (type === 'UPDATE_CLIENT') {
                         if (isUpdating) {
                             addLog('Client update already in progress. Skipping duplicate command.', 'warn');

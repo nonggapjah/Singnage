@@ -138,6 +138,7 @@ async function createWindow() {
         alwaysOnTop: true,
         skipTaskbar: true,
         autoHideMenuBar: true,
+        show: false, // Don't show until we are ready to take over the screen
         webPreferences: {
             nodeIntegration: true,
             contextIsolation: false,
@@ -146,9 +147,23 @@ async function createWindow() {
         backgroundColor: '#000000'
     });
 
+    // Remove menu completely
+    mainWindow.setMenu(null);
+    mainWindow.setMenuBarVisibility(false);
+
     // Force top-most level even above system dialogs and taskbars
     mainWindow.setAlwaysOnTop(true, 'screen-saver');
-    mainWindow.setKiosk(true);
+    
+    mainWindow.once('ready-to-show', () => {
+        // Slight delay to ensure Windows Taskbar has finished its own initialization during boot
+        setTimeout(() => {
+            mainWindow.show();
+            mainWindow.focus();
+            mainWindow.setKiosk(true);
+            mainWindow.setAlwaysOnTop(true, 'screen-saver');
+            mainWindow.setFullScreen(true);
+        }, 1000);
+    });
 
     mainWindow.loadFile('index.html');
 
@@ -159,7 +174,7 @@ async function createWindow() {
     sleepBlockerId = powerSaveBlocker.start('prevent-display-sleep');
     try {
         exec('reg add "HKEY_CURRENT_USER\\Control Panel\\Desktop" /v ScreenSaveActive /t REG_SZ /d 0 /f');
-        // Force Auto-Start on Boot
+        // Force Auto-Start on Boot (Keep this as requested)
         exec(`reg add "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v "SignageUnicorn" /d "\\"${process.execPath}\\"" /f`);
 
         console.log('Windows Screensaver disabled. Auto-Start registered.');

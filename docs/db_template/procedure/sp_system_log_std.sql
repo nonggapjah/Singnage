@@ -110,8 +110,19 @@ BEGIN
     ============================================= */
     IF @p_action = 'CLEANUP'
     BEGIN
-        DELETE FROM sn_system_logs
-        WHERE created_at < DATEADD(DAY, -@p_retention_days, SYSUTCDATETIME());
+        DECLARE @DeletedRows INT = 1;
+        
+        -- Delete in batches of 5000 to prevent long table locks and log growth issues
+        WHILE @DeletedRows > 0
+        BEGIN
+            DELETE TOP (5000) FROM sn_system_logs
+            WHERE created_at < DATEADD(DAY, -@p_retention_days, SYSUTCDATETIME());
+            
+            SET @DeletedRows = @@ROWCOUNT;
+            
+            -- Small delay if many batches are expected (optional, but keeps system responsive)
+            -- IF @DeletedRows > 0 WAITFOR DELAY '00:00:00.100'; 
+        END
 
         SET @msg = N'Old logs cleaned';
         GOTO ResultSection;

@@ -7,6 +7,7 @@ import { Device } from '@/features/devices/types';
 import { Playlist, PlaylistItem } from '@/features/playlists/types/playlist';
 import { useUI } from '@/features/ui/context/UIContext';
 import { DevicePlaylistModal } from '@/features/devices/components/DevicePlaylistModal';
+import { BatchRemovePlaylistModal } from '@/features/devices/components/BatchRemovePlaylistModal';
 
 const formatDuration = (seconds?: number) => {
     if (!seconds) return '00:00:00';
@@ -35,6 +36,7 @@ export default function DevicesPage() {
 
     // Modal State
     const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
+    const [isBatchRemoveModalOpen, setIsBatchRemoveModalOpen] = useState(false);
     const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
     const [selectedPlaylistId, setSelectedPlaylistId] = useState<string>('');
 
@@ -133,7 +135,30 @@ export default function DevicesPage() {
                 } catch (error) {
                     showNotify('CRITICAL ERROR', 'A critical error occurred while sending batch command.', 'ERROR');
                 }
+                }
             }
+        );
+    }
+
+    async function handleClearSchedule(deviceIds: string[]) {
+        showConfirm(
+            'CLEAR PLAYLIST',
+            `Are you sure you want to remove the playlist from ${deviceIds.length === 1 ? 'this device' : `${deviceIds.length} devices`}?`,
+            async () => {
+                try {
+                    const res = await deviceApi.batchClearSchedule(deviceIds);
+                    if (res.success) {
+                        showNotify('CLEARED', `Playlist removed successfully.`, 'SUCCESS');
+                        if (deviceIds.length > 1) setSelectedIds([]);
+                        fetchDevices();
+                    } else {
+                        showNotify('FAILED', res.message || 'Unknown error', 'ERROR');
+                    }
+                } catch (error) {
+                    showNotify('CRITICAL ERROR', 'A critical error occurred while clearing schedule.', 'ERROR');
+                }
+            },
+            'DANGER'
         );
     }
 
@@ -542,7 +567,10 @@ export default function DevicesPage() {
                                 </div>
 
                                 <div className="grid grid-cols-3 gap-2 mt-auto">
-                                    <button onClick={() => openAssignModal(device.deviceId)} className="col-span-3 py-3 mb-1 rounded-lg bg-accent-cyan/10 hover:bg-accent-cyan/20 border border-accent-cyan/20 text-xs font-black text-accent-cyan uppercase tracking-wider transition-all">Assign Protocol</button>
+                                    <div className="col-span-3 flex gap-2 mb-1">
+                                        <button onClick={() => openAssignModal(device.deviceId)} className="flex-[2] py-3 rounded-lg bg-accent-cyan/10 hover:bg-accent-cyan/20 border border-accent-cyan/20 text-xs font-black text-accent-cyan uppercase tracking-wider transition-all">Assign Protocol</button>
+                                        <button onClick={() => handleClearSchedule([device.deviceId])} className="flex-1 py-3 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-xs font-black text-red-500 uppercase tracking-wider transition-all" title="Clear Playlist">Clear</button>
+                                    </div>
                                     <button onClick={() => handleCommand(device.deviceId, 'RELOAD')} className="py-2 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 text-xs font-bold text-amber-500 uppercase tracking-wider">Reset</button>
                                     <button onClick={() => handleCommand(device.deviceId, 'REFRESH')} className="py-2 rounded-lg bg-muted/20 hover:bg-muted/40 border border-border text-xs font-bold text-muted-foreground hover:text-foreground uppercase tracking-wider">Refresh</button>
                                     {isOnline ? (
@@ -683,6 +711,12 @@ export default function DevicesPage() {
                                                     Assign
                                                 </button>
                                                 <button
+                                                    onClick={() => handleClearSchedule([device.deviceId])}
+                                                    className="text-[10px] text-red-400 hover:text-red-300 hover:bg-red-500/10 border border-transparent hover:border-red-500/20 px-3 py-1.5 rounded transition-all uppercase font-bold tracking-wider"
+                                                >
+                                                    Clear
+                                                </button>
+                                                <button
                                                     onClick={() => handleCommand(device.deviceId, 'RELOAD')}
                                                     className="text-[10px] text-amber-500 hover:text-amber-400 hover:bg-amber-500/10 border border-transparent hover:border-amber-500/20 px-3 py-1.5 rounded transition-all uppercase font-bold tracking-wider"
                                                 >
@@ -730,6 +764,18 @@ export default function DevicesPage() {
                 />
             )}
 
+            {isBatchRemoveModalOpen && (
+                <BatchRemovePlaylistModal
+                    isOpen={isBatchRemoveModalOpen}
+                    onClose={() => setIsBatchRemoveModalOpen(false)}
+                    deviceIds={selectedIds}
+                    onSuccess={() => {
+                        setSelectedIds([]);
+                        fetchDevices();
+                    }}
+                />
+            )}
+
             {/* Batch Action Bar */}
             {selectedIds.length > 0 && (
                 <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 bg-black/80 backdrop-blur-xl border border-accent-cyan/30 px-8 py-4 rounded-2xl shadow-[0_0_50px_rgba(0,0,0,0.8)] flex items-center gap-8 animate-in slide-in-from-bottom duration-300">
@@ -739,6 +785,18 @@ export default function DevicesPage() {
                     </div>
 
                     <div className="flex gap-3">
+                        <button
+                            onClick={() => setIsBatchRemoveModalOpen(true)}
+                            className="px-6 py-2 rounded-xl bg-red-600/20 text-red-500 border border-red-500/50 font-black uppercase tracking-widest text-[10px] hover:bg-red-500 hover:text-white transition-all hover:scale-105"
+                        >
+                            Batch Select Remove
+                        </button>
+                        <button
+                            onClick={() => handleClearSchedule(selectedIds)}
+                            className="px-6 py-2 rounded-xl bg-red-900/40 text-red-400 border border-red-900/50 font-bold uppercase tracking-widest text-[10px] hover:bg-red-900 hover:text-white transition-all hover:scale-105"
+                        >
+                            Batch Clear All
+                        </button>
                         <button
                             onClick={() => handleBatchCommand('RELOAD')}
                             className="px-6 py-2 rounded-xl bg-amber-500 text-black font-black uppercase tracking-widest text-[10px] hover:bg-amber-400 transition-all hover:scale-105 shadow-[0_0_20px_rgba(245,158,11,0.3)]"
@@ -756,6 +814,12 @@ export default function DevicesPage() {
                             className="px-6 py-2 rounded-xl bg-red-600 text-white font-black uppercase tracking-widest text-[10px] hover:bg-red-500 transition-all"
                         >
                             Batch Reboot
+                        </button>
+                        <button
+                            onClick={() => handleBatchCommand('UPDATE_CLIENT')}
+                            className="px-6 py-2 rounded-xl bg-blue-600 text-white font-black uppercase tracking-widest text-[10px] hover:bg-blue-500 transition-all shadow-[0_0_20px_rgba(37,99,235,0.3)]"
+                        >
+                            Batch Update
                         </button>
                     </div>
 
