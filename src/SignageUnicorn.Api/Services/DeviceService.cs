@@ -207,6 +207,19 @@ namespace SignageUnicorn.Api.Services
             }
         }
 
+        public async Task AcknowledgeCommandAsync(string deviceId, string commandId, string status, long? userId = null)
+        {
+            var result = await _deviceRepository.AcknowledgeCommandAsync(deviceId, commandId, status, userId);
+            if (result.Success)
+            {
+                await _logRepo.LogAsync(deviceId, "INFO", $"[DeviceService] COMMAND_ACKNOWLEDGED | CommandID: {commandId} | Status: {status}", "API", userId);
+            }
+            else
+            {
+                await _logRepo.LogAsync(deviceId, "ERROR", $"[DeviceService] COMMAND_ACK_FAILED | CommandID: {commandId} | Code: {result.ErrorCode} | Msg: {result.Message}", "API", userId);
+            }
+        }
+
         public async Task BatchSendCommandAsync(List<string> deviceIds, string command)
         {
             await _logRepo.LogAsync(null, "INFO", $"[DeviceService] BATCH_COMMAND_START | Command: {command} | Count: {deviceIds.Count}", "API");
@@ -318,7 +331,6 @@ namespace SignageUnicorn.Api.Services
                  }
              }
 
-             // 3. Seed Initial Data (Admin)
              try 
              {
                  Console.WriteLine("[DeviceService] Checking/Seeding Admin & Roles...");
@@ -329,6 +341,36 @@ namespace SignageUnicorn.Api.Services
              {
                  Console.WriteLine($"[WARN] Admin Seeding skipped/failed: {ex.Message}");
              }
+        }
+
+        public async Task SaveScreenshotAsync(string deviceId, string base64Image)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(base64Image)) return;
+
+                // Remove header if present (e.g. data:image/jpeg;base64,)
+                if (base64Image.Contains(","))
+                {
+                    base64Image = base64Image.Split(',')[1];
+                }
+
+                byte[] imageBytes = Convert.FromBase64String(base64Image);
+
+                string screenshotsFolder = Path.Combine(_env.WebRootPath ?? Path.Combine(_env.ContentRootPath, "wwwroot"), "screenshots");
+                if (!Directory.Exists(screenshotsFolder))
+                {
+                    Directory.CreateDirectory(screenshotsFolder);
+                }
+
+                string filePath = Path.Combine(screenshotsFolder, $"{deviceId}.jpg");
+                await File.WriteAllBytesAsync(filePath, imageBytes);
+                Console.WriteLine($"[DeviceService] Saved screenshot for device {deviceId} to {filePath}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ERROR] Failed to save screenshot for device {deviceId}: {ex.Message}");
+            }
         }
         
         private async Task ExecuteSqlFile(string filePath)
@@ -356,6 +398,11 @@ namespace SignageUnicorn.Api.Services
             }
             catch (Exception ex)
             {
+                if (ex.Message.Contains("There is already an object named", StringComparison.OrdinalIgnoreCase) ||
+                    ex.Message.Contains("already exists", StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
                 Console.WriteLine($"[ERROR] Failed to execute {Path.GetFileName(filePath)}: {ex.Message}");
             }
         }

@@ -9,7 +9,14 @@ namespace SignageUnicorn.Api.Models.Domain
     {
         [JsonPropertyName("playlistId")]
         public string PlaylistId { get; set; } = string.Empty;
-        
+
+        // Ensure database 'playlist_uuid' overrides numeric 'playlist_id' mapping
+        [JsonIgnore]
+        public string playlist_uuid 
+        { 
+            set { if (!string.IsNullOrEmpty(value)) PlaylistId = value; } 
+        }
+
         [JsonPropertyName("playlistName")]
         public string PlaylistName { get; set; } = string.Empty;
         
@@ -92,6 +99,9 @@ namespace SignageUnicorn.Api.Models.Domain
         [JsonPropertyName("fileSizeKB")]
         public int? FileSizeKB { get; set; }
 
+        [JsonPropertyName("fileHash")]
+        public string? FileHash { get; set; }
+
         [JsonPropertyName("media")]
         public MediaFile? Media { get; set; }
 
@@ -115,6 +125,7 @@ namespace SignageUnicorn.Api.Models.Domain
         [JsonIgnore] public string ratio { set => Ratio = value; }
         // file_size_kb is now selected
         [JsonIgnore] public long? file_size_kb { set => FileSizeKB = (int?)value; } // DB might be BIGINT, DTO is int? 
+        [JsonIgnore] public string? file_hash { set => FileHash = value; }
         
         // Extended Media Properties Mapping
         [JsonIgnore] public string uploaded_by { set { if (Media == null) Media = new MediaFile(); Media.UploadedBy = value; } }

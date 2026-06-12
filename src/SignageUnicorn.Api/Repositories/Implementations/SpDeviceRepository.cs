@@ -204,6 +204,51 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             }
         }
 
+        public async Task<RepositoryResult> AcknowledgeCommandAsync(string deviceId, string commandId, string status, long? userId = null)
+        {
+            using (var connection = new SqlConnection(_connectionString))
+            {
+                long? devId = null;
+                string? devUuid = null;
+
+                if (long.TryParse(deviceId, out var id)) devId = id;
+                else devUuid = deviceId;
+
+                long? cmdId = null;
+                string? cmdUuid = null;
+
+                if (long.TryParse(commandId, out var cid)) cmdId = cid;
+                else cmdUuid = commandId;
+
+                var p = new 
+                {
+                    p_action = "ACKNOWLEDGE",
+                    p_device_id = devId,
+                    p_device_uuid = devUuid,
+                    p_command_id = cmdId,
+                    p_command_uuid = cmdUuid,
+                    p_status = status,
+                    p_userid = userId
+                };
+
+                try 
+                {
+                    var result = await connection.QueryFirstOrDefaultAsync<SpStdResult>("sp_device_command_std", p, commandType: CommandType.StoredProcedure);
+                    return result != null && !result.err_flag 
+                        ? RepositoryResult.Ok(result.msg) 
+                        : RepositoryResult.Fail(result?.err_code ?? -1, result?.msg ?? "DB Error");
+                }
+                catch (SqlException ex)
+                {
+                    return RepositoryResult.Fail(500, $"SQL Error: {ex.Message}");
+                }
+                catch (Exception ex)
+                {
+                    return RepositoryResult.Fail(500, $"Unexpected Error: {ex.Message}");
+                }
+            }
+        }
+
         public async Task<RepositoryResult> DeactivateDeviceAsync(string deviceId, long? userId = null)
         {
             using (var connection = new SqlConnection(_connectionString))
@@ -305,12 +350,13 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             else devUuid = deviceId;
 
             string sql = @"
-                SELECT dp.id as Id, dp.device_id as DeviceId, dp.playlist_id as PlaylistId, p.playlist_name as PlaylistName,
+                SELECT dp.id as Id, dp.device_id as DeviceId, p.playlist_uuid as PlaylistId, p.playlist_name as PlaylistName,
                        dp.start_date as StartDate, dp.end_date as EndDate, dp.is_active as IsActive
                 FROM sn_device_playlists dp
                 JOIN sn_playlists p ON dp.playlist_id = p.playlist_id
                 WHERE dp.device_id = (SELECT top 1 device_id FROM sn_devices WHERE device_id = @devId OR device_uuid = @devUuid)
                   AND dp.is_active = 1
+                  AND p.is_deleted = 0
                 ORDER BY dp.id ASC";
             return await connection.QueryAsync<DevicePlaylistDto>(sql, new { devId, devUuid });
         }
@@ -338,8 +384,16 @@ namespace SignageUnicorn.Api.Repositories.Implementations
                 if (playlists != null && playlists.Count > 0)
                 {
                     string insertSql = @"
-                        INSERT INTO sn_device_playlists (device_id, playlist_id, start_date, end_date) 
-                        VALUES (@devId, @playlistId, @startDate, @endDate)";
+                        DECLARE @actual_playlist_id bigint;
+                        SELECT TOP 1 @actual_playlist_id = playlist_id 
+                        FROM sn_playlists 
+                        WHERE playlist_uuid = @playlistId OR CAST(playlist_id AS nvarchar(50)) = @playlistId;
+
+                        IF @actual_playlist_id IS NOT NULL
+                        BEGIN
+                            INSERT INTO sn_device_playlists (device_id, playlist_id, start_date, end_date) 
+                            VALUES (@devId, @actual_playlist_id, @startDate, @endDate)
+                        END";
                     
                     foreach (var p in playlists)
                     {
@@ -365,7 +419,7 @@ namespace SignageUnicorn.Api.Repositories.Implementations
         {
             using (var connection = new SqlConnection(_connectionString))
             {
-                await connection.ExecuteAsync(sql);
+                await connection.ExecuteAsync(sql, commandTimeout: 300);
             }
         }
     }

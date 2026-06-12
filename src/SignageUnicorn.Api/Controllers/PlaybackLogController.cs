@@ -23,16 +23,19 @@ namespace SignageUnicorn.Api.Controllers
         [HttpPost]
         public async Task<IActionResult> Create([FromBody] CreatePlaybackLogRequest request)
         {
-            // DISABLED: Stopped Playback Logging to prevent connection pool exhaustion.
-            return Ok(new { success = true, message = "Playback log recorded (Disabled)" });
+            await _playbackRepo.LogPlaybackAsync(request);
+            return Ok(new { success = true, message = "Playback log recorded" });
         }
 
         [AllowAnonymous]
         [HttpPost("batch")]
         public async Task<IActionResult> CreateBatch([FromBody] List<CreatePlaybackLogRequest> requests)
         {
-            // DISABLED: Stopped Playback Logging to prevent connection pool exhaustion.
-            return Ok(new { success = true, message = "Batch recorded (Disabled)", count = requests?.Count ?? 0 });
+            if (requests != null && requests.Count > 0)
+            {
+                await _playbackRepo.LogPlaybackBatchAsync(requests);
+            }
+            return Ok(new { success = true, message = "Batch recorded", count = requests?.Count ?? 0 });
         }
 
         [HttpGet]

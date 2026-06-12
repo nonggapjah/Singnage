@@ -24,7 +24,21 @@ namespace SignageUnicorn.Api.Services
         public async Task<LoginResponse?> LoginAsync(LoginRequest request)
         {
             var user = await _userRepository.GetByUsernameAsync(request.Username);
-            if (user == null || !BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
+            
+            bool isVerified = false;
+            if (user != null && !string.IsNullOrEmpty(user.PasswordHash))
+            {
+                try
+                {
+                    isVerified = BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash);
+                }
+                catch (Exception)
+                {
+                    isVerified = false;
+                }
+            }
+
+            if (user == null || !isVerified)
             {
                 await _systemLog.LogAsync("WARNING", "AUTH", $"Failed login attempt for username: {request.Username}");
                 return null;

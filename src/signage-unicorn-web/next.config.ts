@@ -9,7 +9,7 @@ const nextConfig: NextConfig = {
     proxyClientMaxBodySize: '2gb',
   },
   env: {
-    NEXT_PUBLIC_DEBUG: '0', // Set to '1' for Development
+    NEXT_PUBLIC_DEBUG: '1', // Set to '1' for Development
   },
   async rewrites() {
     return [
@@ -20,6 +20,10 @@ const nextConfig: NextConfig = {
       {
         source: '/media/:path*',
         destination: 'http://127.0.0.1:8862/media/:path*' // Proxy to Backend Static Files
+      },
+      {
+        source: '/screenshots/:path*',
+        destination: 'http://127.0.0.1:8862/screenshots/:path*' // Proxy to Backend Screenshots
       }
     ]
   }

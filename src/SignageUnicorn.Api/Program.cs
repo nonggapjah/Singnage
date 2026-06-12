@@ -10,6 +10,11 @@ using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Clear logging providers to prevent Windows Event Log permission issues from crashing the app
+builder.Logging.ClearProviders();
+builder.Logging.AddConsole();
+builder.Logging.AddDebug();
+
 // 1. Add Services
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
@@ -86,6 +91,20 @@ builder.Services.AddAuthentication(x =>
         ValidAudience = jwtSettings["Audience"],
         ClockSkew = TimeSpan.Zero
     };
+    x.Events = new Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerEvents
+    {
+        OnAuthenticationFailed = context =>
+        {
+            Console.WriteLine($"[DEBUG JWT FAILED] Path: {context.Request.Path} | Error: {context.Exception.Message}");
+            return Task.CompletedTask;
+        },
+        OnTokenValidated = context =>
+        {
+            var user = context.Principal?.Identity?.Name ?? "none";
+            Console.WriteLine($"[DEBUG JWT VALIDATED] Path: {context.Request.Path} | User: {user}");
+            return Task.CompletedTask;
+        }
+    };
 });
 
 // 2. Add CORS (Allow Frontend to connect)
@@ -152,6 +171,27 @@ app.UseStaticFiles(new StaticFileOptions
 app.UseCors("AllowAll"); // Enable CORS
 
 app.UseAuthentication();
+
+app.Use(async (context, next) =>
+{
+    var path = context.Request.Path.Value;
+    if (path != null && path.Contains("/api/", StringComparison.OrdinalIgnoreCase))
+    {
+        var authHeader = context.Request.Headers["Authorization"].ToString();
+        var user = context.User;
+        var isAuthenticated = user?.Identity?.IsAuthenticated ?? false;
+        var username = user?.Identity?.Name ?? "none";
+        var claimsList = user?.Claims ?? Enumerable.Empty<System.Security.Claims.Claim>();
+        var roles = claimsList
+            .Where(c => c.Type == System.Security.Claims.ClaimTypes.Role || c.Type == "role")
+            .Select(c => c.Value)
+            .ToList();
+        
+        Console.WriteLine($"[DEBUG AUTH] Path: {path} | Method: {context.Request.Method} | AuthHeader: {(string.IsNullOrEmpty(authHeader) ? "MISSING" : authHeader.Substring(0, Math.Min(30, authHeader.Length)) + "...")} | IsAuth: {isAuthenticated} | User: {username} | Roles: {string.Join(",", roles)}");
+    }
+    await next();
+});
+
 app.UseAuthorization();
 
 // 5. Automatic Database Migration/Fix

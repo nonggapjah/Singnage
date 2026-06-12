@@ -39,7 +39,7 @@ namespace SignageUnicorn.Api.Controllers
             if (!System.IO.File.Exists(path)) return NotFound(ApiResponse<string>.ErrorResponse(404, "Setup file not found"));
             
             var bytes = await System.IO.File.ReadAllBytesAsync(path);
-            return File(bytes, "application/vnd.microsoft.portable-executable", "Signage_Unicorn_Setup_2.5.7.exe");
+            return File(bytes, "application/vnd.microsoft.portable-executable", "Signage_Unicorn_Setup_2.5.9.exe");
         }
 
         [HttpPost]

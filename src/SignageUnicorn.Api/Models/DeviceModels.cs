@@ -138,4 +138,19 @@ namespace SignageUnicorn.Api.Models
         [JsonPropertyName("endDate")]
         public DateTime? EndDate { get; set; }
     }
+
+    public class CommandAckRequest
+    {
+        [JsonPropertyName("commandId")]
+        public string CommandId { get; set; } = string.Empty;
+
+        [JsonPropertyName("status")]
+        public string Status { get; set; } = "EXECUTED";
+    }
+
+    public class ScreenshotUploadRequest
+    {
+        [JsonPropertyName("base64Image")]
+        public string Base64Image { get; set; } = string.Empty;
+    }
 }

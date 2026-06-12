@@ -49,43 +49,44 @@ namespace SignageUnicorn.Api.Services
         {
             if (string.IsNullOrEmpty(m.BlobUrl)) return m;
 
-            var baseUrl = _configuration["ServerSettings:BaseUrl"];
-            if (string.IsNullOrEmpty(baseUrl))
-            {
-                var httpRequest = _httpContextAccessor.HttpContext?.Request;
-                if (httpRequest != null) baseUrl = $"{httpRequest.Scheme}://{httpRequest.Host}";
-            }
-
-            // Case 1: Relative Path - Always transform
+            // Case 1: Already a relative path (e.g. /media/file.mp4)
+            // Return as-is — Next.js proxy handles /media/ routes,
+            // so the browser will resolve it relative to the current page (HTTP or HTTPS)
+            // This prevents Mixed Content errors on HTTPS pages.
             if (!m.BlobUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
             {
-                if (!string.IsNullOrEmpty(baseUrl))
+                return m;
+            }
+
+            // Case 2: Absolute URL pointing to localhost/127.0.0.1 — strip host, make relative
+            if (m.BlobUrl.Contains("localhost", StringComparison.OrdinalIgnoreCase) ||
+                m.BlobUrl.Contains("127.0.0.1"))
+            {
+                int protoEnd = m.BlobUrl.IndexOf("://");
+                if (protoEnd > 0)
                 {
-                    m.BlobUrl = $"{baseUrl.TrimEnd('/')}/{m.BlobUrl.TrimStart('/')}";
+                    int firstSlashAfterProto = m.BlobUrl.IndexOf('/', protoEnd + 3);
+                    if (firstSlashAfterProto > 0)
+                    {
+                        m.BlobUrl = m.BlobUrl.Substring(firstSlashAfterProto); // e.g. /media/file.mp4
+                    }
                 }
                 return m;
             }
 
-            // Case 2: Absolute Path containing localhost or 127.0.0.1 - Fix it to match current access point
-            if (m.BlobUrl.Contains("localhost", StringComparison.OrdinalIgnoreCase) || m.BlobUrl.Contains("127.0.0.1"))
+            // Case 3: Absolute URL with any IP address — strip host, make relative
+            if (m.BlobUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
             {
-                if (!string.IsNullOrEmpty(baseUrl))
+                // Check if it's a local IP (not a real domain)
+                var uri = new System.Uri(m.BlobUrl);
+                if (System.Net.IPAddress.TryParse(uri.Host, out _))
                 {
-                     // Replace the host part (e.g. http://localhost:8862) with the current baseUrl
-                     // Finding the 3rd slash (after proto://host:port)
-                     int protoEnd = m.BlobUrl.IndexOf("://");
-                     if (protoEnd > 0)
-                     {
-                         int firstSlashAfterProto = m.BlobUrl.IndexOf('/', protoEnd + 3);
-                         if (firstSlashAfterProto > 0)
-                         {
-                             var path = m.BlobUrl.Substring(firstSlashAfterProto);
-                             m.BlobUrl = $"{baseUrl.TrimEnd('/')}/{path.TrimStart('/')}";
-                         }
-                     }
+                    m.BlobUrl = uri.PathAndQuery; // e.g. /media/file.mp4
+                    return m;
                 }
             }
 
+            // Case 4: External absolute URL (signage.aith123.com, CDN, etc.) — keep as-is
             return m;
         }
 
@@ -93,6 +94,8 @@ namespace SignageUnicorn.Api.Services
         {
             string finalUrl = request.BlobUrl ?? "";
             string? fileHash = null;
+            bool needsTranscoding = false;
+            string? localFilePath = null;
 
             // Handle Local File Upload
             if (request.File != null && request.File.Length > 0)
@@ -110,6 +113,7 @@ namespace SignageUnicorn.Api.Services
                 string fileExtension = Path.GetExtension(request.File.FileName);
                 string uniqueFileName = $"{Guid.NewGuid()}{fileExtension}";
                 string filePath = Path.Combine(uploadsFolder, uniqueFileName);
+                localFilePath = filePath;
 
                 // Save file stream
                 using (var fileStream = new FileStream(filePath, FileMode.Create))
@@ -117,9 +121,12 @@ namespace SignageUnicorn.Api.Services
                     await request.File.CopyToAsync(fileStream);
                 }
 
-                // Auto-Convert to Baseline H.264
-                filePath = await ConvertToBaselineFormatAsync(filePath);
-                uniqueFileName = Path.GetFileName(filePath);
+                var ext = fileExtension?.ToLowerInvariant();
+                if (ext == ".mp4" || ext == ".mov" || ext == ".avi" || ext == ".webm")
+                {
+                    needsTranscoding = true;
+                }
+
                 var fileInfo = new FileInfo(filePath);
 
                 // Save as relative path for portability, transform to absolute on output
@@ -160,6 +167,56 @@ namespace SignageUnicorn.Api.Services
             {
                 var createdMedia = TransformToAbsoluteUrl(result.Value);
                 await _systemLog.LogAsync(null, "INFO", $"[MediaService] UPLOAD_SUCCESS | FileName: {createdMedia.FileName} | MediaID: {createdMedia.MediaId}", "API", userId);
+
+                // Start background transcoding if needed, to prevent request timeouts (500)
+                if (needsTranscoding && !string.IsNullOrEmpty(localFilePath))
+                {
+                    var mediaId = result.Value.MediaId;
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await _systemLog.LogAsync(null, "INFO", $"[MediaService] ASYNC_TRANSCODE_START | MediaID: {mediaId} | FilePath: {localFilePath}", "SYSTEM", userId);
+                            
+                            var convertedPath = await ConvertToBaselineFormatAsync(localFilePath);
+                            var fileInfo = new FileInfo(convertedPath);
+                            
+                            string? finalHash = null;
+                            using (var md5 = System.Security.Cryptography.MD5.Create())
+                            using (var stream = File.OpenRead(convertedPath))
+                            {
+                                var hashBytes = md5.ComputeHash(stream);
+                                finalHash = BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
+                            }
+
+                            // Update database record with converted file details
+                            var existingMedia = await _repository.GetByIdAsync(mediaId);
+                            if (existingMedia != null)
+                            {
+                                existingMedia.FileSizeKb = (int)(fileInfo.Length / 1024);
+                                existingMedia.FileHash = finalHash;
+                                await _repository.ReplaceAsync(existingMedia, userId);
+                                await _systemLog.LogAsync(null, "INFO", $"[MediaService] ASYNC_TRANSCODE_SUCCESS | MediaID: {mediaId}", "SYSTEM", userId);
+
+                                // Trigger Sync in case it was assigned to a playlist/device in the meantime
+                                try
+                                {
+                                    var affectedDevices = await _deviceRepository.GetDevicesByMediaIdAsync(mediaId);
+                                    foreach (var dev in affectedDevices)
+                                    {
+                                        await _deviceRepository.AddCommandAsync(dev.DeviceId, "FORCE_SYNC");
+                                    }
+                                }
+                                catch { }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            await _systemLog.LogAsync(null, "ERROR", $"[MediaService] ASYNC_TRANSCODE_FAILED | MediaID: {mediaId} | Error: {ex.Message}", "SYSTEM", userId);
+                        }
+                    });
+                }
+
                 return createdMedia;
             }
             return null;
@@ -268,6 +325,8 @@ namespace SignageUnicorn.Api.Services
 
             string finalUrl = request.BlobUrl ?? existing.BlobUrl;
             string? fileHash = existing.FileHash;
+            bool needsTranscoding = false;
+            string? localFilePath = null;
 
             // Handle Local File Upload (logic duplicated from CreateMediaAsync for now, could be refactored)
             if (request.File != null && request.File.Length > 0)
@@ -279,15 +338,19 @@ namespace SignageUnicorn.Api.Services
                 string fileExtension = Path.GetExtension(request.File.FileName);
                 string uniqueFileName = $"{Guid.NewGuid()}{fileExtension}";
                 string filePath = Path.Combine(uploadsFolder, uniqueFileName);
+                localFilePath = filePath;
 
                 using (var fileStream = new FileStream(filePath, FileMode.Create))
                 {
                     await request.File.CopyToAsync(fileStream);
                 }
 
-                // Auto-Convert to Baseline H.264
-                filePath = await ConvertToBaselineFormatAsync(filePath);
-                uniqueFileName = Path.GetFileName(filePath);
+                var ext = fileExtension?.ToLowerInvariant();
+                if (ext == ".mp4" || ext == ".mov" || ext == ".avi" || ext == ".webm")
+                {
+                    needsTranscoding = true;
+                }
+
                 var fileInfo = new FileInfo(filePath);
 
                 finalUrl = $"/media/{uniqueFileName}";
@@ -319,16 +382,67 @@ namespace SignageUnicorn.Api.Services
             if (result.Success)
             {
                 await _systemLog.LogAsync(null, "INFO", $"[MediaService] CONTENT_REPLACED | FileName: {media.FileName} | MediaID: {id}", "API", userId);
-                
-                // Trigger Sync
-                try
+
+                // Start background transcoding if needed, to prevent request timeouts (500)
+                if (needsTranscoding && !string.IsNullOrEmpty(localFilePath))
                 {
-                    var affectedDevices = await _deviceRepository.GetDevicesByMediaIdAsync(id);
-                    foreach (var dev in affectedDevices)
+                    _ = Task.Run(async () =>
                     {
-                        await _deviceRepository.AddCommandAsync(dev.DeviceId, "FORCE_SYNC");
-                    }
-                } catch { }
+                        try
+                        {
+                            await _systemLog.LogAsync(null, "INFO", $"[MediaService] ASYNC_REPLACE_TRANSCODE_START | MediaID: {id} | FilePath: {localFilePath}", "SYSTEM", userId);
+                            
+                            var convertedPath = await ConvertToBaselineFormatAsync(localFilePath);
+                            var fileInfo = new FileInfo(convertedPath);
+                            
+                            string? finalHash = null;
+                            using (var md5 = System.Security.Cryptography.MD5.Create())
+                            using (var stream = File.OpenRead(convertedPath))
+                            {
+                                var hashBytes = md5.ComputeHash(stream);
+                                finalHash = BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
+                            }
+
+                            var existingMedia = await _repository.GetByIdAsync(id);
+                            if (existingMedia != null)
+                            {
+                                existingMedia.FileSizeKb = (int)(fileInfo.Length / 1024);
+                                existingMedia.FileHash = finalHash;
+                                await _repository.ReplaceAsync(existingMedia, userId);
+                                await _systemLog.LogAsync(null, "INFO", $"[MediaService] ASYNC_REPLACE_TRANSCODE_SUCCESS | MediaID: {id}", "SYSTEM", userId);
+
+                                // Trigger Sync now that the database has the transcoded file hash
+                                try
+                                {
+                                    var affectedDevices = await _deviceRepository.GetDevicesByMediaIdAsync(id);
+                                    foreach (var dev in affectedDevices)
+                                    {
+                                        await _deviceRepository.AddCommandAsync(dev.DeviceId, "FORCE_SYNC");
+                                    }
+                                }
+                                catch { }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            await _systemLog.LogAsync(null, "ERROR", $"[MediaService] ASYNC_REPLACE_TRANSCODE_FAILED | MediaID: {id} | Error: {ex.Message}", "SYSTEM", userId);
+                        }
+                    });
+                }
+
+                // Trigger Sync immediately only if no transcoding is needed.
+                // Otherwise, the background transcoding task will trigger it once it finishes.
+                if (!needsTranscoding)
+                {
+                    try
+                    {
+                        var affectedDevices = await _deviceRepository.GetDevicesByMediaIdAsync(id);
+                        foreach (var dev in affectedDevices)
+                        {
+                            await _deviceRepository.AddCommandAsync(dev.DeviceId, "FORCE_SYNC");
+                        }
+                    } catch { }
+                }
 
                 return TransformToAbsoluteUrl(result.Value);
             }

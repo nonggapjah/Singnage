@@ -1,4 +1,6 @@
 const { ipcRenderer } = require('electron');
+const path = require('path');
+const url = require('url');
 
 let config = null;
 let playlist = [];
@@ -9,7 +11,7 @@ let currentItemTimer = null;
 let mediaStartTime = 0;
 let mediaDuration = 0;
 let volume = 50;
-let isMuted = false;
+let isMuted = true;
 let isUpdating = false;
 let clockTimer, syncTimer;
 let cacheProgress = 0;
@@ -60,7 +62,8 @@ const logContainer = document.getElementById('log-container');
 async function init() {
     config = await ipcRenderer.invoke('get-config');
     volume = config.volume ?? 50;
-    isMuted = config.isMuted ?? false;
+    isMuted = config.isMuted ?? true;
+    videoEl.muted = isMuted;
     videoEl.volume = isMuted ? 0 : volume / 100;
 
     // Inject app version from package.json into all .app-version elements
@@ -220,10 +223,13 @@ async function syncSystemLogs() {
 }
 
 async function recordPlayback(item, duration, result = 'success', error = '') {
+    if (item.playlistItemId && item.playlistItemId.startsWith('FALLBACK')) {
+        return;
+    }
     const log = {
         deviceId: config.deviceId,
         mediaId: item.media.mediaId,
-        playlistId: config.lastPlaylistId || null,
+        playlistId: item.playlistId || config.lastPlaylistId || null,
         duration: Math.max(1, Math.floor(duration / 1000)),
         result: result,
         errorMessage: error,
@@ -316,7 +322,7 @@ async function sync() {
             deviceName: config.deviceName,
             branchCode: config.branchCode,
             status: isPlaying ? 'PLAYING' : 'IDLE',
-            currentPlaylistId: config.lastPlaylistId || '',
+            currentPlaylistId: (playlist[currentIndex] && playlist[currentIndex].playlistId) ? playlist[currentIndex].playlistId : (config.lastPlaylistId || ''),
             currentMediaId: (playlist[currentIndex] && playlist[currentIndex].media) ? playlist[currentIndex].media.mediaId : '',
             currentPlaylistItemId: (playlist[currentIndex]) ? playlist[currentIndex].playlistItemId : '',
             currentPositionSec: isPlaying ? Math.floor(videoEl.currentTime) : 0,
@@ -412,6 +418,30 @@ async function sync() {
                         addLog('Remote Schedule Sync triggered.', 'info', true);
                         loadPlaylist('SCHEDULE');
                     }
+                    if (type === 'CAPTURE_SCREEN') {
+                        addLog('Remote Screen Capture triggered.', 'info', true);
+                        try {
+                            const result = await ipcRenderer.invoke('capture-screen');
+                            if (result.success) {
+                                const response = await fetch(`${config.serverIp}/api/v1/devices/${config.deviceId}/screenshot`, {
+                                    method: 'POST',
+                                    headers: {
+                                        'Content-Type': 'application/json'
+                                    },
+                                    body: JSON.stringify({ base64Image: result.base64 })
+                                });
+                                if (response.ok) {
+                                    addLog('Screen capture uploaded successfully.', 'info', true);
+                                } else {
+                                    addLog(`Screen capture upload failed: Status ${response.status}`, 'error', true);
+                                }
+                            } else {
+                                addLog(`Screen capture failed: ${result.error}`, 'error', true);
+                            }
+                        } catch (e) {
+                            addLog(`Screen capture exception: ${e.message}`, 'error', true);
+                        }
+                    }
                     if (type.startsWith('PLAY_PLAYLIST:')) {
                         const pid = type.split(':')[1];
                         if (pid) { showHUD('REMOTE PLAYLIST'); loadPlaylist(pid); }
@@ -436,6 +466,36 @@ async function sync() {
             }
             syncPlaybackLogs();
             syncSystemLogs();
+
+            // Self-Healing: Check if any playlist items are missing on disk and download them in the background
+            if (!isSyncing && playlist && playlist.length > 0) {
+                (async () => {
+                    let hasMissing = false;
+                    for (const item of playlist) {
+                        const media = item.media;
+                        if (media) {
+                            const exists = await ipcRenderer.invoke('check-media-exists', {
+                                filename: media.fileName
+                            });
+                            if (!exists) {
+                                hasMissing = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (hasMissing) {
+                        addLog("Self-Healing: Detected missing/corrupted files in cache. Triggering sync...", "warn");
+                        const currentHash = localStorage.getItem('playlist_hash') || '';
+                        pendingPlaylist = {
+                            id: config.lastPlaylistId,
+                            name: dashPlaylistName.innerText,
+                            items: playlist,
+                            hash: currentHash
+                        };
+                        syncPendingAssets();
+                    }
+                })();
+            }
         } else throw new Error('Status ' + res.status);
     } catch (err) {
         statusDot.style.background = '#ff4d4d';
@@ -496,10 +556,28 @@ async function loadPlaylist(playlistId, resumeIndex = 0) {
             dashTotalCount.innerText = items.length;
 
             if (contentHash === savedHash && playlist.length > 0) {
-                addLog("Smart Sync: Hash matches. Skipping re-download.");
-                dashReadyStatus.innerText = 'READY';
-                dashReadyStatus.style.color = '#00f2ff';
-                return;
+                // Check if all files in the playlist actually exist on disk
+                let allFilesExist = true;
+                for (const item of items) {
+                    const media = item.media;
+                    if (media) {
+                        const exists = await ipcRenderer.invoke('check-media-exists', {
+                            filename: media.fileName
+                        });
+                        if (!exists) {
+                            allFilesExist = false;
+                            break;
+                        }
+                    }
+                }
+                if (allFilesExist) {
+                    addLog("Smart Sync: Hash matches and all files exist. Skipping re-download.");
+                    dashReadyStatus.innerText = 'READY';
+                    dashReadyStatus.style.color = '#00f2ff';
+                    return;
+                } else {
+                    addLog("Smart Sync: Hash matches but some files are missing. Re-syncing...", "warn");
+                }
             }
 
             // --- Background Smooth Sync ---
@@ -514,11 +592,35 @@ async function loadPlaylist(playlistId, resumeIndex = 0) {
 
             // Start background sequential download
             syncPendingAssets();
+        } else {
+            addLog("Playlist contains 0 items. Triggering fallback...", "warn");
+            await loadFallbackPlaylist();
         }
     } catch (err) {
         addLog(`Load playlist failed: ${err.message}`, 'error');
         dashReadyStatus.innerText = 'SYNC ERROR';
         dashReadyStatus.style.color = '#ff4d4d';
+        await loadFallbackPlaylist();
+    }
+}
+
+async function loadFallbackPlaylist() {
+    addLog("Emergency Mode: Loading local fallback playlist...", "warn");
+    try {
+        const fallbackItems = await ipcRenderer.invoke('get-fallback-media');
+        if (fallbackItems && fallbackItems.length > 0) {
+            playlist = fallbackItems;
+            currentIndex = 0;
+            dashPlaylistName.innerText = "EMERGENCY FALLBACK";
+            dashTotalCount.innerText = playlist.length;
+            dashReadyStatus.innerText = 'EMERGENCY';
+            dashReadyStatus.style.color = '#e74c3c';
+            playNext();
+        } else {
+            addLog("Emergency Mode: No fallback files found in fallback_media folder.", "error");
+        }
+    } catch (e) {
+        addLog(`Emergency Mode failed: ${e.message}`, 'error');
     }
 }
 
@@ -547,7 +649,8 @@ async function syncPendingAssets() {
                 // console.log(`Downloader: Start Item ${synced + 1}/${items.length} - ${media.fileName}`);
                 const res = await ipcRenderer.invoke('download-media', {
                     url: media.blobUrl,
-                    filename: media.fileName
+                    filename: media.fileName,
+                    fileHash: media.fileHash
                 });
 
                 if (res && res.success) {
@@ -630,15 +733,25 @@ setInterval(updatePlaybackHUD, 500);
 async function playNext() {
     if (playlist.length === 0) {
         isPlaying = false; jingleEl.classList.remove('hidden');
-        dashCurrentMedia.innerText = '▶ IDLE / WAITING'; return;
+        dashCurrentMedia.innerText = '▶ IDLE / WAITING'; 
+        try {
+            videoEl.pause();
+            videoEl.removeAttribute('src');
+            videoEl.load();
+            imageEl.removeAttribute('src');
+        } catch (e) {}
+        return;
     }
     localStorage.setItem('last_playlist_index', currentIndex);
     isPlaying = true;
     const item = playlist[currentIndex];
     const media = item.media;
+    const isFallback = item.playlistItemId && item.playlistItemId.startsWith('FALLBACK');
 
     // Check if file is physically downloaded to prevent trying to play 0-byte/partial files
-    const isReady = await ipcRenderer.invoke('check-media-exists', media.fileName);
+    const isReady = isFallback ? true : await ipcRenderer.invoke('check-media-exists', {
+        filename: media.fileName
+    });
     if (!isReady) {
         addLog(`Skip: ${media.fileName} (still syncing)`, 'warn');
         currentIndex = (currentIndex + 1) % playlist.length;
@@ -648,14 +761,17 @@ async function playNext() {
         return;
     }
 
-    const localDir = await ipcRenderer.invoke('get-local-path');
-    const localFile = `file://${localDir}/${media.fileName}`;
+    const localDir = isFallback 
+        ? await ipcRenderer.invoke('get-fallback-path')
+        : await ipcRenderer.invoke('get-local-path');
+    const localFile = url.pathToFileURL(path.join(localDir, media.fileName)).href;
 
     dashCurrentMedia.innerText = `▶ ${media.displayName || media.fileName}`;
     dashLoopInfo.innerText = `ITEM ${currentIndex + 1} / ${playlist.length}`;
 
     mediaStartTime = Date.now();
-    mediaDuration = (item.durationOverride || media.durationSec || 10) * 1000;
+    const rawDuration = item.durationOverride || media.durationSec || 10;
+    mediaDuration = Math.max(1, parseInt(rawDuration) || 10) * 1000;
     dashDur.innerText = formatTime(mediaDuration);
     jingleEl.classList.add('hidden');
 
@@ -668,7 +784,9 @@ async function playNext() {
         // --- SMOOTH SWAP LOGIC ---
         if (pendingPlaylist && pendingPlaylist.items.length > 0) {
             const firstMedia = pendingPlaylist.items[0].media;
-            const isReady = await ipcRenderer.invoke('check-media-exists', firstMedia.fileName);
+            const isReady = await ipcRenderer.invoke('check-media-exists', {
+                filename: firstMedia.fileName
+            });
 
             if (isReady) {
                 swapToPending();
@@ -710,14 +828,26 @@ async function playNext() {
             }, mediaDuration + 60000);
         }
 
-        videoEl.onerror = () => {
+        videoEl.onerror = async () => {
             if (currentItemTimer) clearTimeout(currentItemTimer);
             const err = videoEl.error ? `Code ${videoEl.error.code}: ${videoEl.error.message}` : 'Unknown Playback Error';
             console.error('Video Error:', err, localFile);
             recordPlayback(item, 0, 'error', err);
+            
+            // Delete corrupt file from local cache for auto-recovery
+            addLog(`Error playing ${media.fileName}. Deleting cached file for auto-recovery.`, 'warn');
+            await ipcRenderer.invoke('delete-cached-file', media.fileName);
+
             setTimeout(() => onComplete(true), 2000);
         };
     } else {
+        // Clear video element to release hardware decoders/memory
+        try {
+            videoEl.pause();
+            videoEl.removeAttribute('src');
+            videoEl.load();
+        } catch (e) {}
+
         imageEl.src = localFile; imageEl.classList.remove('hidden'); videoEl.classList.add('hidden');
         if (currentItemTimer) clearTimeout(currentItemTimer);
         currentItemTimer = setTimeout(() => onComplete(false), mediaDuration);
@@ -749,10 +879,11 @@ function showSetup() {
         const loc = document.getElementById('location').value;
         if (!ip || !name) return alert('โปรดกรอกข้อมูล');
         try {
+            const uuid = await ipcRenderer.invoke('get-machine-uuid');
             const res = await fetch(`${ip}/api/v1/devices/register`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    deviceKey: 'WIN-' + Math.random().toString(36).substr(2, 6).toUpperCase(),
+                    deviceKey: uuid,
                     deviceName: name,
                     branchCode: branch,
                     location: loc,
@@ -934,9 +1065,12 @@ document.getElementById('close-help').onclick = () => {
 document.getElementById('btn-f1').onclick = () => { helpScreen.classList.remove('hidden'); updateCursorVisibility(); };
 document.getElementById('btn-f2').onclick = () => adjustVolume(-5);
 document.getElementById('btn-f3').onclick = () => adjustVolume(5);
-document.getElementById('btn-f4').onclick = () => {
+document.getElementById('btn-f4').onclick = async () => {
     isMuted = !isMuted;
+    videoEl.muted = isMuted;
     videoEl.volume = isMuted ? 0 : volume / 100;
+    config.isMuted = isMuted;
+    await ipcRenderer.invoke('save-config', config);
     showHUD(isMuted ? 'MUTED' : 'UNMUTED');
     updateCursorVisibility();
 };
@@ -951,7 +1085,13 @@ document.getElementById('btn-esc').onclick = () => {
 
 async function adjustVolume(delta) {
     volume = Math.max(0, Math.min(100, volume + delta));
-    videoEl.volume = volume / 100; config.volume = volume;
+    if (isMuted && delta > 0) {
+        isMuted = false;
+    }
+    videoEl.muted = isMuted;
+    videoEl.volume = isMuted ? 0 : volume / 100;
+    config.volume = volume;
+    config.isMuted = isMuted;
     await ipcRenderer.invoke('save-config', config);
     addLog(`Vol: ${volume}%`);
     showHUD(`VOLUME: ${volume}%`);
@@ -961,7 +1101,15 @@ window.addEventListener('keydown', async e => {
     if (e.key === 'F1') { highlightShortcut('btn-f1'); helpScreen.classList.remove('hidden'); }
     if (e.key === 'F2') { highlightShortcut('btn-f2'); adjustVolume(-5); }
     if (e.key === 'F3') { highlightShortcut('btn-f3'); adjustVolume(5); }
-    if (e.key === 'F4') { highlightShortcut('btn-f4'); isMuted = !isMuted; videoEl.volume = isMuted ? 0 : volume / 100; showHUD(isMuted ? 'MUTED' : 'UNMUTED'); }
+    if (e.key === 'F4') {
+        highlightShortcut('btn-f4');
+        isMuted = !isMuted;
+        videoEl.muted = isMuted;
+        videoEl.volume = isMuted ? 0 : volume / 100;
+        config.isMuted = isMuted;
+        await ipcRenderer.invoke('save-config', config);
+        showHUD(isMuted ? 'MUTED' : 'UNMUTED');
+    }
     if (e.key === 'F5') { highlightShortcut('btn-f5'); showHUD('RELOADING...'); setTimeout(() => window.location.reload(), 500); }
     if (e.key === 'F6') { highlightShortcut('btn-f6'); showHUD('MANUAL SYNC'); sync(); }
     if (e.key === 'F7') { highlightShortcut('btn-f7'); dashboardScreen.classList.toggle('hidden'); }

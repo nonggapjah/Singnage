@@ -108,6 +108,11 @@ BEGIN
         UPDATE sn_playlist_items
         SET is_deleted = 1, deleted_at = SYSUTCDATETIME(), deleted_by = @p_userid
         WHERE playlist_id = @p_playlist_id;
+
+        -- Deactivate assignments on devices
+        UPDATE sn_device_playlists
+        SET is_active = 0
+        WHERE playlist_id = @p_playlist_id;
         
         SET @msg = N'Playlist deleted.';
         GOTO ResultSection;
@@ -269,6 +274,7 @@ ResultSection:
                 m.duration_sec AS original_duration,
                 m.ratio,
                 m.file_size_kb,
+                m.file_hash,
                 m.created_at AS uploaded_at,
                 m.supplier_code,
                 m.remark1,

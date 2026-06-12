@@ -10,6 +10,7 @@ namespace SignageUnicorn.Api.Repositories.Interfaces
         Task<IEnumerable<DeviceDto>> GetAllDevicesAsync();
         Task<DeviceDto?> GetDeviceByIdAsync(string deviceId);
         Task<RepositoryResult> AddCommandAsync(string deviceId, string commandType);
+        Task<RepositoryResult> AcknowledgeCommandAsync(string deviceId, string commandId, string status, long? userId = null);
         Task<RepositoryResult> DeactivateDeviceAsync(string deviceId, long? userId = null);
         Task<RepositoryResult> CleanupOfflineDevicesAsync(int days = 14);
         Task<RepositoryResult<int>> GetOfflineDeviceCountAsync(int days = 14);

@@ -99,6 +99,8 @@ namespace SignageUnicorn.Api.Services.Application
                 // Polyfill nested Media object for client compatibility & Transform URLs
                 foreach (var item in items)
                 {
+                    item.PlaylistId = playlist.PlaylistId;
+                    
                     // 1. Transform the item's direct URL
                     item.BlobUrl = TransformUrl(item.BlobUrl);
                     
@@ -117,7 +119,8 @@ namespace SignageUnicorn.Api.Services.Application
                         BlobUrl = item.BlobUrl ?? "", // Already transformed above
                         DurationSec = (item.OriginalDuration.HasValue && item.OriginalDuration.Value > 0) ? item.OriginalDuration.Value : 10,
                         Ratio = item.Ratio,
-                        FileSizeKb = item.FileSizeKB
+                        FileSizeKb = item.FileSizeKB,
+                        FileHash = item.FileHash
                     };
                 }
 

@@ -47,3 +47,10 @@ CREATE NONCLUSTERED INDEX [IX_PLAYBACK_LOGS_Reporting] ON [dbo].[sn_playback_log
     [start_time] ASC
 )
 GO
+
+-- Index for Cleanup and Admin Dashboard Queries
+CREATE NONCLUSTERED INDEX [IX_PLAYBACK_LOGS_CreatedAt] ON [dbo].[sn_playback_logs]
+(
+    [created_at] ASC
+)
+GO

@@ -75,6 +75,22 @@ namespace SignageUnicorn.Api.Controllers
             await _deviceService.SendCommandAsync(id, "PLAY_PLAYLIST:" + playlistId);
             return Ok(ApiResponse<object>.SuccessResponse(null, "Playlist assigned successfully"));
         }
+
+        [HttpPost("{id}/command/ack")]
+        [AllowAnonymous]
+        public async Task<IActionResult> AcknowledgeCommand(string id, [FromBody] CommandAckRequest request)
+        {
+            await _deviceService.AcknowledgeCommandAsync(id, request.CommandId, request.Status);
+            return Ok(ApiResponse<object>.SuccessResponse(null, "Command acknowledged successfully"));
+        }
+
+        [HttpPost("{id}/screenshot")]
+        [AllowAnonymous]
+        public async Task<IActionResult> UploadScreenshot(string id, [FromBody] ScreenshotUploadRequest request)
+        {
+            await _deviceService.SaveScreenshotAsync(id, request.Base64Image);
+            return Ok(ApiResponse<object>.SuccessResponse(null, "Screenshot uploaded successfully"));
+        }
         
         [HttpPost("{id}/command")]
         [Authorize(Roles = UserRoles.Admin)]

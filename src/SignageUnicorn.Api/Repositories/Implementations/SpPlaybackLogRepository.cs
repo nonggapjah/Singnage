@@ -50,6 +50,46 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             var status = await db.QueryFirstOrDefaultAsync<SpStdResult>("sp_playback_log_std", p, commandType: CommandType.StoredProcedure);
         }
 
+        public async Task LogPlaybackBatchAsync(IEnumerable<CreatePlaybackLogRequest> logs)
+        {
+            if (logs == null || !logs.Any()) return;
+
+            using var db = CreateConnection();
+            if (db.State != ConnectionState.Open)
+            {
+                if (db is SqlConnection sqlConn)
+                {
+                    await sqlConn.OpenAsync();
+                }
+                else
+                {
+                    db.Open();
+                }
+            }
+
+            foreach (var log in logs)
+            {
+                var p = new DynamicParameters();
+                p.Add("@p_action", "INSERT");
+                p.Add("@p_duration_sec", log.Duration);
+                p.Add("@p_status", log.Result ?? "success");
+                p.Add("@p_error_message", log.ErrorMessage);
+
+                if (long.TryParse(log.DeviceId, out var devId)) p.Add("@p_device_id", devId);
+                else p.Add("@p_device_uuid", log.DeviceId);
+
+                if (long.TryParse(log.MediaId, out var mediaId)) p.Add("@p_media_id", mediaId);
+                else p.Add("@p_media_uuid", log.MediaId);
+
+                if (long.TryParse(log.PlaylistId, out var plId)) p.Add("@p_playlist_id", plId);
+                else p.Add("@p_playlist_uuid", log.PlaylistId);
+
+                p.Add("@p_start_time", log.PlayedAt);
+
+                await db.QueryFirstOrDefaultAsync<SpStdResult>("sp_playback_log_std", p, commandType: CommandType.StoredProcedure);
+            }
+        }
+
         public async Task<IEnumerable<PlaybackLogDto>> GetLatestLogsAsync(int top)
         {
             using var db = CreateConnection();
@@ -125,6 +165,16 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             if (status != null && status.err_flag) return Enumerable.Empty<PlaybackExportDto>();
 
             return await multi.ReadAsync<PlaybackExportDto>();
+        }
+
+        public async Task ClearOldPlaybackLogsAsync(int retentionDays = 14)
+        {
+            using var db = CreateConnection();
+            var p = new DynamicParameters();
+            p.Add("@p_action", "CLEANUP");
+            p.Add("@p_duration_sec", retentionDays); // We use duration_sec parameter in SP to pass retention days
+
+            var status = await db.QueryFirstOrDefaultAsync<SpStdResult>("sp_playback_log_std", p, commandType: CommandType.StoredProcedure);
         }
     }
 }

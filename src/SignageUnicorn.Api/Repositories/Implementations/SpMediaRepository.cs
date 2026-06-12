@@ -261,5 +261,32 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             var result = await multi.ReadFirstOrDefaultAsync<SpStdResult>();
             return result != null && !result.err_flag;
         }
+
+        public async Task<bool> NormalizeMediaUrlsToRelative()
+        {
+            // Strip all known absolute URL prefixes from blob_url to convert to relative /media/... paths
+            // This allows media to load from any domain without hardcoded host references
+            using var db = CreateConnection();
+            var sql = @"
+                UPDATE sn_media_files
+                SET blob_url = CASE
+                    WHEN blob_url LIKE 'https://signage.aith123.com/%' 
+                        THEN SUBSTRING(blob_url, LEN('https://signage.aith123.com') + 1, LEN(blob_url))
+                    WHEN blob_url LIKE 'http://signage.aith123.com/%' 
+                        THEN SUBSTRING(blob_url, LEN('http://signage.aith123.com') + 1, LEN(blob_url))
+                    WHEN blob_url LIKE 'http://localhost:8862/%' 
+                        THEN SUBSTRING(blob_url, LEN('http://localhost:8862') + 1, LEN(blob_url))
+                    WHEN blob_url LIKE 'http://127.0.0.1:8862/%' 
+                        THEN SUBSTRING(blob_url, LEN('http://127.0.0.1:8862') + 1, LEN(blob_url))
+                    WHEN blob_url LIKE 'http://%.%.%.%:8862/%'
+                        THEN SUBSTRING(blob_url, CHARINDEX('/', blob_url, 9), LEN(blob_url))
+                    ELSE blob_url
+                END,
+                updated_at = SYSUTCDATETIME()
+                WHERE blob_url LIKE 'http%' AND blob_url LIKE '%/media/%'
+            ";
+            await db.ExecuteAsync(sql);
+            return true;
+        }
     }
 }

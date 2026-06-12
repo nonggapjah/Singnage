@@ -120,12 +120,14 @@ namespace SignageUnicorn.Api.Services
         {
             try 
             {
-                string currentBaseUrl = _configuration["ServerSettings:BaseUrl"] ?? "http://localhost:8862";
-                await RunMediaMigration("AUTO_DETECT", currentBaseUrl);
+                // Normalize all absolute blob URLs to relative /media/... paths
+                // so media works from any domain (signage.aith123.com, local IP, localhost, etc.)
+                await _mediaRepo.NormalizeMediaUrlsToRelative();
                 return true;
             }
-            catch
+            catch (Exception ex)
             {
+                Console.WriteLine($"SyncMediaPaths error: {ex.Message}");
                 return false;
             }
         }

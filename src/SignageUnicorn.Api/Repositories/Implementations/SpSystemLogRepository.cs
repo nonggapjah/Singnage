@@ -34,19 +34,18 @@ namespace SignageUnicorn.Api.Repositories.Implementations
                 : $"[Device: {deviceId}] {message}";
 
             using var db = CreateConnection();
-            var p = new DynamicParameters();
-            p.Add("@p_action", "INSERT");
-            p.Add("@p_log_level", "Info"); // Defaulting to Info as logType is Category
-            p.Add("@p_category", logType);
-            p.Add("@p_message", finalMessage);
-            p.Add("@p_source_system", source);
-            p.Add("@p_userid", userId);
-            p.Add("@p_created_at", createdAt);
+            var parameters = new
+            {
+                p_action = "INSERT",
+                p_log_level = "Info", // Defaulting to Info as logType is Category
+                p_category = logType,
+                p_message = finalMessage,
+                p_source_system = source,
+                p_userid = userId,
+                p_created_at = createdAt
+            };
 
-            // 1. Status (Always)
-            // Just execute and verify no error if crucial, but for logging we often fire-and-forget or just await.
-            // But strict standard says we read status.
-            var status = await db.QueryFirstOrDefaultAsync<SpStdResult>("sp_system_log_std", p, commandType: CommandType.StoredProcedure);
+            var status = await db.QueryFirstOrDefaultAsync<SpStdResult>("sp_system_log_std", parameters, commandType: CommandType.StoredProcedure);
         }
 
         public async Task<IEnumerable<SystemLogEntry>> GetLatestLogsAsync(int top = 100)

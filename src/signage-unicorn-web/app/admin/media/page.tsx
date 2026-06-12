@@ -728,8 +728,19 @@ export default function MediaLibraryPage() {
                                                 src={m.blobUrl}
                                                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
                                                 muted
-                                                onMouseOver={e => (e.target as HTMLVideoElement).play()}
-                                                onMouseOut={e => { (e.target as HTMLVideoElement).pause(); (e.target as HTMLVideoElement).currentTime = 0; }}
+                                                onMouseOver={e => {
+                                                    const playPromise = (e.target as HTMLVideoElement).play();
+                                                    if (playPromise !== undefined) {
+                                                        playPromise.catch(() => {});
+                                                    }
+                                                }}
+                                                onMouseOut={e => {
+                                                    const video = e.target as HTMLVideoElement;
+                                                    video.pause();
+                                                    try {
+                                                        video.currentTime = 0;
+                                                    } catch (_) {}
+                                                }}
                                             />
                                         ) : (
                                             <img

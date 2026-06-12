@@ -40,7 +40,15 @@ namespace SignageUnicorn.Api.Services.Background
                 }
 
                 // Wait for next cycle
-                await Task.Delay(_checkInterval, stoppingToken);
+                try
+                {
+                    await Task.Delay(_checkInterval, stoppingToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    // Graceful shutdown - host is stopping
+                    break;
+                }
             }
 
             _logger.LogInformation("Media Cleanup Worker stopping.");
@@ -64,6 +72,8 @@ namespace SignageUnicorn.Api.Services.Background
                 {
                      _logger.LogDebug("No expired media found.");
                 }
+
+
             }
         }
     }

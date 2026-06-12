@@ -10,7 +10,8 @@ export interface ApiResponse<T = any> {
 
 export async function apiFetch<T = any>(
     endpoint: string,
-    options: RequestInit = {}
+    options: RequestInit = {},
+    isUpload: boolean = false
 ): Promise<ApiResponse<T>> {
     const getBaseUrl = () => {
         // 1. Priority: Environment Variable from .env (as per docs/guides/installation-and-run.md)
@@ -52,11 +53,21 @@ export async function apiFetch<T = any>(
     }
 
     try {
-        const response = await fetch(url, {
-            ...options,
-            headers,
-            cache: 'no-store',
-        });
+        const controller = new AbortController();
+        const timeoutMs = isUpload ? 10 * 60 * 1000 : 30000; // 10 min for uploads, 30s for normal requests
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+        let response: Response;
+        try {
+            response = await fetch(url, {
+                ...options,
+                headers,
+                cache: 'no-store',
+                signal: controller.signal,
+            });
+        } finally {
+            clearTimeout(timeoutId);
+        }
 
         const text = await response.text();
         let result: ApiResponse<T>;

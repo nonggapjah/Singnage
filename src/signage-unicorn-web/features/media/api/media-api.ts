@@ -27,7 +27,7 @@ export const mediaApi = {
         return apiFetch('/media', {
             method: 'POST',
             body: isFormData ? data : JSON.stringify(data),
-        });
+        }, true); // isUpload=true: use 10 min timeout
     },
 
     update: async (id: string, data: Partial<MediaFile>): Promise<ApiResponse<boolean>> => {
@@ -64,7 +64,7 @@ export const mediaApi = {
         return await apiFetch<MediaFile>(`/media/${id}/replace`, {
             method: 'POST',
             body: formData,
-        });
+        }, true); // isUpload=true: use 10 min timeout
     },
 
     runCleanup: async (): Promise<ApiResponse<number>> => {

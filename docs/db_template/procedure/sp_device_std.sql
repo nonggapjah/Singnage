@@ -186,8 +186,24 @@ BEGIN
         FROM sn_devices WITH (NOLOCK) 
         WHERE is_deleted = 0 AND (device_id = @p_device_id OR device_uuid = @p_device_uuid);
 
+        -- Expire stale POLLING commands that have been active for more than 3 minutes
         UPDATE sn_device_commands
-        SET status = 'POLLING',
+        SET status = 'EXPIRED',
+            updated_at = SYSUTCDATETIME(),
+            fail_reason = 'Command execution timed out (3 minutes in POLLING status)'
+        WHERE device_id = @actual_id 
+          AND status = 'POLLING' 
+          AND updated_at < DATEADD(MINUTE, -3, SYSUTCDATETIME());
+
+        UPDATE sn_device_commands
+        SET status = CASE 
+                        WHEN command_type IN ('REFRESH', 'RELOAD', 'WIPE_CACHE', 'REBOOT', 'UPDATE_CLIENT') OR command_type LIKE 'RESTART%' THEN 'EXECUTED'
+                        ELSE 'POLLING'
+                     END,
+            executed_at = CASE 
+                             WHEN command_type IN ('REFRESH', 'RELOAD', 'WIPE_CACHE', 'REBOOT', 'UPDATE_CLIENT') OR command_type LIKE 'RESTART%' THEN SYSUTCDATETIME()
+                             ELSE executed_at
+                          END,
             updated_at = SYSUTCDATETIME()
         OUTPUT 
             INSERTED.command_id AS CommandId,
@@ -199,7 +215,7 @@ BEGIN
             INSERTED.status AS Status,
             INSERTED.created_at AS CreatedAt
         INTO @PollTbl
-        WHERE device_id = @actual_id AND status = 'PENDING';
+        WHERE device_id = @actual_id AND (status = 'PENDING' OR (status = 'POLLING' AND updated_at < DATEADD(SECOND, -30, SYSUTCDATETIME())));
 
         GOTO ResultSection;
     END
@@ -353,7 +369,11 @@ ResultSection:
                 d.ratio AS Ratio,
                 d.branch_code AS BranchCode,
                 d.ip_address AS IpAddress,
-                d.status AS Status,
+                CASE
+                    WHEN d.last_check_in IS NULL THEN 'OFFLINE'
+                    WHEN DATEDIFF(SECOND, d.last_check_in, SYSUTCDATETIME()) > 60 THEN 'OFFLINE' 
+                    ELSE d.status
+                END AS Status,
                 CAST(d.current_playlist_id AS NVARCHAR(36)) AS CurrentPlaylistId,
                 CAST(d.current_playlist_item_id AS NVARCHAR(36)) AS CurrentPlaylistItemId,
                 CAST(d.current_media_id AS NVARCHAR(36)) AS CurrentMediaId,

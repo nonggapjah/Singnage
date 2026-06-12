@@ -120,13 +120,26 @@ BEGIN
     ============================================= */
     IF @p_action = 'EXPIRE_OLD'
     BEGIN
-        -- Mark commands older than 24h as expired if still pending
+        -- 1. Mark commands older than 24h as expired if still pending
         UPDATE sn_device_commands
-        SET status = 'EXPIRED'
+        SET status = 'EXPIRED',
+            updated_at = SYSUTCDATETIME()
         WHERE status = 'PENDING' 
           AND created_at < DATEADD(HOUR, -24, SYSUTCDATETIME());
 
-        SET @msg = N'Expired old commands';
+        -- 2. Mark commands in POLLING status for more than 2 hours as EXPIRED
+        UPDATE sn_device_commands
+        SET status = 'EXPIRED',
+            updated_at = SYSUTCDATETIME()
+        WHERE status = 'POLLING' 
+          AND updated_at < DATEADD(HOUR, -2, SYSUTCDATETIME());
+
+        -- 3. Delete executed/expired commands older than 30 days
+        DELETE FROM sn_device_commands
+        WHERE status IN ('EXECUTED', 'EXPIRED')
+          AND created_at < DATEADD(DAY, -30, SYSUTCDATETIME());
+
+        SET @msg = N'Expired old commands and cleaned up logs';
         GOTO ResultSection;
     END
 

@@ -84,7 +84,8 @@ BEGIN
             SELECT 1 FROM sn_playback_logs 
             WHERE device_id = @p_device_id 
             AND media_id = @p_media_id 
-            AND ABS(DATEDIFF(SECOND, start_time, @v_check_time)) < 10
+            AND start_time >= DATEADD(SECOND, -10, @v_check_time)
+            AND start_time <= DATEADD(SECOND, 10, @v_check_time)
         )
         BEGIN
             SET @msg = N'Duplicate skipped';
@@ -143,6 +144,27 @@ BEGIN
     ===================================================== */
     IF @p_action = 'GET_EXPORT_DATA'
     BEGIN
+        GOTO ResultSection;
+    END
+
+    /* =====================================================
+       CLEANUP (Maintenance - Delete Old Logs in Batches)
+       ===================================================== */
+    IF @p_action = 'CLEANUP'
+    BEGIN
+        DECLARE @v_retention_days INT = ISNULL(@p_duration_sec, 30);
+        DECLARE @DeletedRows INT = 1;
+
+        -- Delete in batches of 5000 to prevent transaction log full and table locking
+        WHILE @DeletedRows > 0
+        BEGIN
+            DELETE TOP (5000) FROM sn_playback_logs
+            WHERE created_at < DATEADD(DAY, -@v_retention_days, SYSUTCDATETIME());
+
+            SET @DeletedRows = @@ROWCOUNT;
+        END
+
+        SET @msg = N'Old playback logs cleaned';
         GOTO ResultSection;
     END
 
