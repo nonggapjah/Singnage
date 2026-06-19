@@ -42,7 +42,28 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             
             if (status != null && status.err_flag) return Enumerable.Empty<PlaylistDto>();
 
-            return await multi.ReadAsync<PlaylistDto>();
+            var results = await multi.ReadAsync<dynamic>();
+            var list = new List<PlaylistDto>();
+            foreach (var row in results)
+            {
+                var dto = new PlaylistDto
+                {
+                    PlaylistId = (string)row.playlist_uuid ?? row.playlist_id.ToString(),
+                    PlaylistName = (string)row.playlist_name,
+                    Description = (string)row.description,
+                    CreatedAt = row.created_at != null ? (DateTime)row.created_at : DateTime.MinValue,
+                    CreatedBy = row.created_by?.ToString(),
+                    ItemCount = row.ItemCount != null ? (int)row.ItemCount : 0,
+                    TotalDuration = row.TotalDuration != null ? (int)row.TotalDuration : 0
+                };
+                
+                string activeStr = (string)row.active;
+                if (!string.IsNullOrEmpty(activeStr)) dto.Active = activeStr;
+                else if (!string.IsNullOrEmpty((string)row.status)) dto.Active = ((string)row.status).Trim().ToLower() == "active" ? "Y" : "N";
+                
+                list.Add(dto);
+            }
+            return list;
         }
 
         public async Task<PlaylistDto?> GetPlaylistByIdAsync(string playlistId)

@@ -18,6 +18,15 @@ const formatDuration = (seconds?: number) => {
     return [hrs, mins, secs].map(v => v.toString().padStart(2, '0')).join(':');
 };
 
+const formatDateTime = (dateStr?: string) => {
+    if (!dateStr) return '-';
+    const d = new Date(dateStr.endsWith('Z') ? dateStr : dateStr + 'Z');
+    if (isNaN(d.getTime())) return '-';
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+};
+
+
 export default function DevicesPage() {
     // --- API Handlers (Defined before usage) ---
     const { theme, showModal } = useUI();
@@ -608,8 +617,8 @@ export default function DevicesPage() {
                                                     <div className="space-y-3 mb-6 bg-white/[0.02] rounded-xl p-3 border border-white/5">
                                                         <div className="flex justify-between items-center text-xs">
                                                             <span className="text-muted-foreground uppercase tracking-wider font-bold text-[10px]">Check-In</span>
-                                                            <span className="text-foreground font-mono text-[11px]">
-                                                                {device.lastCheckIn ? new Date(device.lastCheckIn.endsWith('Z') ? device.lastCheckIn : device.lastCheckIn + 'Z').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'}
+                                                            <span className="text-foreground font-mono text-[10px]">
+                                                                {formatDateTime(device.lastCheckIn)}
                                                             </span>
                                                         </div>
                                                         <div className="flex justify-between items-center text-xs">
@@ -856,7 +865,7 @@ export default function DevicesPage() {
                                                                 </td>
                                                                 <td className="p-4">
                                                                     <span className="font-mono text-xs text-muted-foreground">
-                                                                        {device.lastCheckIn ? new Date(device.lastCheckIn.endsWith('Z') ? device.lastCheckIn : device.lastCheckIn + 'Z').toLocaleString() : '-'}
+                                                                        {formatDateTime(device.lastCheckIn)}
                                                                     </span>
                                                                 </td>
                                                                 <td className="p-4 text-right space-x-2">

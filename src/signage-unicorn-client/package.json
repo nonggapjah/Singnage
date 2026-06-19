@@ -1,6 +1,6 @@
 {
   "name": "signage-unicorn-client",
-  "version": "2.6.5",
+  "version": "2.7.4",
   "description": "Standalone Player for Signage Unicorn",
   "main": "main.js",
   "author": "Signage Unicorn Team",
@@ -11,7 +11,6 @@
     "rebuild": "electron-rebuild -f -w better-sqlite3"
   },
   "dependencies": {
-    "axios": "^1.7.2",
     "better-sqlite3": "^12.6.2",
     "fs-extra": "^11.2.0"
   },
@@ -24,11 +23,48 @@
   "build": {
     "appId": "com.signage.unicorn",
     "productName": "Signage Unicorn",
+    "asar": true,
+    "asarUnpack": [
+      "**/better-sqlite3/**/*.node",
+      "**/better-sqlite3/build/**"
+    ],
+    "compression": "maximum",
     "directories": {
       "output": "dist"
     },
+    "files": [
+      "main.js",
+      "index.html",
+      "src/**/*",
+      "assets/**/*",
+      "node_modules/**/*",
+      "!node_modules/**/test/**",
+      "!node_modules/**/tests/**",
+      "!node_modules/**/*.md",
+      "!node_modules/**/*.ts",
+      "!node_modules/**/*.map",
+      "!node_modules/**/LICENSE*",
+      "!node_modules/**/CHANGELOG*",
+      "!node_modules/**/README*",
+      "!node_modules/**/.github/**",
+      "!node_modules/**/docs/**",
+      "!node_modules/**/examples/**"
+    ],
     "win": {
-      "target": "nsis"
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "deleteAppDataOnUninstall": false
     }
   }
 }

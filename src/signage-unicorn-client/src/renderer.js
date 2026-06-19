@@ -13,11 +13,13 @@ let mediaDuration = 0;
 let volume = 50;
 let isMuted = true;
 let isUpdating = false;
+let isHeartbeating = false; // Guard: prevent concurrent heartbeat calls
 let clockTimer, syncTimer;
 let cacheProgress = 0;
 let pendingPlaylist = null; // Next playlist waiting for smooth swap
 let isSyncing = false;     // Prevent multiple sync loops
 let isBootReportSent = false; // Boot Report: send full device info once
+let cachedMachineUuid = null;
 
 // Queues for Offline Sync
 let systemLogQueue = JSON.parse(localStorage.getItem('system_log_queue') || '[]');
@@ -295,6 +297,7 @@ async function syncPlaybackLogs() {
 
 // --- Sync & Heartbeat ---
 async function startSync() {
+    cachedMachineUuid = await ipcRenderer.invoke('get-machine-uuid');
     const version = await ipcRenderer.invoke('get-app-version');
     dashDeviceId.innerText = config.deviceId;
     dashDeviceNameDisp.innerText = `NAME: ${config.deviceName || 'UNNAMED'}`;
@@ -315,10 +318,17 @@ async function startSync() {
 }
 
 async function sync() {
+    // Prevent concurrent heartbeat calls (e.g. server slow + 15s interval fires again)
+    if (isHeartbeating) {
+        console.warn('[Heartbeat] Skipped: previous heartbeat still in progress.');
+        return;
+    }
+    isHeartbeating = true;
     try {
         // Build heartbeat payload
         const heartbeatData = {
             deviceId: config.deviceId,
+            deviceKey: cachedMachineUuid,
             deviceName: config.deviceName,
             branchCode: config.branchCode,
             status: isPlaying ? 'PLAYING' : 'IDLE',
@@ -330,9 +340,8 @@ async function sync() {
         };
 
         // --- AUTO-RETRY LOGIC (v2.3.3) ---
-        // If we have a playlist ID but nothing is playing and no items are loaded, retry load.
-        // This fixes the "starting morning with jingle only" issue if net was down at boot.
-        if (!isPlaying && playlist.length === 0 && config.lastPlaylistId) {
+        // Only retry if not already syncing, to prevent download storms on reconnect
+        if (!isPlaying && playlist.length === 0 && config.lastPlaylistId && !isSyncing) {
             addLog(`Auto-Retry: No playlist active, attempting to load ${config.lastPlaylistId}...`, 'warn');
             const savedIndex = parseInt(localStorage.getItem('last_playlist_index') || '0');
             loadPlaylist(config.lastPlaylistId, savedIndex);
@@ -386,6 +395,16 @@ async function sync() {
                         showHUD('SYSTEM REBOOT...');
                         ipcRenderer.invoke('reboot-device');
                     }
+                    if (type.startsWith('UPDATE_DEVICE_ID:')) {
+                        const newDeviceId = type.split(':')[1];
+                        if (newDeviceId && newDeviceId !== config.deviceId) {
+                            addLog(`Self-healing: updating config.deviceId from ${config.deviceId} to ${newDeviceId}`, 'info', true);
+                            config.deviceId = newDeviceId;
+                            await ipcRenderer.invoke('save-config', config);
+                            addLog(`Local deviceId updated to ${newDeviceId}. Reloading application...`, 'info', true);
+                            setTimeout(() => window.location.reload(), 1000);
+                        }
+                    }
                     if (type === 'UPDATE_CLIENT') {
                         if (isUpdating) {
                             addLog('Client update already in progress. Skipping duplicate command.', 'warn');
@@ -394,22 +413,48 @@ async function sync() {
                         showHUD('UPDATING CLIENT...');
                         addLog('Remote Client Update triggered.', 'info', true);
                         isUpdating = true;
+
+                        // Safety timeout: reset isUpdating after 15 minutes in case download stalls
+                        const updateTimeout = setTimeout(() => {
+                            if (isUpdating) {
+                                addLog('Update timed out after 15 minutes. Resetting state.', 'error', true);
+                                isUpdating = false;
+                            }
+                        }, 15 * 60 * 1000);
+
+                        const cmdId = cmd.deviceCommandId ?? cmd.commandId;
                         try {
                             const dr = await fetch(`${config.serverIp}/api/v1/system/settings/ClientDownloadUrl`).then(r => r.json());
                             if (dr.data) {
+                                addLog(`Downloading update from: ${dr.data}`, 'info', true);
                                 const dl = await ipcRenderer.invoke('download-update', { url: dr.data });
                                 if (dl.success) {
                                     addLog('Update downloaded. Launching installer...', 'warn', true);
+                                    // ACK BEFORE launching (process will restart and can't ACK after)
+                                    if (cmdId) {
+                                        await fetch(`${config.serverIp}/api/v1/devices/${config.deviceId}/command/ack`, {
+                                            method: 'POST',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({ commandId: cmdId, status: 'EXECUTED' })
+                                        }).catch(() => {});
+                                    }
+                                    clearTimeout(updateTimeout);
                                     ipcRenderer.invoke('launch-installer', dl.path);
+                                    // Skip bottom-of-loop ACK (already done above) and keep isUpdating=true
+                                    continue;
                                 } else {
                                     addLog(`Download failed: ${dl.error}`, 'error', true);
+                                    clearTimeout(updateTimeout);
                                     isUpdating = false;
                                 }
                             } else {
+                                addLog('No download URL found in settings.', 'error', true);
+                                clearTimeout(updateTimeout);
                                 isUpdating = false;
                             }
                         } catch (e) {
                             addLog(`Update failed to trigger: ${e.message}`, 'error', true);
+                            clearTimeout(updateTimeout);
                             isUpdating = false;
                         }
                     }
@@ -449,16 +494,16 @@ async function sync() {
 
                     // --- ACK: Report command as EXECUTED ---
                     try {
-                        const ackUrl = `${config.serverIp}/api/v1/devices/${config.deviceId}/command/ack`;
-                        await fetch(ackUrl, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                commandId: cmd.deviceCommandId || cmd.commandId,
-                                status: 'EXECUTED'
-                            })
-                        });
-                        addLog(`Command ${type} acknowledged.`, 'info', true);
+                        const cmdId = cmd.deviceCommandId ?? cmd.commandId;
+                        if (cmdId) {
+                            const ackUrl = `${config.serverIp}/api/v1/devices/${config.deviceId}/command/ack`;
+                            await fetch(ackUrl, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ commandId: cmdId, status: 'EXECUTED' })
+                            });
+                            addLog(`Command ${type} acknowledged.`, 'info', true);
+                        }
                     } catch (e) {
                         addLog(`Failed to ACK command: ${e.message}`, 'warn', true);
                     }
@@ -502,6 +547,8 @@ async function sync() {
         dashStatus.innerText = 'OFFLINE';
         dashStatus.style.color = '#ff4d4d';
         addLog(`Heartbeat failed: ${err.message}`, 'error', true);
+    } finally {
+        isHeartbeating = false; // Always release lock — prevents permanent deadlock
     }
 }
 

@@ -57,6 +57,9 @@ namespace SignageUnicorn.Api.Models
         [JsonPropertyName("deviceId")]
         public string DeviceId { get; set; } = string.Empty;
 
+        [JsonPropertyName("deviceKey")]
+        public string? DeviceKey { get; set; }
+
         [JsonPropertyName("deviceName")]
         public string? DeviceName { get; set; }
 

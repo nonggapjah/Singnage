@@ -117,11 +117,11 @@ namespace SignageUnicorn.Api.Services.Background
                         DECLARE @Deleted INT = 1;
                         WHILE @Deleted > 0
                         BEGIN
-                            DELETE TOP (5000) FROM sn_device_commands WHERE created_at < DATEADD(day, -2, SYSUTCDATETIME());
+                            DELETE TOP (5000) FROM sn_device_commands WHERE created_at < DATEADD(day, -7, SYSUTCDATETIME()) AND status <> 'PENDING';
                             SET @Deleted = @@ROWCOUNT;
                         END";
                     await deviceRepo.ExecuteSqlAsync(sql2);
-                    _logger.LogInformation("[Maintenance] Stale device commands (> 2 days) cleared.");
+                    _logger.LogInformation("[Maintenance] Stale device commands (> 7 days, non-pending) cleared.");
                 }
                 catch (Exception ex)
                 {

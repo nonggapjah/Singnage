@@ -67,6 +67,10 @@ namespace SignageUnicorn.Api.Repositories.Implementations
                 if (long.TryParse(request.DeviceId, out var devId))
                 {
                     p.Add("@p_device_id", devId);
+                    if (!string.IsNullOrEmpty(request.DeviceKey))
+                    {
+                        p.Add("@p_device_uuid", request.DeviceKey);
+                    }
                 }
                 else
                 {

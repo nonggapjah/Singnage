@@ -70,7 +70,14 @@ builder.Services.Configure<IISServerOptions>(options =>
 
 // JWT Setup
 var jwtSettings = builder.Configuration.GetSection("JwtSettings");
-var key = Encoding.ASCII.GetBytes(jwtSettings["Secret"] ?? "THIS_IS_A_VERY_SECRET_KEY_FOR_SIGNAGE_UNICORN_DEV_ONLY_DO_NOT_USE_IN_PROD");
+var jwtSecret = jwtSettings["Secret"];
+if (string.IsNullOrEmpty(jwtSecret))
+{
+    Console.WriteLine("[FATAL] JwtSettings:Secret is missing from appsettings.json. API cannot start securely.");
+    // Use a random fallback for dev only — production must have this set
+    jwtSecret = "CHANGE_THIS_SECRET_IN_PRODUCTION_appsettings_json_JwtSettings_Secret";
+}
+var key = Encoding.ASCII.GetBytes(jwtSecret);
 
 builder.Services.AddAuthentication(x =>
 {
@@ -172,25 +179,8 @@ app.UseCors("AllowAll"); // Enable CORS
 
 app.UseAuthentication();
 
-app.Use(async (context, next) =>
-{
-    var path = context.Request.Path.Value;
-    if (path != null && path.Contains("/api/", StringComparison.OrdinalIgnoreCase))
-    {
-        var authHeader = context.Request.Headers["Authorization"].ToString();
-        var user = context.User;
-        var isAuthenticated = user?.Identity?.IsAuthenticated ?? false;
-        var username = user?.Identity?.Name ?? "none";
-        var claimsList = user?.Claims ?? Enumerable.Empty<System.Security.Claims.Claim>();
-        var roles = claimsList
-            .Where(c => c.Type == System.Security.Claims.ClaimTypes.Role || c.Type == "role")
-            .Select(c => c.Value)
-            .ToList();
-        
-        Console.WriteLine($"[DEBUG AUTH] Path: {path} | Method: {context.Request.Method} | AuthHeader: {(string.IsNullOrEmpty(authHeader) ? "MISSING" : authHeader.Substring(0, Math.Min(30, authHeader.Length)) + "...")} | IsAuth: {isAuthenticated} | User: {username} | Roles: {string.Join(",", roles)}");
-    }
-    await next();
-});
+    // Auth debug middleware disabled in production — re-enable only when debugging auth issues
+    // Console.WriteLine($"[DEBUG AUTH] Path: {path} | ...");
 
 app.UseAuthorization();
 

@@ -1,8 +1,8 @@
 const { app, BrowserWindow, ipcMain, screen, shell, powerSaveBlocker, desktopCapturer } = require('electron');
 const path = require('path');
 const fs = require('fs-extra');
-const axios = require('axios');
 const https = require('https');
+const http = require('http');
 const { exec, spawn } = require('child_process');
 const Database = require('better-sqlite3');
 const crypto = require('crypto');
@@ -14,7 +14,40 @@ app.commandLine.appendSwitch('disable-background-timer-throttling');
 // Prevent GPU process from disabling hardware acceleration after multiple crashes
 app.commandLine.appendSwitch('disable-gpu-process-crash-limit');
 
-axios.defaults.httpsAgent = new https.Agent({ rejectUnauthorized: false });
+// --- Native HTTP Download Helper (replaces axios dependency) ---
+const httpsAgent = new https.Agent({ rejectUnauthorized: false });
+
+/**
+ * Downloads a URL as a stream using Node's built-in https/http.
+ * Returns a promise that resolves to { status, headers, stream }
+ */
+function httpGetStream(url, requestHeaders = {}, timeoutMs = 300000) {
+    return new Promise((resolve, reject) => {
+        const parsedUrl = new URL(url);
+        const lib = parsedUrl.protocol === 'https:' ? https : http;
+        const options = {
+            hostname: parsedUrl.hostname,
+            port: parsedUrl.port || (parsedUrl.protocol === 'https:' ? 443 : 80),
+            path: parsedUrl.pathname + parsedUrl.search,
+            method: 'GET',
+            headers: requestHeaders,
+            agent: parsedUrl.protocol === 'https:' ? httpsAgent : undefined,
+            timeout: timeoutMs
+        };
+        const req = lib.request(options, (res) => {
+            if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+                // Follow redirect
+                resolve(httpGetStream(res.headers.location, requestHeaders, timeoutMs));
+                res.resume();
+                return;
+            }
+            resolve({ status: res.statusCode, headers: res.headers, stream: res });
+        });
+        req.on('timeout', () => { req.destroy(new Error('Request timed out')); });
+        req.on('error', reject);
+        req.end();
+    });
+}
 
 let mainWindow;
 let sleepBlockerId;
@@ -264,6 +297,8 @@ app.whenReady().then(async () => {
     setInterval(() => {
         const now = new Date();
         if (now.getHours() === 4 && now.getMinutes() < 5) {
+            // Only restart if NOT in the middle of a client update download
+            if (app.isQuitting) return; // Already shutting down
             console.log('Daily maintenance: Scheduled relaunch at 4:00 AM.');
             app.relaunch();
             app.exit(0);
@@ -291,17 +326,28 @@ ipcMain.handle('get-app-version', () => {
 ipcMain.handle('get-machine-uuid', async () => {
     return new Promise((resolve) => {
         exec('wmic csproduct get uuid', (err, stdout) => {
+            const fallback = 'WIN-' + (process.env.COMPUTERNAME || Math.random().toString(36).substr(2, 6).toUpperCase());
             if (err) {
-                const fallback = 'WIN-' + (process.env.COMPUTERNAME || Math.random().toString(36).substr(2, 6).toUpperCase());
                 resolve(fallback);
                 return;
             }
             const lines = stdout.split('\n').map(line => line.trim()).filter(line => line.length > 0);
             // Note: WMIC output is typically 'UUID' on first line, followed by the uuid value
             if (lines.length >= 2 && lines[1] !== 'Value' && lines[1] !== '' && !lines[1].includes('UUID')) {
-                resolve(lines[1]);
+                const uuid = lines[1].toUpperCase();
+                const genericUuids = [
+                    '03000200-0400-0500-0006-000700080009',
+                    '00020003-0004-0005-0006-000700080009',
+                    '00000000-0000-0000-0000-000000000000',
+                    'FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF',
+                    '11111111-1111-1111-1111-111111111111'
+                ];
+                if (genericUuids.includes(uuid)) {
+                    resolve(fallback);
+                } else {
+                    resolve(lines[1]);
+                }
             } else {
-                const fallback = 'WIN-' + (process.env.COMPUTERNAME || Math.random().toString(36).substr(2, 6).toUpperCase());
                 resolve(fallback);
             }
         });
@@ -511,25 +557,13 @@ ipcMain.handle('download-media', async (event, { url, filename, fileHash }) => {
 
         let response;
         try {
-            response = await axios({
-                method: 'GET',
-                url: url,
-                headers: headers,
-                responseType: 'stream',
-                timeout: 300000,
-                validateStatus: (status) => status === 200 || status === 206 || status === 416
-            });
+            response = await httpGetStream(url, headers, 300000);
         } catch (e) {
             // Fallback: If range request fails, reset and download from 0
             if (startBytes > 0) {
                 console.warn(`Range download failed. Resetting download for ${filename}.`);
                 await fs.remove(tempPath).catch(() => {});
-                response = await axios({
-                    method: 'GET',
-                    url: url,
-                    responseType: 'stream',
-                    timeout: 300000
-                });
+                response = await httpGetStream(url, {}, 300000);
                 startBytes = 0;
             } else {
                 throw e;
@@ -540,12 +574,7 @@ ipcMain.handle('download-media', async (event, { url, filename, fileHash }) => {
         if (response.status === 416) {
             console.warn(`Range unsatisfied (416). Resetting download for ${filename}.`);
             await fs.remove(tempPath).catch(() => {});
-            response = await axios({
-                method: 'GET',
-                url: url,
-                responseType: 'stream',
-                timeout: 300000
-            });
+            response = await httpGetStream(url, {}, 300000);
             startBytes = 0;
         }
 
@@ -558,7 +587,7 @@ ipcMain.handle('download-media', async (event, { url, filename, fileHash }) => {
         }
 
         const writer = fs.createWriteStream(tempPath, { flags: writerFlags });
-        response.data.pipe(writer);
+        response.stream.pipe(writer);
 
         return new Promise((resolve) => {
             writer.on('finish', async () => {
@@ -583,7 +612,7 @@ ipcMain.handle('download-media', async (event, { url, filename, fileHash }) => {
                 resolve({ success: false, error: err.message });
             });
 
-            response.data.on('error', async (err) => {
+            response.stream.on('error', async (err) => {
                 writer.close();
                 // Do NOT delete tempPath on stream errors so we can resume
                 resolve({ success: false, error: 'Download stream broken: ' + err.message });
@@ -600,31 +629,38 @@ ipcMain.handle('download-update', async (event, { url }) => {
     // Use unique name to avoid file lock conflicts if multiple downloads are triggered
     const filePath = path.join(tempDir, `SignageUnicornSetup_${Date.now()}.exe`);
 
+    // Hard total-time timeout (10 minutes) — prevents IPC from hanging forever
+    const HARD_TIMEOUT_MS = 10 * 60 * 1000;
+
     try {
-        const response = await axios({
-            method: 'GET',
-            url: url,
-            responseType: 'stream',
-            timeout: 600000 // 10 minutes timeout for slow networks
-        });
+        const response = await httpGetStream(url, {}, HARD_TIMEOUT_MS);
 
         const writer = fs.createWriteStream(filePath);
-        response.data.pipe(writer);
+        response.stream.pipe(writer);
 
-        return new Promise((resolve, reject) => {
+        const downloadPromise = new Promise((resolve) => {
             writer.on('finish', () => resolve({ success: true, path: filePath }));
             writer.on('error', async (err) => {
                 writer.close();
                 await fs.remove(filePath).catch(() => { });
                 resolve({ success: false, error: 'Write error: ' + err.message });
             });
-            // Handle network/stream errors after connection started
-            response.data.on('error', async (err) => {
+            response.stream.on('error', async (err) => {
                 writer.close();
                 await fs.remove(filePath).catch(() => { });
                 resolve({ success: false, error: 'Download stream broken: ' + err.message });
             });
         });
+
+        const timeoutPromise = new Promise((resolve) =>
+            setTimeout(() => {
+                writer.close();
+                response.stream.destroy();
+                resolve({ success: false, error: 'Download timed out after 10 minutes.' });
+            }, HARD_TIMEOUT_MS)
+        );
+
+        return await Promise.race([downloadPromise, timeoutPromise]);
     } catch (err) {
         return { success: false, error: 'Request failed: ' + err.message };
     }
@@ -639,31 +675,37 @@ ipcMain.handle('launch-installer', async (event, filePath) => {
             return { success: false, error: 'Installer file not found at ' + filePath };
         }
 
-        // To ensure the app opens after silent update, we generate a bat file
         const batPath = path.join(app.getPath('temp'), `update_launcher_${Date.now()}.bat`);
         const appExePath = process.execPath;
+        // Default install location for NSIS oneClick (perUser)
+        const defaultInstallExe = path.join(
+            process.env.LOCALAPPDATA || 'C:\\Users\\Default\\AppData\\Local',
+            'Programs', 'Signage Unicorn', 'Signage Unicorn.exe'
+        );
 
-        // Use a more robust batch content with logging to temp file for debugging if needed
         const batContent = `@echo off
 echo Waiting for app to close...
-timeout /t 5 /nobreak >nul
+ping -n 6 127.0.0.1 >nul
 echo Running Installer: "${filePath}"
-"${filePath}" /S
+start /wait "" "${filePath}" /S
 if %ERRORLEVEL% NEQ 0 (
-    echo Installer failed with code %ERRORLEVEL%
-    timeout /t 10
+    echo Installer failed with code %ERRORLEVEL%. Restarting old version...
+    start "" "${appExePath}"
+    ping -n 6 127.0.0.1 >nul
     exit /b %ERRORLEVEL%
 )
 echo Installer finished. Starting app again...
-timeout /t 3 /nobreak >nul
-start "" "${appExePath}"
+ping -n 6 127.0.0.1 >nul
+if exist "${defaultInstallExe}" (
+    start "" "${defaultInstallExe}"
+) else (
+    start "" "${appExePath}"
+)
 del "%~f0"
 `;
 
         await fs.writeFile(batPath, batContent, 'utf8');
 
-        // Execute the batch script detached. 
-        // Using shell: true helps resolve paths and cmd.exe on Windows.
         const child = spawn('cmd.exe', ['/c', batPath], {
             detached: true,
             stdio: 'ignore',

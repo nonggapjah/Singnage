@@ -288,7 +288,7 @@ namespace SignageUnicorn.Api.Services
             if (result.Success) return result.Value;
             
             // Log warning if count fails
-             await _logRepo.LogAsync(null, "WARN", $"[DeviceService] COUNT_FAILED | Msg: {result.Message}", "API");
+             await _logRepo.LogAsync(null, "WARNING", $"[DeviceService] COUNT_FAILED | Msg: {result.Message}", "API");
              return 0;
         }
         

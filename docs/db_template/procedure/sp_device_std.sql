@@ -125,6 +125,16 @@ BEGIN
     ===================================================== */
     IF @p_action = 'HEARTBEAT'
     BEGIN
+        -- CLONED CONFIG/HWID COLLISION PREVENTION:
+        DECLARE @orig_device_id BIGINT = @p_device_id;
+        IF @p_device_id IS NOT NULL AND @p_device_uuid IS NOT NULL
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM sn_devices WITH (NOLOCK) WHERE device_id = @p_device_id AND device_uuid = @p_device_uuid AND is_deleted = 0)
+            BEGIN
+                SET @p_device_id = NULL;
+            END
+        END
+
         -- Resolve IDs from UUIDs if provided
         IF @p_current_playlist_id IS NULL AND @p_current_playlist_uuid IS NOT NULL
            SELECT @p_current_playlist_id = playlist_id FROM sn_playlists WITH (NOLOCK) WHERE playlist_uuid = @p_current_playlist_uuid;
@@ -185,6 +195,15 @@ BEGIN
         SELECT TOP 1 @actual_id = device_id 
         FROM sn_devices WITH (NOLOCK) 
         WHERE is_deleted = 0 AND (device_id = @p_device_id OR device_uuid = @p_device_uuid);
+
+        -- If device ID was corrected due to mismatch, inject self-healing command
+        IF @actual_id IS NOT NULL AND @orig_device_id IS NOT NULL AND @actual_id <> @orig_device_id
+        BEGIN
+            INSERT INTO @PollTbl
+            (CommandId, CommandUuid, DeviceCommandId, DeviceId, CommandType, Payload, Status, CreatedAt)
+            VALUES
+            (0, NEWID(), NEWID(), @actual_id, 'UPDATE_DEVICE_ID:' + CAST(@actual_id AS NVARCHAR(20)), NULL, 'EXECUTED', SYSUTCDATETIME());
+        END
 
         -- Expire stale POLLING commands that have been active for more than 3 minutes
         UPDATE sn_device_commands

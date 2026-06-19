@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { deviceApi } from '@/features/devices/api/device-api';
 import { Device } from '@/features/devices/types';
+import { DateTimePicker24h } from '@/components/ui/DateTimePicker24h';
 
 interface BatchAssignModalProps {
     playlistId: string;
@@ -206,20 +207,18 @@ export const BatchAssignModal: React.FC<BatchAssignModalProps> = ({ playlistId, 
                             </div>
                             <div>
                                 <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Start Date (Optional)</label>
-                                <input
-                                    type="datetime-local"
-                                    className="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-xs font-mono outline-none focus:border-accent-cyan"
+                                <DateTimePicker24h
                                     value={startDate}
-                                    onChange={(e) => setStartDate(e.target.value)}
+                                    onChange={setStartDate}
+                                    placeholderDate="Start Date"
                                 />
                             </div>
                             <div>
                                 <label className="block text-xs font-bold text-gray-500 uppercase mb-1">End Date (Optional)</label>
-                                <input
-                                    type="datetime-local"
-                                    className="w-full bg-black/40 border border-white/10 rounded-lg p-2 text-xs font-mono outline-none focus:border-red-500/50"
+                                <DateTimePicker24h
                                     value={endDate}
-                                    onChange={(e) => setEndDate(e.target.value)}
+                                    onChange={setEndDate}
+                                    placeholderDate="End Date"
                                 />
                             </div>
                         </div>

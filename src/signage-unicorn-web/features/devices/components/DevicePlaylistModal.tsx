@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { deviceApi } from '../api/device-api';
 import { useUI } from '@/features/ui/context/UIContext';
 import { Playlist } from '@/features/playlists/types/playlist';
+import { DateTimePicker24h } from '@/components/ui/DateTimePicker24h';
 
 interface DevicePlaylistModalProps {
     isOpen: boolean;
@@ -99,10 +100,10 @@ export const DevicePlaylistModal: React.FC<DevicePlaylistModalProps> = ({ isOpen
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-            <div className="w-full max-w-4xl p-8 rounded-3xl border border-border shadow-[0_0_50px_rgba(0,0,0,0.5)] relative flex flex-col max-h-[90vh] bg-card-solid">
+            <div className="w-full max-w-[90vw] xl:max-w-7xl p-10 rounded-3xl border border-border shadow-[0_0_50px_rgba(0,0,0,0.5)] relative flex flex-col max-h-[90vh] bg-card-solid">
                 <div className="mb-6 shrink-0 relative z-10">
                     <div className="text-4xl mb-2">🗓️</div>
-                    <h3 className="text-2xl font-black text-foreground uppercase tracking-tighter">Device Schedule</h3>
+                    <h3 className="text-3xl font-black text-foreground uppercase tracking-tighter">Device Schedule</h3>
                     <p className="text-xs text-muted-foreground font-mono mt-1">Assign Playlists and validity periods for [{deviceName}]</p>
                 </div>
 
@@ -114,10 +115,10 @@ export const DevicePlaylistModal: React.FC<DevicePlaylistModalProps> = ({ isOpen
                             <table className="w-full text-left border-collapse">
                                 <thead>
                                     <tr className="border-b border-white/10 text-xs text-muted-foreground uppercase tracking-wider bg-white/5">
-                                        <th className="p-3 font-bold w-1/3">Playlist</th>
-                                        <th className="p-3 font-bold">Start Date (Optional)</th>
-                                        <th className="p-3 font-bold">End Date (Optional)</th>
-                                        <th className="p-3 font-bold text-center">Status</th>
+                                        <th className="p-3 font-bold w-[350px]">Playlist</th>
+                                        <th className="p-3 font-bold w-[360px]">Start Date (Optional)</th>
+                                        <th className="p-3 font-bold w-[360px]">End Date (Optional)</th>
+                                        <th className="p-3 font-bold text-center w-[120px]">Status</th>
                                         <th className="p-3 font-bold w-16"></th>
                                     </tr>
                                 </thead>
@@ -140,39 +141,37 @@ export const DevicePlaylistModal: React.FC<DevicePlaylistModalProps> = ({ isOpen
 
                                         return (
                                             <tr key={idx} className="border-b border-white/5 hover:bg-white/5 transition-colors">
-                                                <td className="p-2">
+                                                <td className="p-2 w-[350px]">
                                                     <select
                                                         value={assignment.playlistId}
                                                         onChange={e => updateRow(idx, 'playlistId', e.target.value)}
-                                                        className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-accent-cyan"
+                                                        className="w-full bg-black/40 border border-white/10 rounded-xl px-3 h-[46px] text-sm font-mono text-white outline-none focus:border-accent-cyan focus:shadow-[0_0_15px_rgba(34,211,238,0.15)] focus:bg-black/60 cursor-pointer transition-all"
                                                     >
                                                         {availablePlaylists.filter(p => p.active === 'Y').map(p => (
-                                                            <option key={p.playlistId} value={p.playlistId}>{p.playlistName}</option>
+                                                            <option key={p.playlistId} value={p.playlistId} className="bg-neutral-950 text-white text-sm">{p.playlistName}</option>
                                                         ))}
                                                     </select>
                                                 </td>
-                                                <td className="p-2">
-                                                    <input
-                                                        type="datetime-local"
+                                                <td className="p-2 w-[360px]">
+                                                    <DateTimePicker24h
                                                         value={assignment.startDate || ''}
-                                                        onChange={e => updateRow(idx, 'startDate', e.target.value)}
-                                                        className="w-full bg-muted/20 border border-border/50 rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-accent-cyan"
+                                                        onChange={val => updateRow(idx, 'startDate', val)}
+                                                        isLarge={true}
                                                     />
                                                 </td>
-                                                <td className="p-2">
-                                                    <input
-                                                        type="datetime-local"
+                                                <td className="p-2 w-[360px]">
+                                                    <DateTimePicker24h
                                                         value={assignment.endDate || ''}
-                                                        onChange={e => updateRow(idx, 'endDate', e.target.value)}
-                                                        className="w-full bg-muted/20 border border-border/50 rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-red-500/50"
+                                                        onChange={val => updateRow(idx, 'endDate', val)}
+                                                        isLarge={true}
                                                     />
                                                 </td>
-                                                <td className="p-2 text-center">
+                                                <td className="p-2 text-center w-[120px]">
                                                     <span className={`text-[10px] font-bold px-2 py-1 rounded border ${statusColor} uppercase tracking-widest`}>
                                                         {statusStr}
                                                     </span>
                                                 </td>
-                                                <td className="p-2 text-center">
+                                                <td className="p-2 text-center w-16">
                                                     <button onClick={() => removeRow(idx)} className="text-red-500 hover:bg-red-500/10 p-2 rounded transition-colors text-xl">✕</button>
                                                 </td>
                                             </tr>
@@ -185,7 +184,7 @@ export const DevicePlaylistModal: React.FC<DevicePlaylistModalProps> = ({ isOpen
                                     )}
                                 </tbody>
                             </table>
-                            <button onClick={addRow} className="w-full py-3 mt-4 border border-dashed border-border hover:border-accent-cyan/50 rounded-xl text-xs font-bold uppercase tracking-widest text-muted-foreground hover:text-accent-cyan transition-all bg-white/5 hover:bg-white/10">
+                            <button onClick={addRow} className="w-full py-4 mt-4 border border-dashed border-border hover:border-accent-cyan/50 rounded-xl text-xs font-bold uppercase tracking-widest text-muted-foreground hover:text-accent-cyan transition-all bg-white/5 hover:bg-white/10">
                                 + Add Playlist To Schedule
                             </button>
                         </div>
