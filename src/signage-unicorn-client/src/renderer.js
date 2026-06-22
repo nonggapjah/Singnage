@@ -310,11 +310,25 @@ async function startSync() {
         const savedIndex = parseInt(localStorage.getItem('last_playlist_index') || '0');
         addLog(`Auto-resuming last playlist: ${config.lastPlaylistId} at index ${savedIndex}`);
         loadPlaylist(config.lastPlaylistId, savedIndex);
+    } else {
+        // No locally remembered playlist (e.g. fresh install or reinstall with reset config).
+        // Ask the server what this device should play instead of forcing a manual selection.
+        resolveServerPlaylist();
     }
 
     await sync();
     if (heartbeatTimer) clearInterval(heartbeatTimer);
     heartbeatTimer = setInterval(sync, 15000);
+}
+
+// Resolve the playlist a device should play from the server when nothing is cached locally
+// (e.g. after a reinstall or config reset). Loads the device's assigned schedule so it does
+// not sit idle waiting for a manual selection. The schedule is resolved server-side from the
+// playlists assigned to this device in the web admin.
+async function resolveServerPlaylist() {
+    if (!config.serverIp || !config.deviceId) return;
+    addLog('No local playlist found. Loading device assigned SCHEDULE from server...');
+    loadPlaylist('SCHEDULE');
 }
 
 async function sync() {
