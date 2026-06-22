@@ -3,6 +3,10 @@
 รายการอัปเดตและประวัติการแก้ไขระบบ (Patch Version History)
 
 ---
+## [2.7.5] - 2026-06-22
+### Fix: Auto-Resume Playlist After Reinstall
+- **Persist Assigned Playlist on Register**: When a device re-registers (e.g. after a fresh install), the client now saves the `currentPlaylistId` returned by the server into local config (`lastPlaylistId`). Previously this value was discarded, forcing operators to manually re-select a playlist even though the device already had one assigned on the server. New devices with no assignment still prompt for selection as before.
+
 ## [2.5.2] - 2026-04-03
 ### Critical Stability: Race Condition Fix
 - **Atomic Completion**: Solidified `onComplete` logic to ensure only one item-end event can trigger a transition, preventing dual-skips.

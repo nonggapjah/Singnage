@@ -940,6 +940,7 @@ function showSetup() {
             const result = await res.json();
             if (result.success) {
                 config.serverIp = ip; config.deviceName = name; config.branchCode = branch; config.location = loc; config.deviceId = result.data.deviceId;
+                if (result.data.currentPlaylistId) config.lastPlaylistId = result.data.currentPlaylistId;
                 await ipcRenderer.invoke('save-config', config);
                 setupScreen.classList.add('hidden');
                 updateCursorVisibility();
