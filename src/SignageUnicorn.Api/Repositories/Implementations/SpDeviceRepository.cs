@@ -412,8 +412,10 @@ namespace SignageUnicorn.Api.Repositories.Implementations
                     "SELECT top 1 device_id FROM sn_devices WHERE device_id = @parsedId OR device_uuid = @parsedUuid", 
                     new { parsedId, parsedUuid }, transaction);
 
-                // Clear existing active mappings for device
-                await connection.ExecuteAsync("UPDATE sn_device_playlists SET is_active = 0 WHERE device_id = @devId", new { devId }, transaction);
+                // Clear existing mappings for device. We DELETE rather than just flipping is_active=0
+                // so the table does not accumulate dead rows on every reassignment (it previously grew
+                // unbounded — ~94% of rows were inactive leftovers).
+                await connection.ExecuteAsync("DELETE FROM sn_device_playlists WHERE device_id = @devId", new { devId }, transaction);
 
                 // Insert new mappings
                 if (playlists != null && playlists.Count > 0)

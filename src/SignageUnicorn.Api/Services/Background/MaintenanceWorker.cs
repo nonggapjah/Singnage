@@ -172,11 +172,12 @@ namespace SignageUnicorn.Api.Services.Background
                     _logger.LogError(ex, "[Maintenance] Failed to clear stale commands.");
                 }
 
-                // 4. Clear Stale Schedules (sn_device_playlists) for deleted devices
+                // 4. Clear Stale Schedules (sn_device_playlists): rows for deleted devices, plus any
+                //    leftover inactive rows (e.g. from playlist deletion) so the table stays lean.
                 try
                 {
-                    await deviceRepo.ExecuteSqlAsync("SET QUOTED_IDENTIFIER ON; SET ANSI_NULLS ON; DELETE FROM sn_device_playlists WHERE device_id IN (SELECT device_id FROM sn_devices WHERE is_deleted = 1);");
-                    _logger.LogInformation("[Maintenance] Stale schedules for deleted devices cleared.");
+                    await deviceRepo.ExecuteSqlAsync("SET QUOTED_IDENTIFIER ON; SET ANSI_NULLS ON; DELETE FROM sn_device_playlists WHERE device_id IN (SELECT device_id FROM sn_devices WHERE is_deleted = 1) OR is_active = 0;");
+                    _logger.LogInformation("[Maintenance] Stale/inactive schedule rows cleared.");
                 }
                 catch (Exception ex)
                 {
@@ -244,38 +245,9 @@ namespace SignageUnicorn.Api.Services.Background
                     _logger.LogError(ex, "[Maintenance] Failed to scan and clean orphan files.");
                 }
 
-                // 6. Truncate / Shrink Database Files
-                try
-                {
-                    _logger.LogInformation("[Maintenance] Shrinking database and log file...");
-                    var connectionString = config.GetConnectionString("DefaultConnection") 
-                                           ?? config["DB_CONNECTION_STRING"];
-
-                    if (!string.IsNullOrEmpty(connectionString))
-                    {
-                        using (var connection = new SqlConnection(connectionString))
-                        {
-                            await connection.OpenAsync();
-                            
-                            // Checkpoint & shrink file
-                            var shrinkSql = @"
-                                ALTER DATABASE SignageUnicornDB SET RECOVERY SIMPLE;
-                                CHECKPOINT;
-                                DBCC SHRINKFILE (SignageUnicornDB_log, 10);
-                                DBCC SHRINKDATABASE (SignageUnicornDB);";
-                            
-                            using (var cmd = new SqlCommand(shrinkSql, connection))
-                            {
-                                await cmd.ExecuteNonQueryAsync();
-                            }
-                            _logger.LogInformation("[Maintenance] Database shrink completed successfully.");
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "[Maintenance] Failed to shrink database files.");
-                }
+                // NOTE: Periodic DBCC SHRINKDATABASE was intentionally removed. Repeatedly shrinking a
+                // live database severely fragments indexes and hurts performance; the file just regrows.
+                // Keeping RECOVERY SIMPLE is handled once at the DB level, not on every maintenance run.
 
                 _logger.LogInformation("[Maintenance] Cleanup Completed Successfully.");
             }
