@@ -8,6 +8,11 @@ using Microsoft.AspNetCore.StaticFiles;
 
 using Microsoft.OpenApi.Models;
 
+// Single-instance guard: PM2 on Windows occasionally fails to kill the previous dotnet child on
+// restart, leaving an orphan that still holds the listen port. The new instance then crash-loops
+// with SocketException 10048. Before binding, reclaim the port from any stale instance of this app.
+EnsurePortAvailable(args);
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Clear logging providers to prevent Windows Event Log permission issues from crashing the app
@@ -207,3 +212,74 @@ using (var scope = app.Services.CreateScope())
 app.MapControllers(); // Enable Controllers
 
 app.Run();
+
+// Reclaims the listen port from a stale instance of this app (a PM2-orphaned dotnet) so a fresh
+// start never crash-loops on "address already in use". Best-effort: never blocks or fails startup,
+// and only ever kills a dotnet process that is actually LISTENING on our exact port.
+static void EnsurePortAvailable(string[] args)
+{
+    try
+    {
+        // Resolve the port from --urls (e.g. "http://0.0.0.0:8862"); default to 8862.
+        int port = 8862;
+        for (int i = 0; i < args.Length; i++)
+        {
+            string? val = args[i].StartsWith("--urls=") ? args[i]["--urls=".Length..]
+                        : (args[i] == "--urls" && i + 1 < args.Length) ? args[i + 1]
+                        : null;
+            if (val != null)
+            {
+                var m = System.Text.RegularExpressions.Regex.Match(val, @":(\d+)");
+                if (m.Success && int.TryParse(m.Groups[1].Value, out var parsed)) port = parsed;
+                break;
+            }
+        }
+
+        int currentPid = Environment.ProcessId;
+
+        var psi = new System.Diagnostics.ProcessStartInfo("netstat", "-ano -p tcp")
+        {
+            RedirectStandardOutput = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        using var probe = System.Diagnostics.Process.Start(psi);
+        if (probe == null) return;
+        string output = probe.StandardOutput.ReadToEnd();
+        probe.WaitForExit(5000);
+
+        bool killedAny = false;
+        foreach (var raw in output.Split('\n'))
+        {
+            var line = raw.Trim();
+            if (line.Length == 0 || !line.Contains("LISTENING")) continue;
+
+            var parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 5) continue;
+
+            var local = parts[1];                          // e.g. 0.0.0.0:8862 or [::]:8862
+            if (!local.EndsWith(":" + port)) continue;     // exact port (won't match :48862 etc.)
+            if (!int.TryParse(parts[^1], out var pid) || pid == 0 || pid == currentPid) continue;
+
+            try
+            {
+                var holder = System.Diagnostics.Process.GetProcessById(pid);
+                // Only reclaim from a stale instance of THIS app — never touch anything else.
+                if (holder.ProcessName.Equals("dotnet", StringComparison.OrdinalIgnoreCase))
+                {
+                    Console.WriteLine($"[Startup] Port {port} held by stale dotnet process {pid}; terminating to reclaim.");
+                    holder.Kill(true);
+                    holder.WaitForExit(3000);
+                    killedAny = true;
+                }
+            }
+            catch { /* the holder may have exited already */ }
+        }
+
+        if (killedAny) System.Threading.Thread.Sleep(800); // let the socket fully release before bind
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[Startup] Port guard skipped: {ex.Message}");
+    }
+}
