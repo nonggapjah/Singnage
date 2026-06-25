@@ -6,8 +6,10 @@ import { playlistApi } from '@/features/playlists/api/playlist-api';
 import { PlaylistTable } from '@/features/playlists/components/PlaylistTable';
 import { BatchAssignModal } from '@/features/playlists/components/BatchAssignModal';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 
 export default function PlaylistsPage() {
+    const router = useRouter();
     const [playlists, setPlaylists] = useState<Playlist[]>([]);
     const [loading, setLoading] = useState(true);
 
@@ -49,7 +51,8 @@ export default function PlaylistsPage() {
         if (confirm('Are you sure you want to delete this playlist?')) {
             const res = await playlistApi.delete(id);
             if (res.success) {
-                loadPlaylists();
+                await loadPlaylists();
+                router.refresh(); // keep cached views elsewhere (counts, dashboard) in sync
             } else {
                 alert(res.message);
             }
@@ -88,6 +91,7 @@ export default function PlaylistsPage() {
             const createRes = await playlistApi.create(copy);
             if (createRes.success) {
                 await loadPlaylists();
+                router.refresh();
             } else {
                 alert(createRes.message || 'Could not duplicate the playlist.');
             }

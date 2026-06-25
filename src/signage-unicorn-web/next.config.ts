@@ -11,6 +11,18 @@ const nextConfig: NextConfig = {
   env: {
     NEXT_PUBLIC_DEBUG: '1', // Set to '1' for Development
   },
+  async headers() {
+    return [
+      {
+        // The service worker script must never be cached long, otherwise SW updates
+        // (e.g. cache-strategy fixes) take hours to reach clients. Always revalidate.
+        source: '/sw.js',
+        headers: [
+          { key: 'Cache-Control', value: 'public, max-age=0, must-revalidate' },
+        ],
+      },
+    ];
+  },
   async rewrites() {
     return [
       {
