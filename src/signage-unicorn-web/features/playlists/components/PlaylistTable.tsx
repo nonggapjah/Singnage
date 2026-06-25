@@ -8,6 +8,8 @@ interface PlaylistTableProps {
     playlists: Playlist[];
     onDelete?: (id: string) => void;
     onDeploy?: (playlist: Playlist) => void;
+    onDuplicate?: (playlist: Playlist) => void;
+    duplicatingId?: string | null;
 }
 
 const formatDuration = (seconds?: number) => {
@@ -18,7 +20,7 @@ const formatDuration = (seconds?: number) => {
     return [hrs, mins, secs].map(v => v.toString().padStart(2, '0')).join(':');
 };
 
-export const PlaylistTable: React.FC<PlaylistTableProps> = ({ playlists, onDelete, onDeploy }) => {
+export const PlaylistTable: React.FC<PlaylistTableProps> = ({ playlists, onDelete, onDeploy, onDuplicate, duplicatingId }) => {
     return (
         <div className="glass-panel rounded-xl overflow-hidden">
             <table className="w-full text-left border-collapse">
@@ -70,6 +72,14 @@ export const PlaylistTable: React.FC<PlaylistTableProps> = ({ playlists, onDelet
                                     Edit
                                 </Link>
                                 <button
+                                    onClick={() => onDuplicate?.(playlist)}
+                                    disabled={duplicatingId === playlist.playlistId}
+                                    className="text-gray-400 hover:text-accent-cyan text-xs font-bold mr-3 transition-colors disabled:opacity-40 disabled:cursor-wait"
+                                    title="Create an inactive copy of this playlist (incl. all videos) to edit"
+                                >
+                                    {duplicatingId === playlist.playlistId ? 'Copying…' : 'Duplicate'}
+                                </button>
+                                <button
                                     onClick={() => onDelete?.(playlist.playlistId)}
                                     className="text-red-900/60 hover:text-red-500 text-xs font-bold transition-colors"
                                 >
@@ -80,7 +90,7 @@ export const PlaylistTable: React.FC<PlaylistTableProps> = ({ playlists, onDelet
                     ))}
                     {playlists.length === 0 && (
                         <tr>
-                            <td colSpan={5} className="px-6 py-12 text-center text-gray-500 uppercase tracking-widest">
+                            <td colSpan={6} className="px-6 py-12 text-center text-gray-500 uppercase tracking-widest">
                                 No Playlists Found
                             </td>
                         </tr>
