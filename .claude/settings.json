@@ -1,0 +1,102 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(*)",
+      "Glob(*)",
+      "Write(*)",
+      "Edit(*)",
+      "Read(*)",
+      "Bash(npx tsc *)",
+      "Bash(node_modules/.bin/tsc --noEmit -p tsconfig.json)",
+      "Bash(node node_modules/typescript/bin/tsc --noEmit -p tsconfig.json)",
+      "Bash(npm run *)",
+      "Bash(npm install *)",
+      "Bash(find \"c:/DEVOPS_repair\" /c/Singnage/.. -maxdepth 6 \\\\\\( -name \"BatchAssignPlaylistModal.tsx\" -o -name \"DateTimePicker24h.tsx\" \\\\\\) 2>/dev/null | head; echo \"\\(search done\\)\")",
+      "Read(//c/DEVOPS_repair/**)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8865/admin/devices)",
+      "Bash(curl -s http://localhost:8865/admin/devices)",
+      "Bash(curl -s \"http://localhost:8865/_next/static/chunks/app/admin/devices/page.js\")",
+      "Bash(curl -s -o /dev/null -w \"GET /admin/devices -> HTTP %{http_code}\\\\n\" http://localhost:8865/admin/devices)",
+      "Bash(curl -s -m 5 -o /dev/null -w \"127.0.0.1:8862 -> HTTP %{http_code}\\\\n\" http://127.0.0.1:8862/api/v1/devices)",
+      "Bash(curl -s -m 8 -o /dev/null -w \"signage.aith123.com -> HTTP %{http_code}\\\\n\" https://signage.aith123.com/api/v1/devices)",
+      "Bash(curl -s -m 8 -D - -o /dev/null -X OPTIONS -H \"Origin: http://localhost:8865\" -H \"Access-Control-Request-Method: GET\" https://signage.aith123.com/api/v1/devices)",
+      "Bash(curl -s -m 15 -D - -o /dev/null -H \"Origin: http://localhost:8865\" \"https://signage.aith123.com/api/v1/devices\")",
+      "Bash(curl -s -m 15 -H \"Origin: http://localhost:8865\" \"https://signage.aith123.com/api/v1/devices\")",
+      "Bash(xxd)",
+      "Bash(grep -iA3 \"check-git\\\\|PreToolUse\\\\|Bash\" .claude/settings.json)",
+      "Bash(command -v pm2)",
+      "Bash(pm2 -v)",
+      "Bash(echo \"=== is this the prod checkout path \\(c:\\\\\\\\git\\\\\\\\Signage-Unicorn\\)? ===\")",
+      "Read(//c/git/**)",
+      "Bash(git commit -m ' *)",
+      "PowerShell(pm2 -v 2>&1)",
+      "PowerShell(pm2 list 2>&1)",
+      "Bash(grep -viE \"^\\\\.git$|node_modules\")",
+      "PowerShell(Write-Output \"=== npx pm2 version ===\"; npx --no-install pm2 -v 2>&1 | Select-Object -First 3; Write-Output \"=== global pm2 path ===\"; \\(Get-Command pm2 -ErrorAction SilentlyContinue\\).Source; npm ls -g pm2 --depth=0 2>&1 | Select-Object -First 5; Write-Output \"=== node processes \\(next/dotnet/cloudflared\\) ===\"; Get-Process -Name node,dotnet,cloudflared -ErrorAction SilentlyContinue | Select-Object Name,Id,Path | Format-Table -AutoSize)",
+      "Bash(netstat -ano)",
+      "Bash(curl -s -m 5 -o /dev/null -w \"127.0.0.1:8862/api/v1/devices -> HTTP %{http_code}\\\\n\" http://127.0.0.1:8862/api/v1/devices)",
+      "Bash(curl -s -m 5 -o /dev/null -w \"localhost:8865 -> HTTP %{http_code}\\\\n\" http://localhost:8865)",
+      "Bash(tasklist)",
+      "PowerShell(Write-Output \"=== node/dotnet/cloudflared command lines ===\"; Get-CimInstance Win32_Process -Filter \"Name='node.exe' OR Name='dotnet.exe' OR Name='cloudflared.exe'\" | Select-Object ProcessId,@{N='Cmd';E={$_.CommandLine}} | Format-List; Write-Output \"=== pm2 home / dump exists? ===\"; Test-Path \"$env:USERPROFILE\\\\.pm2\\\\dump.pm2\"; Get-ChildItem \"$env:USERPROFILE\\\\.pm2\" -ErrorAction SilentlyContinue | Select-Object Name | Format-Table -AutoSize; Write-Output \"=== cloudflared as a service? ===\"; Get-Service -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'cloudflare|tunnel' } | Select-Object Name,Status | Format-Table -AutoSize)",
+      "Bash(curl -s -m 12 -o /dev/null -w \"https://signage.aith123.com/ -> HTTP %{http_code}\\\\n\" https://signage.aith123.com/)",
+      "Bash(curl -s -m 12 -o /dev/null -w \"https://signage.aith123.com/admin/devices -> HTTP %{http_code}\\\\n\" https://signage.aith123.com/admin/devices)",
+      "Bash(curl -s -m 12 -D - -o /dev/null https://signage.aith123.com/)",
+      "PowerShell(cd \"C:\\\\Singnage\\\\src\\\\signage-unicorn-client\"; $env:CSC_IDENTITY_AUTO_DISCOVERY = \"false\"; npm run build 2>&1 | Tee-Object -FilePath \"C:\\\\Singnage\\\\src\\\\signage-unicorn-client\\\\build.log\" | Select-Object -Last 12)"
+    ],
+    "additionalDirectories": [
+      "*"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '[RoundTable] Governance framework active. Rules and hooks loaded.'"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash hooks/scripts/check-git-workflow.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash hooks/scripts/check-ticket-exists.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "The user is about to modify a file. Check if the file path contains '.claude/CLAUDE.md', '.claude/policies/', or '.claude/agents/'. If it matches any of these PROTECTED paths, respond 'yes' ONLY if the user has explicitly authorized policy modifications in this session. Otherwise respond 'no' to block. If the file is NOT protected, respond 'yes' to allow."
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash hooks/scripts/log-file-change.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -50,6 +50,22 @@ namespace SignageUnicorn.Api.Services
             };
 
             var assignments = await GetAssignedPlaylistsAsync(deviceId);
+
+            // PERMANENT FIX: if this device has no active assignments of its own — which happens when
+            // a screen is freshly installed or re-registers under a new hardware identity — inherit
+            // the assignments of a sibling screen (same branch + same device name) that does have them.
+            // Branch content is defined per screen type (e.g. every "Thonglor All" plays the same set),
+            // not per physical device, so a new screen should immediately play what its peers play
+            // instead of going idle and forcing a manual playlist selection.
+            if (assignments == null || !assignments.Any())
+            {
+                var siblingId = await _deviceRepository.GetSiblingDeviceIdWithAssignmentsAsync(deviceId);
+                if (!string.IsNullOrEmpty(siblingId))
+                {
+                    assignments = await GetAssignedPlaylistsAsync(siblingId);
+                }
+            }
+
             int currentOrder = 1;
 
             var now = DateTime.UtcNow;

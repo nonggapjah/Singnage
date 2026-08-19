@@ -3,6 +3,10 @@
 รายการอัปเดตและประวัติการแก้ไขระบบ (Patch Version History)
 
 ---
+## [2.7.6] - 2026-06-22
+### Fix: Auto-Load Playlist on Boot Without Local State
+- **Server-Resolved Playlist Fallback**: On boot, if the device has no locally remembered playlist (`lastPlaylistId`) — which happens after a reinstall or any config reset — the client now asks the server what to play instead of sitting idle and requiring a manual selection. It first tries the device's last-known `currentPlaylistId`, then falls back to the device's assigned SCHEDULE. This fixes the 2.7.5 case where reinstalled devices (whose config bypasses the registration screen) still required picking a playlist by hand.
+
 ## [2.7.5] - 2026-06-22
 ### Fix: Auto-Resume Playlist After Reinstall
 - **Persist Assigned Playlist on Register**: When a device re-registers (e.g. after a fresh install), the client now saves the `currentPlaylistId` returned by the server into local config (`lastPlaylistId`). Previously this value was discarded, forcing operators to manually re-select a playlist even though the device already had one assigned on the server. New devices with no assignment still prompt for selection as before.

@@ -66,8 +66,12 @@ namespace SignageUnicorn.Api.Controllers
             return Ok(ApiResponse<DeviceDto>.SuccessResponse(device));
         }
 
+        // Admin-only: queues a PLAY_PLAYLIST command to a device. Was previously [AllowAnonymous],
+        // which let anyone on the internet drive any screen. The admin UI uses the authenticated
+        // /command and /playlists endpoints, and the player never calls this — so locking it down
+        // closes the hole without affecting either.
         [HttpPost("{id}/assign-playlist")]
-        [AllowAnonymous]
+        [Authorize(Roles = UserRoles.Admin)]
         public async Task<IActionResult> AssignPlaylist(string id, [FromBody] dynamic payload)
         {
             string playlistId = payload.GetProperty("playlistId").GetString();
