@@ -365,6 +365,37 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             return await connection.QueryAsync<DevicePlaylistDto>(sql, new { devId, devUuid });
         }
 
+        // Finds another device at the SAME branch with the SAME device name that already has
+        // active playlist assignments. Used so a freshly installed / re-registered screen (which
+        // comes up with a brand-new device identity and no assignments of its own) can inherit the
+        // content its peers already play, instead of sitting idle waiting for a manual selection.
+        public async Task<string?> GetSiblingDeviceIdWithAssignmentsAsync(string deviceId)
+        {
+            using var connection = new SqlConnection(_connectionString);
+
+            long? devId = null;
+            string? devUuid = null;
+            if (long.TryParse(deviceId, out var parsed)) devId = parsed;
+            else devUuid = deviceId;
+
+            string sql = @"
+                DECLARE @self BIGINT = (SELECT TOP 1 device_id FROM sn_devices WHERE device_id = @devId OR device_uuid = @devUuid);
+                DECLARE @branch NVARCHAR(50), @name NVARCHAR(255);
+                SELECT @branch = branch_code, @name = device_name FROM sn_devices WHERE device_id = @self;
+
+                SELECT TOP 1 sib.device_id
+                FROM sn_devices sib
+                JOIN sn_device_playlists dp ON dp.device_id = sib.device_id AND dp.is_active = 1
+                WHERE sib.is_deleted = 0
+                  AND sib.device_id <> @self
+                  AND sib.branch_code = @branch
+                  AND sib.device_name = @name
+                ORDER BY dp.id DESC";
+
+            var sibling = await connection.ExecuteScalarAsync<long?>(sql, new { devId, devUuid });
+            return sibling?.ToString();
+        }
+
         public async Task UpdateAssignedPlaylistsAsync(string deviceId, List<DevicePlaylistDto> playlists)
         {
             using var connection = new SqlConnection(_connectionString);
@@ -381,8 +412,10 @@ namespace SignageUnicorn.Api.Repositories.Implementations
                     "SELECT top 1 device_id FROM sn_devices WHERE device_id = @parsedId OR device_uuid = @parsedUuid", 
                     new { parsedId, parsedUuid }, transaction);
 
-                // Clear existing active mappings for device
-                await connection.ExecuteAsync("UPDATE sn_device_playlists SET is_active = 0 WHERE device_id = @devId", new { devId }, transaction);
+                // Clear existing mappings for device. We DELETE rather than just flipping is_active=0
+                // so the table does not accumulate dead rows on every reassignment (it previously grew
+                // unbounded — ~94% of rows were inactive leftovers).
+                await connection.ExecuteAsync("DELETE FROM sn_device_playlists WHERE device_id = @devId", new { devId }, transaction);
 
                 // Insert new mappings
                 if (playlists != null && playlists.Count > 0)
@@ -395,8 +428,8 @@ namespace SignageUnicorn.Api.Repositories.Implementations
 
                         IF @actual_playlist_id IS NOT NULL
                         BEGIN
-                            INSERT INTO sn_device_playlists (device_id, playlist_id, start_date, end_date) 
-                            VALUES (@devId, @actual_playlist_id, @startDate, @endDate)
+                            INSERT INTO sn_device_playlists (device_id, playlist_id, start_date, end_date, is_active)
+                            VALUES (@devId, @actual_playlist_id, @startDate, @endDate, 1)
                         END";
                     
                     foreach (var p in playlists)

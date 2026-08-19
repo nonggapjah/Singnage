@@ -29,16 +29,25 @@ namespace SignageUnicorn.Api.Services.Background
         {
             _logger.LogInformation("Maintenance Worker started.");
 
+            var lastDailyUtc = DateTime.MinValue;
+
             while (!stoppingToken.IsCancellationRequested)
             {
                 try
                 {
-                    await PerformMaintenanceAsync();
-                    
-                    // Wait for 24 hours before next run
-                    // If you want to run at specific time (e.g. 2 AM), logic needs to be adjustments,
-                    // but interval-based 24h is simple and robust for local apps.
-                    await Task.Delay(TimeSpan.FromHours(24), stoppingToken);
+                    // Lightweight, runs every cycle: retire old device records that have been
+                    // superseded by an upgraded screen, so the old duplicate disappears on its own.
+                    await RetireSupersededDevicesAsync();
+
+                    // Heavy daily cleanup (logs, orphan files, DB shrink) at most once per 24h.
+                    if (DateTime.UtcNow - lastDailyUtc >= TimeSpan.FromHours(24))
+                    {
+                        await PerformMaintenanceAsync();
+                        lastDailyUtc = DateTime.UtcNow;
+                    }
+
+                    // Re-check for superseded devices every 30 minutes.
+                    await Task.Delay(TimeSpan.FromMinutes(30), stoppingToken);
                 }
                 catch (OperationCanceledException)
                 {
@@ -48,10 +57,45 @@ namespace SignageUnicorn.Api.Services.Background
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Error occurred during maintenance task.");
-                    
-                    // Retry in 1 hour if failed
-                    await Task.Delay(TimeSpan.FromHours(1), stoppingToken);
+
+                    // Retry in 30 minutes if failed
+                    await Task.Delay(TimeSpan.FromMinutes(30), stoppingToken);
                 }
+            }
+        }
+
+        // Automatically retires the old device record left behind when a screen is upgraded and
+        // re-registers under a new hardware identity. A "ghost" is an old-identity device
+        // (device_uuid like 'WIN-<computername>') that has gone offline and is superseded by a LIVE
+        // new-identity device of the same branch + device name. Only already-upgraded branches are
+        // touched; the 1-hour offline grace ignores brief reboots/network blips. Soft-delete is
+        // self-healing: a real screen merely powered off re-registers (and auto-plays via sibling
+        // schedule inheritance) on its next boot.
+        private async Task RetireSupersededDevicesAsync()
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var deviceRepo = scope.ServiceProvider.GetRequiredService<IDeviceRepository>();
+            try
+            {
+                var sql = @"
+                    UPDATE sn_devices
+                    SET is_deleted = 1, status = 'OFFLINE', deleted_at = SYSUTCDATETIME()
+                    WHERE is_deleted = 0
+                      AND device_uuid LIKE 'WIN-%'
+                      AND (last_check_in IS NULL OR last_check_in < DATEADD(HOUR, -1, SYSUTCDATETIME()))
+                      AND EXISTS (
+                            SELECT 1 FROM sn_devices n
+                            WHERE n.is_deleted = 0
+                              AND n.device_uuid NOT LIKE 'WIN-%'
+                              AND n.branch_code = sn_devices.branch_code
+                              AND n.device_name = sn_devices.device_name
+                              AND n.last_check_in > DATEADD(MINUTE, -5, SYSUTCDATETIME()));";
+                await deviceRepo.ExecuteSqlAsync(sql);
+                _logger.LogInformation("[Maintenance] Superseded ghost devices retired (if any).");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Maintenance] Failed to retire superseded devices.");
             }
         }
 
@@ -128,11 +172,12 @@ namespace SignageUnicorn.Api.Services.Background
                     _logger.LogError(ex, "[Maintenance] Failed to clear stale commands.");
                 }
 
-                // 4. Clear Stale Schedules (sn_device_playlists) for deleted devices
+                // 4. Clear Stale Schedules (sn_device_playlists): rows for deleted devices, plus any
+                //    leftover inactive rows (e.g. from playlist deletion) so the table stays lean.
                 try
                 {
-                    await deviceRepo.ExecuteSqlAsync("SET QUOTED_IDENTIFIER ON; SET ANSI_NULLS ON; DELETE FROM sn_device_playlists WHERE device_id IN (SELECT device_id FROM sn_devices WHERE is_deleted = 1);");
-                    _logger.LogInformation("[Maintenance] Stale schedules for deleted devices cleared.");
+                    await deviceRepo.ExecuteSqlAsync("SET QUOTED_IDENTIFIER ON; SET ANSI_NULLS ON; DELETE FROM sn_device_playlists WHERE device_id IN (SELECT device_id FROM sn_devices WHERE is_deleted = 1) OR is_active = 0;");
+                    _logger.LogInformation("[Maintenance] Stale/inactive schedule rows cleared.");
                 }
                 catch (Exception ex)
                 {
@@ -200,38 +245,9 @@ namespace SignageUnicorn.Api.Services.Background
                     _logger.LogError(ex, "[Maintenance] Failed to scan and clean orphan files.");
                 }
 
-                // 6. Truncate / Shrink Database Files
-                try
-                {
-                    _logger.LogInformation("[Maintenance] Shrinking database and log file...");
-                    var connectionString = config.GetConnectionString("DefaultConnection") 
-                                           ?? config["DB_CONNECTION_STRING"];
-
-                    if (!string.IsNullOrEmpty(connectionString))
-                    {
-                        using (var connection = new SqlConnection(connectionString))
-                        {
-                            await connection.OpenAsync();
-                            
-                            // Checkpoint & shrink file
-                            var shrinkSql = @"
-                                ALTER DATABASE SignageUnicornDB SET RECOVERY SIMPLE;
-                                CHECKPOINT;
-                                DBCC SHRINKFILE (SignageUnicornDB_log, 10);
-                                DBCC SHRINKDATABASE (SignageUnicornDB);";
-                            
-                            using (var cmd = new SqlCommand(shrinkSql, connection))
-                            {
-                                await cmd.ExecuteNonQueryAsync();
-                            }
-                            _logger.LogInformation("[Maintenance] Database shrink completed successfully.");
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "[Maintenance] Failed to shrink database files.");
-                }
+                // NOTE: Periodic DBCC SHRINKDATABASE was intentionally removed. Repeatedly shrinking a
+                // live database severely fragments indexes and hurts performance; the file just regrows.
+                // Keeping RECOVERY SIMPLE is handled once at the DB level, not on every maintenance run.
 
                 _logger.LogInformation("[Maintenance] Cleanup Completed Successfully.");
             }

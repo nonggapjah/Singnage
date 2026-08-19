@@ -309,3 +309,28 @@ select option {
   border: 1px solid var(--border) !important;
   box-shadow: 0 10px 25px rgba(0,0,0,0.5) !important;
 }
+
+/* ── datetime-local: force 24-hour display & hide native placeholder overlay ── */
+input[type="datetime-local"] {
+  /* dark color-scheme forces Chromium/Edge to use 24h format */
+  color-scheme: dark;
+}
+
+/* When the field is empty (.dt-empty set via JS), hide the native
+   "mm/dd/yyyy --:-- --" ghost text so our custom label shows cleanly */
+input[type="datetime-local"].dt-empty::-webkit-datetime-edit {
+  opacity: 0;
+}
+input[type="datetime-local"].dt-empty::-webkit-datetime-edit-fields-wrapper {
+  opacity: 0;
+}
+
+/* Always display in 24h regardless of OS locale where possible */
+input[type="datetime-local"]::-webkit-datetime-edit-hour-field,
+input[type="datetime-local"]::-webkit-datetime-edit-ampm-field {
+  display: revert;
+}
+/* Hide AM/PM field entirely to enforce 24h */
+input[type="datetime-local"]::-webkit-datetime-edit-ampm-field {
+  display: none !important;
+}

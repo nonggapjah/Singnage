@@ -115,11 +115,11 @@ export const DevicePlaylistModal: React.FC<DevicePlaylistModalProps> = ({ isOpen
                             <table className="w-full text-left border-collapse">
                                 <thead>
                                     <tr className="border-b border-white/10 text-xs text-muted-foreground uppercase tracking-wider bg-white/5">
-                                        <th className="p-3 font-bold w-[350px]">Playlist</th>
-                                        <th className="p-3 font-bold w-[360px]">Start Date (Optional)</th>
-                                        <th className="p-3 font-bold w-[360px]">End Date (Optional)</th>
-                                        <th className="p-3 font-bold text-center w-[120px]">Status</th>
-                                        <th className="p-3 font-bold w-16"></th>
+                                        <th className="p-3 font-bold">Playlist</th>
+                                        <th className="p-3 font-bold w-[280px]">Start Date (Optional)</th>
+                                        <th className="p-3 font-bold w-[280px]">End Date (Optional)</th>
+                                        <th className="p-3 font-bold text-center w-[110px]">Status</th>
+                                        <th className="p-3 font-bold w-12"></th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -141,10 +141,11 @@ export const DevicePlaylistModal: React.FC<DevicePlaylistModalProps> = ({ isOpen
 
                                         return (
                                             <tr key={idx} className="border-b border-white/5 hover:bg-white/5 transition-colors">
-                                                <td className="p-2 w-[350px]">
+                                                <td className="p-2">
                                                     <select
                                                         value={assignment.playlistId}
                                                         onChange={e => updateRow(idx, 'playlistId', e.target.value)}
+                                                        title={availablePlaylists.find(p => p.playlistId === assignment.playlistId)?.playlistName || ''}
                                                         className="w-full bg-black/40 border border-white/10 rounded-xl px-3 h-[46px] text-sm font-mono text-white outline-none focus:border-accent-cyan focus:shadow-[0_0_15px_rgba(34,211,238,0.15)] focus:bg-black/60 cursor-pointer transition-all"
                                                     >
                                                         {availablePlaylists.filter(p => p.active === 'Y').map(p => (
@@ -152,26 +153,26 @@ export const DevicePlaylistModal: React.FC<DevicePlaylistModalProps> = ({ isOpen
                                                         ))}
                                                     </select>
                                                 </td>
-                                                <td className="p-2 w-[360px]">
+                                                <td className="p-2 w-[280px]">
                                                     <DateTimePicker24h
                                                         value={assignment.startDate || ''}
                                                         onChange={val => updateRow(idx, 'startDate', val)}
                                                         isLarge={true}
                                                     />
                                                 </td>
-                                                <td className="p-2 w-[360px]">
+                                                <td className="p-2 w-[280px]">
                                                     <DateTimePicker24h
                                                         value={assignment.endDate || ''}
                                                         onChange={val => updateRow(idx, 'endDate', val)}
                                                         isLarge={true}
                                                     />
                                                 </td>
-                                                <td className="p-2 text-center w-[120px]">
+                                                <td className="p-2 text-center w-[110px]">
                                                     <span className={`text-[10px] font-bold px-2 py-1 rounded border ${statusColor} uppercase tracking-widest`}>
                                                         {statusStr}
                                                     </span>
                                                 </td>
-                                                <td className="p-2 text-center w-16">
+                                                <td className="p-2 text-center w-12">
                                                     <button onClick={() => removeRow(idx)} className="text-red-500 hover:bg-red-500/10 p-2 rounded transition-colors text-xl">✕</button>
                                                 </td>
                                             </tr>

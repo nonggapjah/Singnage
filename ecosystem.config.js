@@ -10,7 +10,7 @@ module.exports = {
             restart_delay: 3000,
             exp_backoff_restart_delay: 100,
             env: {
-                ASPNETCORE_ENVIRONMENT: "Development"
+                ASPNETCORE_ENVIRONMENT: "Production"
             }
         },
         {
