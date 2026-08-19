@@ -6,8 +6,10 @@ import { playlistApi } from '@/features/playlists/api/playlist-api';
 import { PlaylistTable } from '@/features/playlists/components/PlaylistTable';
 import { BatchAssignModal } from '@/features/playlists/components/BatchAssignModal';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 
 export default function PlaylistsPage() {
+    const router = useRouter();
     const [playlists, setPlaylists] = useState<Playlist[]>([]);
     const [loading, setLoading] = useState(true);
 
@@ -18,6 +20,9 @@ export default function PlaylistsPage() {
 
     // Modal State
     const [selectedPlaylist, setSelectedPlaylist] = useState<Playlist | null>(null);
+
+    // Duplicate State
+    const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
 
     // Initial Load & Search/Filter Debounce
     // This single effect handles both mount (initial load) and subsequent updates
@@ -46,7 +51,8 @@ export default function PlaylistsPage() {
         if (confirm('Are you sure you want to delete this playlist?')) {
             const res = await playlistApi.delete(id);
             if (res.success) {
-                loadPlaylists();
+                await loadPlaylists();
+                router.refresh(); // keep cached views elsewhere (counts, dashboard) in sync
             } else {
                 alert(res.message);
             }
@@ -56,6 +62,45 @@ export default function PlaylistsPage() {
     const handleDeploySuccess = () => {
         alert('Playlist deployment initiated for selected devices.');
         setSelectedPlaylist(null);
+    };
+
+    const handleDuplicate = async (playlist: Playlist) => {
+        if (duplicatingId) return; // guard against double-clicks
+        setDuplicatingId(playlist.playlistId);
+        try {
+            // Load the full source playlist (incl. its items) then create a fresh copy.
+            const res = await playlistApi.getById(playlist.playlistId);
+            if (!res.success || !res.data) {
+                alert(res.message || 'Could not load the playlist to duplicate.');
+                return;
+            }
+            const src = res.data;
+            const copy: Partial<Playlist> = {
+                playlistName: `${src.playlistName} (Copy)`,
+                description: src.description,
+                active: 'N', // start as an inactive draft so it is reviewed before going live
+                items: (src.items || []).map((it, index) => ({
+                    playlistItemId: '',
+                    playlistId: '',
+                    mediaId: it.mediaId,
+                    positionOrder: index + 1,
+                    durationOverride: it.durationOverride ?? null,
+                    active: 'Y',
+                })),
+            };
+            const createRes = await playlistApi.create(copy);
+            if (createRes.success) {
+                await loadPlaylists();
+                router.refresh();
+            } else {
+                alert(createRes.message || 'Could not duplicate the playlist.');
+            }
+        } catch (error) {
+            console.error('Failed to duplicate playlist', error);
+            alert('Failed to duplicate the playlist.');
+        } finally {
+            setDuplicatingId(null);
+        }
     };
 
     const filteredPlaylists = React.useMemo(() => {
@@ -136,6 +181,8 @@ export default function PlaylistsPage() {
                     playlists={filteredPlaylists}
                     onDelete={handleDelete}
                     onDeploy={(p) => setSelectedPlaylist(p)}
+                    onDuplicate={handleDuplicate}
+                    duplicatingId={duplicatingId}
                 />
             )}
 

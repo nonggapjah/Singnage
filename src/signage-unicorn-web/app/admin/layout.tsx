@@ -43,6 +43,16 @@ export default function AdminLayout({
     const [hasUnread, setHasUnread] = React.useState(false);
     const [lastLogId, setLastLogId] = React.useState<string | null>(null);
 
+    // Live clock — kept null on the server and the first client render so SSR and
+    // client markup match (avoids a hydration mismatch from locale/timezone-dependent
+    // Date formatting). Populated after mount, then ticked every 30s.
+    const [now, setNow] = React.useState<Date | null>(null);
+    React.useEffect(() => {
+        setNow(new Date());
+        const clock = setInterval(() => setNow(new Date()), 30_000);
+        return () => clearInterval(clock);
+    }, []);
+
     const allowStatsLoad = React.useRef(true);
 
     const menuItems = [
@@ -266,11 +276,11 @@ export default function AdminLayout({
                     <div className="flex items-center gap-4 sm:gap-8">
                         <div className="flex items-center gap-2 sm:gap-3">
                             <div className="text-right hidden md:block">
-                                <p className="text-xs font-black text-foreground">
-                                    {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                <p className="text-xs font-black text-foreground" suppressHydrationWarning>
+                                    {now ? now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}
                                 </p>
-                                <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-widest mt-0.5">
-                                    {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-widest mt-0.5" suppressHydrationWarning>
+                                    {now ? now.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '--'}
                                 </p>
                             </div>
 

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'unicorn-player-v1';
+const CACHE_NAME = 'unicorn-player-v2';
 const ASSETS_TO_CACHE = [
     '/',
     '/player',
@@ -30,10 +30,29 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
     if (event.request.method !== 'GET') return;
 
+    const url = new URL(event.request.url);
+
+    // API requests must NEVER be served stale: a cache-first strategy here makes the admin UI
+    // show old data after edit/duplicate/delete until a manual refresh. Use network-first so live
+    // data is always fresh when online, and only fall back to cache when the network is unavailable.
+    if (url.pathname.startsWith('/api/')) {
+        event.respondWith(
+            fetch(event.request)
+                .then((networkResponse) => {
+                    if (networkResponse && networkResponse.status === 200) {
+                        const copy = networkResponse.clone();
+                        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+                    }
+                    return networkResponse;
+                })
+                .catch(() => caches.match(event.request))
+        );
+        return;
+    }
+
+    // Static assets / app shell: stale-while-revalidate for fast loads and offline support.
     event.respondWith(
         caches.match(event.request).then((cachedResponse) => {
-            // Strategy: Stale-While-Revalidate
-            // If found in cache, returns it immediately, but fetches update in background
             const fetchPromise = fetch(event.request).then((networkResponse) => {
                 if (networkResponse && networkResponse.status === 200) {
                     const cacheCopy = networkResponse.clone();
@@ -42,9 +61,7 @@ self.addEventListener('fetch', (event) => {
                     });
                 }
                 return networkResponse;
-            }).catch(() => {
-                // Silent fail on fetch error (offline)
-            });
+            }).catch(() => undefined);
 
             return cachedResponse || fetchPromise;
         })

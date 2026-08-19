@@ -41,6 +41,7 @@ export default function PlaylistDetailPage() {
 
         if (res.success) {
             router.push('/admin/playlists');
+            router.refresh(); // invalidate the App Router cache so the list reflects the change immediately
         } else {
             alert(res.message || 'Operation failed with unknown error');
         }

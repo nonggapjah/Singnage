@@ -75,6 +75,15 @@ export default function DevicesPage() {
         showModal({ title, message, type, onConfirm });
     };
 
+    const copyDeviceId = async (deviceId: string) => {
+        try {
+            await navigator.clipboard.writeText(deviceId);
+            showNotify('COPIED', `Device ID copied to clipboard.`, 'SUCCESS');
+        } catch {
+            showNotify('COPY FAILED', 'Clipboard access was blocked by the browser.', 'ERROR');
+        }
+    };
+
     async function fetchMediaNames() {
         try {
             const { mediaApi } = await import('@/features/media/api/media-api');
@@ -615,6 +624,17 @@ export default function DevicesPage() {
                                                     </div>
 
                                                     <div className="space-y-3 mb-6 bg-white/[0.02] rounded-xl p-3 border border-white/5">
+                                                        <div className="flex justify-between items-center gap-2 text-xs">
+                                                            <span className="text-muted-foreground uppercase tracking-wider font-bold text-[10px] shrink-0">Device ID</span>
+                                                            <button
+                                                                onClick={() => copyDeviceId(device.deviceId)}
+                                                                title={`${device.deviceId} (click to copy)`}
+                                                                className="text-foreground font-mono text-[10px] truncate max-w-[150px] hover:text-accent-cyan transition-colors flex items-center gap-1 outline-none"
+                                                            >
+                                                                <span className="truncate">{device.deviceId}</span>
+                                                                <span className="opacity-40 shrink-0">⧉</span>
+                                                            </button>
+                                                        </div>
                                                         <div className="flex justify-between items-center text-xs">
                                                             <span className="text-muted-foreground uppercase tracking-wider font-bold text-[10px]">Check-In</span>
                                                             <span className="text-foreground font-mono text-[10px]">
