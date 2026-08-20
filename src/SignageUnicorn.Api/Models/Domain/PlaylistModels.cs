@@ -17,6 +17,22 @@ namespace SignageUnicorn.Api.Models.Domain
             set { if (!string.IsNullOrEmpty(value)) PlaylistId = value; } 
         }
 
+        // BUG-06: the device endpoint reports current_playlist_id as the NUMERIC key
+        // (sp_device_std: CAST(d.current_playlist_id AS NVARCHAR(36))) while PlaylistId above is
+        // deliberately the uuid. The admin console compared the two with === and never matched,
+        // so every device card fell back to "IDLE" while the screen played perfectly well.
+        // This carries the numeric key alongside, additively -- nothing that already reads
+        // playlistId changes meaning.
+        [JsonPropertyName("playlistRefId")]
+        public string PlaylistRefId { get; set; } = string.Empty;
+
+        // Naming this exactly after the column also makes the mapping deterministic. Dapper
+        // prefers an exact column match, so playlist_id now lands here instead of racing
+        // playlist_uuid to set PlaylistId. The end state is unchanged -- PlaylistId is the uuid --
+        // but it no longer depends on the order the columns happen to come back in.
+        [JsonIgnore]
+        public long playlist_id { set { PlaylistRefId = value.ToString(); } }
+
         [JsonPropertyName("playlistName")]
         public string PlaylistName { get; set; } = string.Empty;
         

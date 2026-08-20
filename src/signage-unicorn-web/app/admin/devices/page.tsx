@@ -565,7 +565,14 @@ export default function DevicesPage() {
                                         {branchDevices.map((device, index) => {
                                             const statusUpper = (device.status || '').toUpperCase();
                                             const isOnline = ['ONLINE', 'PLAYING', 'IDLE'].includes(statusUpper);
-                                            const currentPlaylist = playlists.find(p => p.playlistId === device.currentPlaylistId);
+                                            // BUG-06: device records identify their current playlist by NUMERIC id while
+                                            // Playlist.playlistId is the uuid, so the old strict compare never matched and
+                                            // every card rendered "IDLE". Match the numeric key first, keeping the uuid
+                                            // compare so anything that does send a uuid still resolves.
+                                            const currentPlaylist = playlists.find(p =>
+                                                (p.playlistRefId && p.playlistRefId === device.currentPlaylistId) ||
+                                                p.playlistId === device.currentPlaylistId
+                                            );
                                             const mediaName = device.currentMediaId ? mediaMap[device.currentMediaId] || device.currentMediaId : 'Buffering...';
 
                                             const displayId = device.deviceUuid ? device.deviceUuid : device.deviceId;
@@ -811,7 +818,14 @@ export default function DevicesPage() {
                                                     {branchDevices.map((device, index) => {
                                                         const statusUpper = (device.status || '').toUpperCase();
                                                         const isOnline = ['ONLINE', 'PLAYING', 'IDLE'].includes(statusUpper);
-                                                        const currentPlaylist = playlists.find(p => p.playlistId === device.currentPlaylistId);
+                                                        // BUG-06: device records identify their current playlist by NUMERIC id while
+                                                        // Playlist.playlistId is the uuid, so the old strict compare never matched and
+                                                        // every card rendered "IDLE". Match the numeric key first, keeping the uuid
+                                                        // compare so anything that does send a uuid still resolves.
+                                                        const currentPlaylist = playlists.find(p =>
+                                                            (p.playlistRefId && p.playlistRefId === device.currentPlaylistId) ||
+                                                            p.playlistId === device.currentPlaylistId
+                                                        );
                                                         const displayId = device.deviceUuid ? device.deviceUuid : device.deviceId;
                                                         const isSelected = selectedIds.includes(device.deviceId);
 
