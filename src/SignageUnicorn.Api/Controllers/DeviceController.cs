@@ -190,51 +190,78 @@ namespace SignageUnicorn.Api.Controllers
         [Authorize(Roles = UserRoles.Admin)]
         public async Task<IActionResult> BatchAddPlaylistToSchedule([FromBody] BatchAddScheduleRequest request)
         {
-            foreach (var deviceId in request.DeviceIds)
+            if (request.DeviceIds == null || request.DeviceIds.Count == 0)
             {
-                var current = await _deviceService.GetAssignedPlaylistsAsync(deviceId);
-                var updated = current.ToList();
-
-                // Remove existing mapping of the same playlist just in case
-                updated.RemoveAll(x => x.PlaylistId == request.PlaylistId);
-
-                updated.Add(new DevicePlaylistDto
-                {
-                    DeviceId = deviceId,
-                    PlaylistId = request.PlaylistId,
-                    StartDate = request.StartDate,
-                    EndDate = request.EndDate,
-                    IsActive = true
-                });
-
-                await _deviceService.UpdateAssignedPlaylistsAsync(deviceId, updated);
-                await _deviceService.SendCommandAsync(deviceId, "SYNC_SCHEDULE");
+                return BadRequest(ApiResponse<object>.ErrorResponse(400, "No device IDs provided."));
             }
 
-            return Ok(ApiResponse<object>.SuccessResponse(null, $"Added playlist to {request.DeviceIds.Count} devices."));
+            try
+            {
+                var options = new ParallelOptions { MaxDegreeOfParallelism = 10 };
+                await Parallel.ForEachAsync(request.DeviceIds, options, async (deviceId, ct) =>
+                {
+                    var current = await _deviceService.GetAssignedPlaylistsAsync(deviceId);
+                    var updated = current.ToList();
+
+                    // Remove existing mapping of the same playlist just in case
+                    updated.RemoveAll(x => x.PlaylistId == request.PlaylistId);
+
+                    updated.Add(new DevicePlaylistDto
+                    {
+                        DeviceId = deviceId,
+                        PlaylistId = request.PlaylistId,
+                        StartDate = request.StartDate,
+                        EndDate = request.EndDate,
+                        IsActive = true
+                    });
+
+                    await _deviceService.UpdateAssignedPlaylistsAsync(deviceId, updated);
+                    await _deviceService.SendCommandAsync(deviceId, "SYNC_SCHEDULE");
+                });
+
+                return Ok(ApiResponse<object>.SuccessResponse(null, $"Added playlist to {request.DeviceIds.Count} devices."));
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, ApiResponse<object>.ErrorResponse(500, $"Failed to batch assign schedule: {ex.Message}"));
+            }
         }
 
         [HttpPost("batch-clear-schedule")]
         [Authorize(Roles = UserRoles.Admin)]
         public async Task<IActionResult> BatchClearSchedule([FromBody] BatchCommandRequest request)
         {
-            foreach (var deviceId in request.DeviceIds)
+            if (request.DeviceIds == null || request.DeviceIds.Count == 0)
             {
-                if (request.PlaylistIds == null || request.PlaylistIds.Count == 0)
-                {
-                    // Send empty list to clear all schedules
-                    await _deviceService.UpdateAssignedPlaylistsAsync(deviceId, new List<DevicePlaylistDto>());
-                }
-                else
-                {
-                    // Remove only selected playlists
-                    var current = await _deviceService.GetAssignedPlaylistsAsync(deviceId);
-                    var updated = current.Where(x => !request.PlaylistIds.Contains(x.PlaylistId)).ToList();
-                    await _deviceService.UpdateAssignedPlaylistsAsync(deviceId, updated);
-                }
-                await _deviceService.SendCommandAsync(deviceId, "SYNC_SCHEDULE");
+                return BadRequest(ApiResponse<object>.ErrorResponse(400, "No device IDs provided."));
             }
-            return Ok(ApiResponse<object>.SuccessResponse(null, $"Updated schedule for {request.DeviceIds.Count} devices."));
+
+            try
+            {
+                var options = new ParallelOptions { MaxDegreeOfParallelism = 10 };
+                await Parallel.ForEachAsync(request.DeviceIds, options, async (deviceId, ct) =>
+                {
+                    if (request.PlaylistIds == null || request.PlaylistIds.Count == 0)
+                    {
+                        // Send empty list to clear all schedules
+                        await _deviceService.UpdateAssignedPlaylistsAsync(deviceId, new List<DevicePlaylistDto>());
+                    }
+                    else
+                    {
+                        // Remove only selected playlists
+                        var current = await _deviceService.GetAssignedPlaylistsAsync(deviceId);
+                        var updated = current.Where(x => !request.PlaylistIds.Contains(x.PlaylistId)).ToList();
+                        await _deviceService.UpdateAssignedPlaylistsAsync(deviceId, updated);
+                    }
+                    await _deviceService.SendCommandAsync(deviceId, "SYNC_SCHEDULE");
+                });
+
+                return Ok(ApiResponse<object>.SuccessResponse(null, $"Updated schedule for {request.DeviceIds.Count} devices."));
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, ApiResponse<object>.ErrorResponse(500, $"Failed to batch clear schedule: {ex.Message}"));
+            }
         }
 
         [HttpGet("fix-devices-db")]

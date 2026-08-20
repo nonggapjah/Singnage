@@ -125,8 +125,8 @@ async function migrateData() {
                 console.log(`MIGRATION: Scrutinizing potential old config in [${oldUserData}]...`);
                 try {
                     const oldData = await fs.readJson(oldConfig);
-                    // Check if it's actually valid data
-                    if (oldData && oldData.deviceId && parseInt(oldData.deviceId) > 0 && oldData.serverIp) {
+                    const hasValidId = oldData.deviceId && (String(oldData.deviceId).trim().length > 0);
+                    if (oldData && hasValidId && oldData.serverIp) {
                         console.log(`MIGRATION: Valid identity found in [${oldUserData}]. Restoring...`);
                         await fs.ensureDir(path.dirname(CONFIG_PATH));
                         await fs.copy(oldConfig, CONFIG_PATH);
