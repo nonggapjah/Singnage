@@ -39,6 +39,11 @@ namespace SignageUnicorn.Api.Services.Background
                     // superseded by an upgraded screen, so the old duplicate disappears on its own.
                     await RetireSupersededDevicesAsync();
 
+                    // BUG-01 defect C: PENDING commands aimed at devices that never come back
+                    // had no terminal state, so the queue grew without bound (303 rows, oldest
+                    // from 19-06-2026). Runs every cycle alongside the ghost retirement.
+                    await ExpireUndeliverableCommandsAsync();
+
                     // Heavy daily cleanup (logs, orphan files, DB shrink) at most once per 24h.
                     if (DateTime.UtcNow - lastDailyUtc >= TimeSpan.FromHours(24))
                     {
@@ -96,6 +101,39 @@ namespace SignageUnicorn.Api.Services.Background
             catch (Exception ex)
             {
                 _logger.LogError(ex, "[Maintenance] Failed to retire superseded devices.");
+            }
+        }
+
+        // Gives PENDING commands a terminal state when they can no longer be delivered.
+        // A command is only reachable through the device's own heartbeat, so once a device is
+        // soft-deleted or has been dark for a week the row will never be picked up and simply
+        // accumulates -- every playlist reassign queues another SYNC_SCHEDULE behind it.
+        // The 7-day threshold is deliberately far beyond the 1-hour ghost-retirement grace, so a
+        // screen that is merely powered off over a long weekend keeps its queued work.
+        private async Task ExpireUndeliverableCommandsAsync()
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var deviceRepo = scope.ServiceProvider.GetRequiredService<IDeviceRepository>();
+            try
+            {
+                var sql = @"
+                    UPDATE c
+                    SET c.status = 'EXPIRED',
+                        c.updated_at = SYSUTCDATETIME(),
+                        c.fail_reason = 'Undeliverable: target device deleted or dark for more than 7 days'
+                    FROM sn_device_commands c
+                    JOIN sn_devices d ON d.device_id = c.device_id
+                    WHERE c.status = 'PENDING'
+                      AND c.created_at < DATEADD(DAY, -7, SYSUTCDATETIME())
+                      AND (d.is_deleted = 1
+                           OR d.last_check_in IS NULL
+                           OR d.last_check_in < DATEADD(DAY, -7, SYSUTCDATETIME()));";
+                await deviceRepo.ExecuteSqlAsync(sql);
+                _logger.LogInformation("[Maintenance] Undeliverable PENDING commands expired (if any).");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Maintenance] Failed to expire undeliverable commands.");
             }
         }
 

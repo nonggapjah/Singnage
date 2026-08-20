@@ -378,20 +378,45 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             if (long.TryParse(deviceId, out var parsed)) devId = parsed;
             else devUuid = deviceId;
 
-            string sql = @"
-                DECLARE @self BIGINT = (SELECT TOP 1 device_id FROM sn_devices WHERE device_id = @devId OR device_uuid = @devUuid);
+            // BUG-02: sibling matching used exact equality on branch_code + device_name, so a
+            // single stray character silently removed a screen from its peer group and it came
+            // up idle with no error anywhere -- a Silent Failure. Production carried a leading
+            // space ("[space]homepro cherngtalay All") and a double space ("KAMALA  ALL").
+            // Both halves are needed: the data is corrected separately, and matching is
+            // hardened here so the next typo does not repeat the outage.
+            //
+            // NormaliseName collapses runs of spaces to one and trims the ends; the explicit
+            // CI_AS collation makes case differences ("Kamala ALL") match regardless of the
+            // column's own collation. Non-sargable, but sn_devices is a few hundred rows.
+            //
+            // @self also had the same non-deterministic TOP 1 as sp_device_std (see BUG-01
+            // defect B): with an OR over id and uuid it could resolve to the wrong row and
+            // then inherit from the wrong branch entirely. Same deterministic ordering applied.
+            const string NormaliseName =
+                "LTRIM(RTRIM(REPLACE(REPLACE(REPLACE({0}, ' ', CHAR(1)+CHAR(2)), CHAR(2)+CHAR(1), ''), CHAR(1)+CHAR(2), ' ')))";
+
+            string sql = $@"
+                DECLARE @self BIGINT = (
+                    SELECT TOP 1 device_id FROM sn_devices
+                    WHERE is_deleted = 0 AND (device_id = @devId OR device_uuid = @devUuid)
+                    ORDER BY CASE WHEN device_uuid = @devUuid THEN 0 ELSE 1 END,
+                             CASE WHEN device_id  = @devId  THEN 0 ELSE 1 END,
+                             device_id DESC);
+
                 DECLARE @branch NVARCHAR(50), @name NVARCHAR(255);
-                SELECT @branch = branch_code, @name = device_name FROM sn_devices WHERE device_id = @self;
+                SELECT @branch = LTRIM(RTRIM(branch_code)),
+                       @name   = {string.Format(NormaliseName, "device_name")}
+                FROM sn_devices WHERE device_id = @self;
 
                 SELECT TOP 1 sib.device_id
                 FROM sn_devices sib
                 JOIN sn_device_playlists dp ON dp.device_id = sib.device_id AND dp.is_active = 1
                 WHERE sib.is_deleted = 0
                   AND sib.device_id <> @self
-                  AND sib.branch_code = @branch
-                  AND sib.device_name = @name
+                  AND LTRIM(RTRIM(sib.branch_code)) = @branch
+                  AND {string.Format(NormaliseName, "sib.device_name")}
+                      COLLATE SQL_Latin1_General_CP1_CI_AS = @name COLLATE SQL_Latin1_General_CP1_CI_AS
                 ORDER BY dp.id DESC";
-
             var sibling = await connection.ExecuteScalarAsync<long?>(sql, new { devId, devUuid });
             return sibling?.ToString();
         }

@@ -172,18 +172,65 @@ BEGIN
             current_position_sec = ISNULL(@p_position_sec, current_position_sec),
             cache_progress = ISNULL(@p_cache_progress, cache_progress),
             last_playback_at = CASE WHEN @p_position_sec IS NOT NULL THEN SYSUTCDATETIME() ELSE last_playback_at END
-        WHERE device_id = @p_device_id 
-           OR (@p_device_id IS NULL AND device_uuid = @p_device_uuid)
-           AND is_deleted = 0;
+        -- BUG-01 defect A: this predicate previously read
+        --     WHERE device_id = @p_device_id
+        --        OR (@p_device_id IS NULL AND device_uuid = @p_device_uuid)
+        --        AND is_deleted = 0;
+        -- AND binds tighter than OR, so is_deleted = 0 only guarded the second branch. A
+        -- heartbeat carrying a soft-deleted row's id revived that row -- 8 deleted rows were
+        -- found checking in within 24h, undoing MaintenanceWorker's retirements.
+        WHERE is_deleted = 0
+          AND (   device_id = @p_device_id
+               OR (@p_device_id IS NULL AND device_uuid = @p_device_uuid));
 
         IF @@ROWCOUNT = 0 AND @p_device_uuid IS NOT NULL
         BEGIN
-             INSERT INTO sn_devices
-             (device_uuid, device_name, status, branch_code, created_at, is_deleted, last_check_in, ip_address, app_version)
-             VALUES
-             (@p_device_uuid, ISNULL(@p_device_name, 'Recovered Device'), 'ONLINE', ISNULL(@p_branch_code, '1000'), SYSUTCDATETIME(), 0, SYSUTCDATETIME(), @p_ip_address, @p_app_version);
+             -- BUG-03: before creating a new row, try to recognise this machine by its MAC.
+             -- A screen that upgrades its client reports a different device_uuid (older builds
+             -- fall back to 'WIN-<COMPUTERNAME>'; newer ones read the hardware UUID), so without
+             -- a stable identifier the same physical screen registers as a brand-new device with
+             -- no playlist and sits idle until the maintenance worker retires the old row. The
+             -- MAC survives that change, so adopt the existing row and re-point its uuid instead.
+             --
+             -- Only adopts when the MAC matches exactly ONE live row. Cloned VMs and shared
+             -- images can repeat a MAC, and merging two real screens into one is far worse than
+             -- creating a duplicate -- so on ambiguity fall through and insert as before.
+             DECLARE @mac_match_id BIGINT = NULL;
 
-             SET @msg = N'Heartbeat processed (Device Recovered).';
+             IF @p_mac_address IS NOT NULL AND LTRIM(RTRIM(@p_mac_address)) <> ''
+                AND @p_mac_address <> '00:00:00:00:00:00'
+             BEGIN
+                  SELECT @mac_match_id = MIN(device_id)
+                  FROM sn_devices WITH (NOLOCK)
+                  WHERE is_deleted = 0
+                    AND mac_address = @p_mac_address
+                    AND device_uuid <> @p_device_uuid
+                  HAVING COUNT(*) = 1;
+             END
+
+             IF @mac_match_id IS NOT NULL
+             BEGIN
+                  UPDATE sn_devices
+                  SET device_uuid   = @p_device_uuid,
+                      last_check_in = SYSUTCDATETIME(),
+                      status        = UPPER(ISNULL(@p_status, 'ONLINE')),
+                      device_name   = ISNULL(@p_device_name, device_name),
+                      branch_code   = ISNULL(@p_branch_code, branch_code),
+                      ip_address    = ISNULL(@p_ip_address, ip_address),
+                      app_version   = ISNULL(@p_app_version, app_version)
+                  WHERE device_id = @mac_match_id;
+
+                  SET @msg = N'Heartbeat processed (identity merged by MAC).';
+             END
+             ELSE
+             BEGIN
+                  INSERT INTO sn_devices
+                  (device_uuid, device_name, status, branch_code, created_at, is_deleted, last_check_in, ip_address, app_version, mac_address)
+                  VALUES
+                  (@p_device_uuid, ISNULL(@p_device_name, 'Recovered Device'), 'ONLINE', ISNULL(@p_branch_code, '1000'), SYSUTCDATETIME(), 0, SYSUTCDATETIME(), @p_ip_address, @p_app_version, @p_mac_address);
+
+                  SET @msg = N'Heartbeat processed (Device Recovered).';
+             END
         END
         ELSE
         BEGIN
@@ -192,10 +239,19 @@ BEGIN
 
         -- Execute Command Polling Logic BEFORE ResultSection!
         DECLARE @actual_id BIGINT;
-        SELECT TOP 1 @actual_id = device_id 
-        FROM sn_devices WITH (NOLOCK) 
-        WHERE is_deleted = 0 AND (device_id = @p_device_id OR device_uuid = @p_device_uuid);
-
+        -- BUG-01 defect B: this was TOP 1 with no ORDER BY over an OR predicate. When the id
+        -- branch and the uuid branch matched different rows -- exactly what identity drift
+        -- produces -- the engine returned an arbitrary one, and the dequeue below
+        -- (WHERE device_id = @actual_id) then looked at the wrong device and delivered nothing.
+        -- The uuid is the device's own hardware identity, so it wins; device_id is the weaker
+        -- hint because a stale local config can carry another row's id. device_id DESC is an
+        -- explicit, documented tie-break so the result is at least reproducible.
+        SELECT TOP 1 @actual_id = device_id
+        FROM sn_devices WITH (NOLOCK)
+        WHERE is_deleted = 0 AND (device_id = @p_device_id OR device_uuid = @p_device_uuid)
+        ORDER BY CASE WHEN device_uuid = @p_device_uuid THEN 0 ELSE 1 END,
+                 CASE WHEN device_id  = @p_device_id  THEN 0 ELSE 1 END,
+                 device_id DESC;
         -- If device ID was corrected due to mismatch, inject self-healing command
         IF @actual_id IS NOT NULL AND @orig_device_id IS NOT NULL AND @actual_id <> @orig_device_id
         BEGIN

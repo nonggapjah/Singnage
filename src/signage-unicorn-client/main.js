@@ -6,6 +6,7 @@ const http = require('http');
 const { exec, spawn } = require('child_process');
 const Database = require('better-sqlite3');
 const crypto = require('crypto');
+const os = require('os');
 
 // Ignore SSL certificate validation errors (helps bypass player client clock skew issues)
 app.commandLine.appendSwitch('ignore-certificate-errors');
@@ -323,6 +324,47 @@ ipcMain.handle('get-app-version', () => {
     return app.getVersion(); // Reads from package.json "version"
 });
 
+
+// BUG-03: the fleet reported a blank MAC on 292 of 292 devices, because the client never sent
+// one -- the server side of the pipe (DTO, repository parameter, sn_devices.mac_address) was
+// already in place and simply never received a value. Without a stable hardware identifier the
+// server cannot merge a screen's old and new rows when it upgrades, so every upgrade spawns a
+// duplicate that the maintenance worker has to retire after the fact.
+//
+// Picks the first physical adapter: skips loopback/internal, all-zero addresses, and the
+// virtual adapters that Hyper-V, VirtualBox, VMware and Docker leave behind (their MACs are
+// not stable across reinstalls, which would defeat the whole point). Sorted by interface name
+// so the same machine keeps returning the same MAC when it has several NICs.
+ipcMain.handle('get-mac-address', async () => {
+    try {
+        const VIRTUAL = /(virtual|vmware|vbox|hyper-v|docker|loopback|tap|tunnel|bluetooth|wsl)/i;
+        const candidates = [];
+
+        for (const [name, addrs] of Object.entries(os.networkInterfaces())) {
+            if (VIRTUAL.test(name)) continue;
+            for (const a of addrs || []) {
+                if (a.internal) continue;
+                const mac = (a.mac || '').toUpperCase();
+                if (!mac || mac === '00:00:00:00:00:00') continue;
+                candidates.push({ name, mac });
+                break;
+            }
+        }
+
+        if (candidates.length === 0) {
+            console.warn('[MAC] No physical adapter found - sending null, server keeps its stored value');
+            return null;
+        }
+
+        candidates.sort((a, b) => a.name.localeCompare(b.name));
+        return candidates[0].mac;
+    } catch (err) {
+        // Never let identity collection break the heartbeat.
+        console.error('[MAC] Lookup failed:', err.message);
+        return null;
+    }
+});
+
 ipcMain.handle('get-machine-uuid', async () => {
     return new Promise((resolve) => {
         exec('wmic csproduct get uuid', (err, stdout) => {
@@ -345,7 +387,9 @@ ipcMain.handle('get-machine-uuid', async () => {
                 if (genericUuids.includes(uuid)) {
                     resolve(fallback);
                 } else {
-                    resolve(lines[1]);
+                    // Resolve the uppercased value, not the raw line: the guard above compares `uuid`
+                    // (uppercased) but resolving `lines[1]` let the same machine register under two casings.
+                    resolve(uuid);
                 }
             } else {
                 resolve(fallback);

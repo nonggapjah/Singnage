@@ -20,6 +20,7 @@ let pendingPlaylist = null; // Next playlist waiting for smooth swap
 let isSyncing = false;     // Prevent multiple sync loops
 let isBootReportSent = false; // Boot Report: send full device info once
 let cachedMachineUuid = null;
+let cachedMacAddress = null; // BUG-03: stable hardware id so the server can merge identities on upgrade
 
 // Queues for Offline Sync
 let systemLogQueue = JSON.parse(localStorage.getItem('system_log_queue') || '[]');
@@ -298,6 +299,7 @@ async function syncPlaybackLogs() {
 // --- Sync & Heartbeat ---
 async function startSync() {
     cachedMachineUuid = await ipcRenderer.invoke('get-machine-uuid');
+    cachedMacAddress = await ipcRenderer.invoke('get-mac-address');
     const version = await ipcRenderer.invoke('get-app-version');
     dashDeviceId.innerText = config.deviceId;
     dashDeviceNameDisp.innerText = `NAME: ${config.deviceName || 'UNNAMED'}`;
@@ -350,7 +352,13 @@ async function sync() {
             currentMediaId: (playlist[currentIndex] && playlist[currentIndex].media) ? playlist[currentIndex].media.mediaId : '',
             currentPlaylistItemId: (playlist[currentIndex]) ? playlist[currentIndex].playlistItemId : '',
             currentPositionSec: isPlaying ? Math.floor(videoEl.currentTime) : 0,
-            cacheProgress: cacheProgress
+            cacheProgress: cacheProgress,
+            // BUG-03: sent on every heartbeat, not just the boot report -- a screen that was
+            // already registered before this client version needs to backfill its MAC too, and
+            // it only sends a boot report once per process start. Null is safe: the stored
+            // procedure applies ISNULL(@p_mac_address, mac_address), so a lookup failure leaves
+            // whatever the server already knows instead of wiping it.
+            macAddress: cachedMacAddress
         };
 
         // --- AUTO-RETRY LOGIC (v2.3.3) ---
