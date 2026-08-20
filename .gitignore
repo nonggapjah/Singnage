@@ -113,3 +113,12 @@ publish/
 
 # Compiled executables
 *.exe
+
+# RoundTable governance artefacts — operational records, never publish to a public repo.
+# These contain production topology, fleet inventory and audit findings.
+# Keep them backed up privately; see Development/Signage/04_Modification Logs/.
+Development/
+RoundTable/
+
+# Hook runtime output (audit trail is local-only)
+hooks/logs/

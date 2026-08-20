@@ -7,12 +7,37 @@
 
 ## Active Projects
 
+### Signage
+**PROJECT_MODE:** Centralized
+**PROJECT_ROOT:** `C:/Singnage/Singnage`
+**SOURCE_ROOT:** `C:/Singnage/Singnage`
+**ACTIVE:** true
+**Notes:** Signage Unicorn — digital signage fleet. Electron client (`src/signage-unicorn-client`),
+.NET 8 API (`src/SignageUnicorn.Api`), Next.js admin web (`src/signage-unicorn-web`).
+Production host `192.1.200.185` — API on :8862, web on :8865, fronted by cloudflared at
+`signage.aith123.com`; both apps run under PM2 (`ecosystem.config.js`). Planning artefacts
+(`Development/`, `RoundTable/`) live at PROJECT_ROOT and are **not** git-tracked.
+`.claude/` **is** git-tracked (since commit 291878d, 2026-07-09) — it is the authoritative
+framework copy for this project.
+
+**Restructure note (20-08-2026):** the repo previously sat directly at `C:/Singnage`.
+It was re-cloned one level down into `C:/Singnage/Singnage`, leaving a stray untracked
+framework copy at `C:/Singnage/.claude` with a stripped permission allowlist — that stray
+copy is NOT authoritative. A `.env` (development reference values) also remains at
+`C:/Singnage/.env`. Sessions must open at `C:/Singnage/Singnage`.
+
+---
+
+## On Hold
+
 ### UniOpsQC
 **PROJECT_MODE:** Centralized
 **PROJECT_ROOT:** `C:/UnicornVibeCode/UniOpsQC`
 **SOURCE_ROOT:** `C:/UnicornVibeCode/UniOpsQC`
-**ACTIVE:** true
-**Notes:** RoundTable Framework — the governance framework itself. Planning and source in same root. Framework management, policy updates, skill development, contributor PR review.
+**ACTIVE:** false
+**Notes:** RoundTable Framework itself. Path does not exist on this machine — entry retained
+per §4 (never delete, set ACTIVE:false). Deactivated 20-08-2026 by AM: this registry shipped
+with the framework template and did not describe this box.
 
 ---
 
@@ -20,8 +45,9 @@
 **PROJECT_MODE:** Decentralized
 **PROJECT_ROOT:** `C:/UnicornVibeCode/UniOpsQC/Development/HubVSCode`
 **SOURCE_ROOT:** `C:/UnicornVibeCode/roundtable-hub-vscode`
-**ACTIVE:** true
-**Notes:** UniOpsQC Hub VSCode Extension (TypeScript, esbuild, v1.6.0). Publisher: UnicornTech. Planning hub in UniOpsQC/Development/HubVSCode — source code in separate repo (GitHub: UniOpsQC-vscode, local folder: roundtable-hub-vscode). Issues tracked in UniOpsQC repo (#50–55). Open bugs: SESSION LOGS filename mismatch, FRAMEWORK STATUS vunknown, Update Preview clipboard bug, Set project name dialog repeat.
+**ACTIVE:** false
+**Notes:** UniOpsQC Hub VSCode Extension. Path does not exist on this machine — entry retained
+per §4. Deactivated 20-08-2026 by AM.
 
 ---
 
@@ -35,4 +61,4 @@
 
 ---
 
-*Last updated: 17-03-2026 by AM (AstonMartin)*
+*Last updated: 20-08-2026 by AM (AstonMartin) — OPS-01*
