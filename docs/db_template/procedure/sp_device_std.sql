@@ -459,7 +459,17 @@ ResultSection:
                 'Y' AS Active
             FROM sn_devices d WITH (NOLOCK)
             WHERE d.is_deleted = 0
-              AND (d.device_id = @p_device_id OR d.device_uuid = @p_device_uuid);
+              AND (d.device_id = @p_device_id OR d.device_uuid = @p_device_uuid)
+            -- Same ambiguity as BUG-01 defect B, on the admin read path: SELECT TOP 1 over an OR
+            -- of two identifiers, with no ORDER BY. When the id and the uuid point at different
+            -- rows -- which is exactly what identity drift produces -- the row returned was
+            -- whichever the engine happened to pick, so "open this device" could show a different
+            -- device between two refreshes. The uuid is the device's own hardware identity, so it
+            -- wins; device_id is the weaker hint because a stale local config can carry another
+            -- row's id. device_id DESC is an explicit tie-break so the result is reproducible.
+            ORDER BY CASE WHEN d.device_uuid = @p_device_uuid THEN 0 ELSE 1 END,
+                     CASE WHEN d.device_id  = @p_device_id  THEN 0 ELSE 1 END,
+                     d.device_id DESC;
         END
         
         IF @p_action = 'COUNT_OFFLINE_ZOMBIES'

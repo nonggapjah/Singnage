@@ -50,3 +50,30 @@ ALTER TABLE [dbo].[sn_devices] ADD  DEFAULT ((0)) FOR [is_deleted]
 GO
 
 
+
+-- These three existed in production but in no template, so a fresh install would have come up
+-- without them. IX_sn_devices_uuid in particular is on the heartbeat path: every beat resolves a
+-- device by device_uuid, 292 screens every 15 seconds.
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_sn_devices_uuid'
+               AND object_id = OBJECT_ID('dbo.sn_devices'))
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_sn_devices_uuid] ON [dbo].[sn_devices] ([device_uuid] ASC);
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_sn_devices_deleted'
+               AND object_id = OBJECT_ID('dbo.sn_devices'))
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_sn_devices_deleted] ON [dbo].[sn_devices] ([is_deleted] ASC);
+END
+GO
+
+-- Sibling inheritance and the admin grouping both look devices up by branch + name.
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_sn_devices_branch_name'
+               AND object_id = OBJECT_ID('dbo.sn_devices'))
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_sn_devices_branch_name]
+    ON [dbo].[sn_devices] ([branch_code] ASC, [device_name] ASC)
+    INCLUDE ([is_deleted], [last_check_in]);
+END
+GO

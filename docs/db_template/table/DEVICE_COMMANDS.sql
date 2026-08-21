@@ -45,3 +45,33 @@ CREATE NONCLUSTERED INDEX [IX_sn_device_commands_Pending] ON [dbo].[sn_device_co
 INCLUDE ([command_type], [payload], [created_at])
 WHERE ([status] = 'PENDING' AND [is_deleted] = 0)
 GO
+
+-- IX_sn_device_commands_Pending above is FILTERED on status = 'PENDING', so it cannot serve the
+-- heartbeat dequeue, which reads:
+--     WHERE device_id = @actual_id
+--       AND (status = 'PENDING' OR (status = 'POLLING' AND updated_at < DATEADD(SECOND,-30,...)))
+-- The OR over a second status puts the predicate outside the filter, so every heartbeat scanned
+-- the table -- and it scans inside an UPDATE, so it takes update locks on rows it only examined.
+-- SQL Server's missing-index DMV reported exactly (device_id, status) INCLUDE (updated_at) with
+-- 36.6 million uses. On 20-08-2026 roughly a hundred heartbeat sessions piled up on LCK_M_U here.
+--
+-- Unfiltered, so it covers both statuses. The filtered index is kept: it is narrower and still
+-- the better choice for the PENDING-only reads elsewhere.
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_sn_device_commands_Dequeue'
+               AND object_id = OBJECT_ID('dbo.sn_device_commands'))
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_sn_device_commands_Dequeue]
+    ON [dbo].[sn_device_commands] ([device_id] ASC, [status] ASC)
+    INCLUDE ([updated_at], [command_type], [payload], [created_at], [command_uuid]);
+END
+GO
+
+-- Also present in production but in no template: the index the daily purge uses
+-- (DELETE ... WHERE created_at < ... AND status <> 'PENDING').
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_devcmd_cleanup'
+               AND object_id = OBJECT_ID('dbo.sn_device_commands'))
+BEGIN
+    CREATE NONCLUSTERED INDEX [IX_devcmd_cleanup]
+    ON [dbo].[sn_device_commands] ([created_at] ASC, [status] ASC);
+END
+GO
