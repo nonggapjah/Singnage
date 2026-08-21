@@ -41,10 +41,21 @@
       "Bash(curl -s -m 12 -o /dev/null -w \"https://signage.aith123.com/ -> HTTP %{http_code}\\\\n\" https://signage.aith123.com/)",
       "Bash(curl -s -m 12 -o /dev/null -w \"https://signage.aith123.com/admin/devices -> HTTP %{http_code}\\\\n\" https://signage.aith123.com/admin/devices)",
       "Bash(curl -s -m 12 -D - -o /dev/null https://signage.aith123.com/)",
-      "PowerShell(cd \"C:\\\\Singnage\\\\src\\\\signage-unicorn-client\"; $env:CSC_IDENTITY_AUTO_DISCOVERY = \"false\"; npm run build 2>&1 | Tee-Object -FilePath \"C:\\\\Singnage\\\\src\\\\signage-unicorn-client\\\\build.log\" | Select-Object -Last 12)"
+      "PowerShell(cd \"C:\\\\Singnage\\\\src\\\\signage-unicorn-client\"; $env:CSC_IDENTITY_AUTO_DISCOVERY = \"false\"; npm run build 2>&1 | Tee-Object -FilePath \"C:\\\\Singnage\\\\src\\\\signage-unicorn-client\\\\build.log\" | Select-Object -Last 12)",
+      "Bash(schtasks *)",
+      "PowerShell(schtasks *)",
+      "Bash(certutil -hashfile *)"
     ],
     "additionalDirectories": [
       "*"
+    ]
+  },
+  "autoMode": {
+    "allow": [
+      "$defaults",
+      "Running schtasks against the Signage API host 192.1.200.185 to query, create, run and delete one-shot deployment tasks, and to stop, start or restart the PM2 apps signage-api and signage-web.",
+      "Writing to the SignageUnicornDB database on 192.1.200.185 with the sa account: applying stored procedures such as sp_device_std, and running the reviewed scripts under _deploy/. Reads were always permitted; this adds writes.",
+      "Creating and running PowerShell helper scripts under the session scratchpad that connect to SignageUnicornDB or invoke schtasks against 192.1.200.185, since deployment work is done through such scripts."
     ]
   },
   "hooks": {

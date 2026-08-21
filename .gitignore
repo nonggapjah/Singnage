@@ -122,3 +122,6 @@ RoundTable/
 
 # Hook runtime output (audit trail is local-only)
 hooks/logs/
+
+# Claude Code local settings (machine-specific deployment permissions -- do not publish)
+.claude/settings.local.json
