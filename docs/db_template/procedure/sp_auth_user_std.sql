@@ -397,6 +397,22 @@ ResultSection:
                     FROM sn_auth_user_role ur
                     INNER JOIN sn_auth_role ar ON ur.role_id = ar.role_id
                     WHERE ur.user_id = u.user_id AND ur.is_deleted = 0 AND ar.is_deleted = 0
+                    -- TOP 1 with no ORDER BY here decided which role went into the JWT, and the
+                    -- token carries exactly one (AuthService: new Claim(ClaimTypes.Role, ...)).
+                    -- sn_auth_user_role holds 14 rows for 7 users, so multi-role users are the
+                    -- norm -- and 32 endpoints gate on the result. The same person could come back
+                    -- admin on one login and not on the next.
+                    --
+                    -- Ordered by privilege, so the role granted is the highest one the user has
+                    -- actually been assigned. That is not an escalation: it is what the assignment
+                    -- already says. The random pick could silently DOWNGRADE them instead.
+                    -- LOWER() so a differently-cased value in the table cannot fall through.
+                    ORDER BY CASE LOWER(ar.role_name)
+                                WHEN 'admin'  THEN 0
+                                WHEN 'editor' THEN 1
+                                WHEN 'viewer' THEN 2
+                                ELSE 3
+                             END, ar.role_name
                 ), 'viewer') as role
             FROM sn_auth_user u
             WHERE u.user_id = @p_userid
@@ -421,6 +437,22 @@ ResultSection:
                     FROM sn_auth_user_role ur
                     INNER JOIN sn_auth_role ar ON ur.role_id = ar.role_id
                     WHERE ur.user_id = u.user_id AND ur.is_deleted = 0 AND ar.is_deleted = 0
+                    -- TOP 1 with no ORDER BY here decided which role went into the JWT, and the
+                    -- token carries exactly one (AuthService: new Claim(ClaimTypes.Role, ...)).
+                    -- sn_auth_user_role holds 14 rows for 7 users, so multi-role users are the
+                    -- norm -- and 32 endpoints gate on the result. The same person could come back
+                    -- admin on one login and not on the next.
+                    --
+                    -- Ordered by privilege, so the role granted is the highest one the user has
+                    -- actually been assigned. That is not an escalation: it is what the assignment
+                    -- already says. The random pick could silently DOWNGRADE them instead.
+                    -- LOWER() so a differently-cased value in the table cannot fall through.
+                    ORDER BY CASE LOWER(ar.role_name)
+                                WHEN 'admin'  THEN 0
+                                WHEN 'editor' THEN 1
+                                WHEN 'viewer' THEN 2
+                                ELSE 3
+                             END, ar.role_name
                 ), 'viewer') as role
             FROM sn_auth_user u
             JOIN sn_auth_credential c ON c.user_id = u.user_id
@@ -428,7 +460,17 @@ ResultSection:
               AND (@p_action = 'GET_CREDENTIAL_BY_ID' OR EXISTS(SELECT 1 FROM sn_auth_identifier i WHERE i.user_id = u.user_id AND i.identifier_value = @p_login_id AND i.is_deleted = 0))
               AND u.is_deleted = 0
               AND c.is_deleted = 0
-              AND c.credential_type = 'password';
+              AND c.credential_type = 'password'
+            -- TOP 1 with no ORDER BY on the login credential lookup. Two ways that bites:
+            -- if a user carries more than one non-deleted password credential, the hash checked
+            -- was whichever the engine picked -- so a superseded password could still
+            -- authenticate. And sn_auth_identifier has only a NON-UNIQUE index on
+            -- identifier_value, so nothing stops two accounts sharing a login id; the row
+            -- returned for that id was arbitrary too.
+            -- Newest credential first, then a stable tie-break. The uniqueness gap itself needs a
+            -- constraint, which cannot be added blind -- existing duplicates would have to be
+            -- resolved first. Raised separately.
+            ORDER BY c.password_last_changed_at DESC, c.credential_id DESC, u.user_id ASC;
         END
 
         IF @p_action = 'LOGIN_SUCCESS' OR @p_action = 'LOGIN_FAIL'
@@ -459,6 +501,22 @@ ResultSection:
                     FROM sn_auth_user_role ur
                     INNER JOIN sn_auth_role ar ON ur.role_id = ar.role_id
                     WHERE ur.user_id = u.user_id AND ur.is_deleted = 0 AND ar.is_deleted = 0
+                    -- TOP 1 with no ORDER BY here decided which role went into the JWT, and the
+                    -- token carries exactly one (AuthService: new Claim(ClaimTypes.Role, ...)).
+                    -- sn_auth_user_role holds 14 rows for 7 users, so multi-role users are the
+                    -- norm -- and 32 endpoints gate on the result. The same person could come back
+                    -- admin on one login and not on the next.
+                    --
+                    -- Ordered by privilege, so the role granted is the highest one the user has
+                    -- actually been assigned. That is not an escalation: it is what the assignment
+                    -- already says. The random pick could silently DOWNGRADE them instead.
+                    -- LOWER() so a differently-cased value in the table cannot fall through.
+                    ORDER BY CASE LOWER(ar.role_name)
+                                WHEN 'admin'  THEN 0
+                                WHEN 'editor' THEN 1
+                                WHEN 'viewer' THEN 2
+                                ELSE 3
+                             END, ar.role_name
                 ), 'viewer') as role
             FROM sn_auth_user u
             WHERE u.is_deleted = 0

@@ -1,3 +1,4 @@
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
@@ -150,6 +151,35 @@ builder.Services.AddAuthentication(x =>
 });
 
 // 2. Add CORS (Allow Frontend to connect)
+// Brute-force protection for the login endpoint.
+//
+// sp_auth_user_std implements LOGIN_SUCCESS and LOGIN_FAIL and sn_auth_user carries
+// failed_login_count and locked_until -- but nothing in this codebase ever calls them, and
+// locked_until is never checked. AuthService.LoginAsync simply logs a warning and returns null on
+// a bad password. With the API reachable from the internet through the tunnel, password guessing
+// was unlimited.
+//
+// Wiring the database lockout is the better fix and is raised separately; it is not done here
+// because it cannot be tested against the database from this machine, and a mismatch in the
+// procedure call would lock everyone out of the console instead of just attackers. This limiter
+// closes the hole without touching the auth path at all: worst case a legitimate operator who
+// mistypes repeatedly waits a minute.
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+    // Per client IP, so one branch fumbling its password cannot lock out another.
+    options.AddPolicy("login", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 10,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0
+            }));
+});
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll",
@@ -212,6 +242,7 @@ app.UseStaticFiles(new StaticFileOptions
 });
 app.UseCors("AllowAll"); // Enable CORS
 
+app.UseRateLimiter();
 app.UseAuthentication();
 
     // Auth debug middleware disabled in production — re-enable only when debugging auth issues

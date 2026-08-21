@@ -20,6 +20,8 @@ namespace SignageUnicorn.Api.Controllers
             _configuration = configuration;
         }
 
+        // Per-IP rate limit: password guessing was otherwise unlimited (see Program.cs).
+        [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("login")]
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] LoginRequest request)
         {
