@@ -6,8 +6,8 @@ import { apiFetch } from '@/lib/api-fetch';
 function SystemConfigPanel() {
     const [config, setConfig] = useState<{ currentBaseUrl: string, detectedIp: string, suggestedBaseUrl: string } | null>(null);
     const [newIp, setNewIp] = useState('');
-    const [newPort, setNewPort] = useState(8865);
-    const [newFrontendPort, setNewFrontendPort] = useState(3000);
+    const [newPort, setNewPort] = useState(8862); // API port. Was 8865 -- that is the WEB port, and this field sets the API's.
+    const [newFrontendPort, setNewFrontendPort] = useState(8865); // Web port. Was 3000, Next.js's dev default, never this deployment's.
     const [loading, setLoading] = useState(false);
     const [refreshing, setRefreshing] = useState(true); // Start refreshing true
 
@@ -18,11 +18,29 @@ function SystemConfigPanel() {
             if (res.success && res.data) {
                 setConfig(res.data);
                 if (res.data.detectedIp) setNewIp(res.data.detectedIp);
-                if (res.data.currentBaseUrl) {
+
+                // Prefer the ports the server reports. Parsing them out of the base URL is a
+                // fallback; leaving either at its useState default is the dangerous case, because
+                // submitting this form writes both into the frontend .env and the API base URL.
+                if (typeof res.data.apiPort === 'number' && res.data.apiPort > 0) {
+                    setNewPort(res.data.apiPort);
+                } else if (res.data.currentBaseUrl) {
                     try {
                         const url = new URL(res.data.currentBaseUrl);
                         setNewPort(parseInt(url.port) || 80);
-                    } catch (e) { }
+                    } catch {
+                        // Swallowing this left the field showing a default the user could then
+                        // save over the real value, for every device in the fleet.
+                        console.warn(`[settings] Could not parse currentBaseUrl "${res.data.currentBaseUrl}". `
+                            + `The API port shown is a default, not the server's actual value -- do not save without checking it.`);
+                    }
+                }
+
+                if (typeof res.data.frontendPort === 'number' && res.data.frontendPort > 0) {
+                    setNewFrontendPort(res.data.frontendPort);
+                } else {
+                    console.warn('[settings] The server did not report a frontend port. The value shown is a default; '
+                        + 'saving it would rewrite PORT= in the frontend .env.');
                 }
             }
         } catch (e) {

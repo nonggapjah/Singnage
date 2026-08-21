@@ -74,6 +74,31 @@ namespace SignageUnicorn.Api.Services
             }
         }
 
+        // The frontend port lives as PORT= in the same .env files UpdateFrontendEnv writes, so read
+        // it back from there. Without this the settings form had no way to know the real value and
+        // defaulted to 3000 -- Next.js's dev default, not this deployment's 8865. Submitting the
+        // form to change the server IP would have carried that 3000 along and rewritten PORT=,
+        // leaving the admin console bound to the wrong port after the next restart.
+        private int? ReadFrontendPort()
+        {
+            foreach (var p in FrontendEnvPaths())
+            {
+                if (!System.IO.File.Exists(p)) continue;
+                foreach (var line in System.IO.File.ReadAllLines(p))
+                {
+                    if (!line.StartsWith("PORT=", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (int.TryParse(line.Substring(5).Trim().Trim('"'), out var v) && v > 0) return v;
+                }
+            }
+            return null;
+        }
+
+        private List<string> FrontendEnvPaths() => new List<string>
+        {
+            Path.GetFullPath(Path.Combine(_env.ContentRootPath, "..", "signage-unicorn-web", ".env")),
+            Path.GetFullPath(Path.Combine(_env.ContentRootPath, "..", "..", ".env"))
+        };
+
         public object GetConfig()
         {
             var currentBaseUrl = _configuration["ServerSettings:BaseUrl"] ?? "http://localhost:8862";
@@ -82,14 +107,16 @@ namespace SignageUnicorn.Api.Services
             {
                 currentPort = uri.Port;
             }
-            
+
             var detectedIp = GetLocalIpAddress();
 
             return new
             {
                 currentBaseUrl,
                 detectedIp,
-                suggestedBaseUrl = $"http://{detectedIp}:{currentPort}"
+                suggestedBaseUrl = $"http://{detectedIp}:{currentPort}",
+                apiPort = currentPort,
+                frontendPort = ReadFrontendPort()
             };
         }
 
@@ -225,11 +252,9 @@ namespace SignageUnicorn.Api.Services
         {
             try
             {
-                var envPaths = new List<string>
-                {
-                    Path.GetFullPath(Path.Combine(_env.ContentRootPath, "..", "signage-unicorn-web", ".env")),
-                    Path.GetFullPath(Path.Combine(_env.ContentRootPath, "..", "..", ".env"))
-                };
+                // Same two paths GetConfig reads PORT= back from -- one source, so a change to where
+                // the frontend .env lives cannot drift between the writer and the reader.
+                var envPaths = FrontendEnvPaths();
                 
                 foreach (var frontendPath in envPaths)
                 {
