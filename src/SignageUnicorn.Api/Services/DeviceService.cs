@@ -308,31 +308,49 @@ namespace SignageUnicorn.Api.Services
              return 0;
         }
         
-        public async Task FixDatabaseAsync()
+        // Re-applies every .sql file under docs/db_template to the database: tables first, then
+        // stored procedures. It is a RESTORE FROM DISK, not an "initialize" -- each procedure file
+        // is CREATE OR ALTER, so running this overwrites whatever is currently in the database with
+        // whatever happens to be in the checkout on this server, newer or not.
+        //
+        // On 20-08-2026 that cost us a deployed fix: a patched sp_device_std was applied directly to
+        // production, verified, and then silently reverted when all nine procedures were rewritten
+        // in the same second by one call to this method. sys.objects.modify_date is what proved it.
+        //
+        // The reporting below exists because of the second half of that incident: every failure used
+        // to be swallowed into Console.WriteLine and the endpoint returned success unconditionally,
+        // so an operator saw "Database Initialized Successfully!" whether or not anything applied.
+        public async Task<SchemaApplyResult> FixDatabaseAsync()
         {
+             var report = new SchemaApplyResult();
+
              string docsPath = Path.GetFullPath(Path.Combine(_env.ContentRootPath, "../../docs/db_template"));
-             if (!Directory.Exists(docsPath)) 
+             if (!Directory.Exists(docsPath))
              {
                  // Try alternative for published/docker scenario (e.g. copied to root)
                  docsPath = Path.Combine(_env.ContentRootPath, "docs/db_template");
              }
-             
+
              if (!Directory.Exists(docsPath))
              {
-                 Console.WriteLine($"WARNING: db_template not found at {docsPath} (Root: {_env.ContentRootPath}). Skipping DB Auto-Fix.");
-                 return;
+                 report.Skipped = $"db_template not found at {docsPath} (Root: {_env.ContentRootPath})";
+                 Console.WriteLine($"WARNING: {report.Skipped}. Skipping DB Auto-Fix.");
+                 await _logRepo.LogAsync(null, "WARNING", $"[DeviceService] SCHEMA_APPLY_SKIPPED | {report.Skipped}", "API");
+                 return report;
              }
-             
+
+             report.SourcePath = docsPath;
              Console.WriteLine($"[DeviceService] Applying Database Schema from: {docsPath}");
 
              // 1. Tables (Execute first)
              string tablePath = Path.Combine(docsPath, "table");
              if (Directory.Exists(tablePath))
              {
-                 var files = Directory.GetFiles(tablePath, "*.sql").OrderBy(f => f).ToList();
-                 foreach (var file in files)
+                 foreach (var file in Directory.GetFiles(tablePath, "*.sql").OrderBy(f => f))
                  {
-                     await ExecuteSqlFile(file);
+                     var error = await ExecuteSqlFile(file);
+                     if (error == null) report.Applied.Add(Path.GetFileName(file));
+                     else report.Failed.Add($"{Path.GetFileName(file)}: {error}");
                  }
              }
 
@@ -340,14 +358,15 @@ namespace SignageUnicorn.Api.Services
              string procPath = Path.Combine(docsPath, "procedure");
              if (Directory.Exists(procPath))
              {
-                 var files = Directory.GetFiles(procPath, "*.sql").OrderBy(f => f).ToList();
-                 foreach (var file in files)
+                 foreach (var file in Directory.GetFiles(procPath, "*.sql").OrderBy(f => f))
                  {
-                     await ExecuteSqlFile(file);
+                     var error = await ExecuteSqlFile(file);
+                     if (error == null) report.Applied.Add(Path.GetFileName(file));
+                     else report.Failed.Add($"{Path.GetFileName(file)}: {error}");
                  }
              }
 
-             try 
+             try
              {
                  Console.WriteLine("[DeviceService] Checking/Seeding Admin & Roles...");
                  // Direct SQL Execution because we might not have a Repository ready or want to bypass it
@@ -355,9 +374,21 @@ namespace SignageUnicorn.Api.Services
              }
              catch (Exception ex)
              {
+                 report.Failed.Add($"INIT_ADMIN: {ex.Message}");
                  Console.WriteLine($"[WARN] Admin Seeding skipped/failed: {ex.Message}");
              }
+
+             // Leave a trail. This operation rewrites production stored procedures; who ran it and
+             // what it touched needs to be answerable later without reading PM2 console scrollback.
+             await _logRepo.LogAsync(null, report.Failed.Count == 0 ? "INFO" : "ERROR",
+                 $"[DeviceService] SCHEMA_APPLY | source={docsPath} | applied={report.Applied.Count} | failed={report.Failed.Count}"
+                 + (report.Failed.Count > 0 ? " | " + string.Join(" ; ", report.Failed) : ""), "API");
+
+             return report;
         }
+        // Maximum accepted screenshot payload. The endpoint is [AllowAnonymous] and reachable from
+        // the public tunnel, so an unbounded body is a disk-fill and memory-pressure primitive.
+        private const int MaxScreenshotBytes = 8 * 1024 * 1024;
 
         public async Task SaveScreenshotAsync(string deviceId, string base64Image)
         {
@@ -365,21 +396,55 @@ namespace SignageUnicorn.Api.Services
             {
                 if (string.IsNullOrEmpty(base64Image)) return;
 
+                // The device id arrives straight from the route and used to be interpolated into a
+                // file path. ASP.NET routing keeps '/' out of a {id} segment, but NOT '\' -- so on
+                // Windows an id like "..\..\wwwroot\something" escaped the screenshots folder, and
+                // this endpoint is anonymous. Accept only the shapes a real device id has (digits,
+                // or a uuid/WIN- identity), then confirm the resolved path really is inside the
+                // folder before writing. Two checks, because the first is a guess about what ids
+                // look like and the second is a fact about where the file lands.
+                if (deviceId.Length is 0 or > 64 ||
+                    !deviceId.All(ch => char.IsLetterOrDigit(ch) || ch == '-' || ch == '_'))
+                {
+                    Console.WriteLine($"[WARN] Rejected screenshot for malformed device id: {deviceId}");
+                    return;
+                }
+
                 // Remove header if present (e.g. data:image/jpeg;base64,)
                 if (base64Image.Contains(","))
                 {
                     base64Image = base64Image.Split(',')[1];
                 }
 
-                byte[] imageBytes = Convert.FromBase64String(base64Image);
+                // 4 base64 chars carry 3 bytes; check before decoding so an oversized payload is
+                // never materialised.
+                if ((long)base64Image.Length / 4 * 3 > MaxScreenshotBytes)
+                {
+                    Console.WriteLine($"[WARN] Rejected oversized screenshot for device {deviceId}");
+                    return;
+                }
 
-                string screenshotsFolder = Path.Combine(_env.WebRootPath ?? Path.Combine(_env.ContentRootPath, "wwwroot"), "screenshots");
+                byte[] imageBytes = Convert.FromBase64String(base64Image);
+                if (imageBytes.Length > MaxScreenshotBytes)
+                {
+                    Console.WriteLine($"[WARN] Rejected oversized screenshot for device {deviceId}");
+                    return;
+                }
+
+                string screenshotsFolder = Path.GetFullPath(
+                    Path.Combine(_env.WebRootPath ?? Path.Combine(_env.ContentRootPath, "wwwroot"), "screenshots"));
                 if (!Directory.Exists(screenshotsFolder))
                 {
                     Directory.CreateDirectory(screenshotsFolder);
                 }
 
-                string filePath = Path.Combine(screenshotsFolder, $"{deviceId}.jpg");
+                string filePath = Path.GetFullPath(Path.Combine(screenshotsFolder, $"{deviceId}.jpg"));
+                if (!filePath.StartsWith(screenshotsFolder + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+                {
+                    Console.WriteLine($"[WARN] Rejected screenshot path outside the screenshots folder: {filePath}");
+                    return;
+                }
+
                 await File.WriteAllBytesAsync(filePath, imageBytes);
                 Console.WriteLine($"[DeviceService] Saved screenshot for device {deviceId} to {filePath}");
             }
@@ -388,21 +453,23 @@ namespace SignageUnicorn.Api.Services
                 Console.WriteLine($"[ERROR] Failed to save screenshot for device {deviceId}: {ex.Message}");
             }
         }
-        
-        private async Task ExecuteSqlFile(string filePath)
+        // Returns null on success, or the failure message. Callers record it; nothing here is
+        // swallowed. The one exception kept from the original is "already exists", which a table
+        // script legitimately hits on every run after the first and is not a failure.
+        private async Task<string?> ExecuteSqlFile(string filePath)
         {
-            try 
+            try
             {
                 string content = await File.ReadAllTextAsync(filePath);
-                
+
                 // Split by 'GO' (case insensitive, separate lines)
                 // Using Regex to find GO on its own line
                 var batches = System.Text.RegularExpressions.Regex.Split(content, @"^\s*GO\s*$", System.Text.RegularExpressions.RegexOptions.Multiline | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                
+
                 foreach (var batch in batches)
                 {
                     if (string.IsNullOrWhiteSpace(batch)) continue;
-                    
+
                     // Basic cleanup
                     string sql = batch.Trim();
                     if (sql.Length > 0)
@@ -411,16 +478,29 @@ namespace SignageUnicorn.Api.Services
                     }
                 }
                 Console.WriteLine($" -> Executed: {Path.GetFileName(filePath)}");
+                return null;
             }
             catch (Exception ex)
             {
                 if (ex.Message.Contains("There is already an object named", StringComparison.OrdinalIgnoreCase) ||
                     ex.Message.Contains("already exists", StringComparison.OrdinalIgnoreCase))
                 {
-                    return;
+                    return null;
                 }
                 Console.WriteLine($"[ERROR] Failed to execute {Path.GetFileName(filePath)}: {ex.Message}");
+                return ex.Message;
             }
         }
+    }
+
+    // Outcome of re-applying docs/db_template. Exists so the caller can tell an operator what
+    // actually happened instead of reporting success unconditionally.
+    public class SchemaApplyResult
+    {
+        public List<string> Applied { get; set; } = new();
+        public List<string> Failed { get; set; } = new();
+        public string? Skipped { get; set; }
+        public string? SourcePath { get; set; }
+        public bool Success => Skipped == null && Failed.Count == 0;
     }
 }

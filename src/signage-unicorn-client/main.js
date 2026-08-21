@@ -92,7 +92,11 @@ async function migrateData() {
                 possibleParents.push(`C:\\Users\\${user}\\AppData\\Local`);
             }
         }
-    } catch (e) { }
+    } catch (e) {
+        // Best-effort discovery, but a silent failure here means the migration below finds no
+        // candidate profiles and quietly restores nothing.
+        console.warn(`[MIGRATION] Could not enumerate user profiles: ${e.message}`);
+    }
 
     // Deduplicate array
     possibleParents = [...new Set(possibleParents)];
@@ -112,7 +116,12 @@ async function migrateData() {
             const current = await fs.readJson(CONFIG_PATH);
             if (current && current.deviceId && current.serverIp) hasValidConfig = true;
         }
-    } catch (e) { }
+    } catch (e) {
+        // Swallowing this used to leave hasValidConfig false with no trace, so a corrupt or
+        // unreadable config made the screen look unconfigured and re-register as a BRAND NEW
+        // device -- losing its playlist assignment. That is the identity-drift failure mode.
+        console.error(`[CONFIG] Could not read ${CONFIG_PATH}: ${e.message}. Treating this device as UNCONFIGURED, which will re-register it.`);
+    }
 
     // Only migrate if we don't have a valid ID in the new location
     if (!hasValidConfig) {
@@ -555,7 +564,11 @@ ipcMain.handle('check-media-exists', async (event, arg) => {
                 return true;
             }
         }
-    } catch (e) { }
+    } catch (e) {
+        // Falls through as "cache not valid", which triggers a re-download. Worth saying so:
+        // a systematic failure here re-downloads media across the whole fleet.
+        console.warn(`[CACHE] Validation failed, treating as invalid (will re-download): ${e.message}`);
+    }
     return false;
 });
 
@@ -584,7 +597,9 @@ ipcMain.handle('download-media', async (event, { url, filename, fileHash }) => {
                 console.warn(`File ${filename} exists but is 0 bytes. Re-downloading.`);
                 await fs.remove(filePath).catch(() => { });
             }
-        } catch (e) { }
+        } catch (e) {
+            console.warn(`[CACHE] Could not inspect cached file, will re-download: ${e.message}`);
+        }
     }
 
     try {

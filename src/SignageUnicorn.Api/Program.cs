@@ -76,14 +76,31 @@ builder.Services.Configure<IISServerOptions>(options =>
 // JWT Setup
 var jwtSettings = builder.Configuration.GetSection("JwtSettings");
 var jwtSecret = jwtSettings["Secret"];
-if (string.IsNullOrEmpty(jwtSecret))
+
+// This used to log "[FATAL] ... API cannot start securely" and then carry on with a hardcoded
+// constant -- one that is committed to a PUBLIC repository. Anyone who read it could mint a valid
+// admin token against any deployment that happened to be missing its secret. A fatal message
+// followed by starting anyway is not a safeguard.
+//
+// Production now refuses to start. Development gets a genuinely random per-process key, so tokens
+// simply stop working across restarts instead of being forgeable by anyone with the source.
+if (string.IsNullOrWhiteSpace(jwtSecret) ||
+    jwtSecret.StartsWith("CHANGE_THIS_SECRET", StringComparison.OrdinalIgnoreCase))
 {
-    Console.WriteLine("[FATAL] JwtSettings:Secret is missing from appsettings.json. API cannot start securely.");
-    // Use a random fallback for dev only — production must have this set
-    jwtSecret = "CHANGE_THIS_SECRET_IN_PRODUCTION_appsettings_json_JwtSettings_Secret";
+    if (builder.Environment.IsProduction())
+    {
+        throw new InvalidOperationException(
+            "JwtSettings:Secret is missing or still the placeholder. Set it in appsettings.Production.json " +
+            "(untracked) before starting in Production. Refusing to start with a guessable signing key.");
+    }
+
+    var random = new byte[64];
+    System.Security.Cryptography.RandomNumberGenerator.Fill(random);
+    jwtSecret = Convert.ToBase64String(random);
+    Console.WriteLine("[WARN] JwtSettings:Secret is not configured. Generated a random key for this " +
+                      "process only -- every restart invalidates existing tokens. Development only.");
 }
 var key = Encoding.ASCII.GetBytes(jwtSecret);
-
 builder.Services.AddAuthentication(x =>
 {
     x.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;

@@ -5,7 +5,7 @@ SET ANSI_NULLS ON
 GO
 SET QUOTED_IDENTIFIER ON
 GO
-ALTER   PROCEDURE [dbo].[sp_playback_log_std]
+CREATE OR ALTER PROCEDURE [dbo].[sp_playback_log_std]
 (
     @p_action           NVARCHAR(50),
     

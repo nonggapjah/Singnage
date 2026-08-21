@@ -246,26 +246,34 @@ export default function DevicesPage() {
         );
     }
 
+    // Re-applies every .sql file in docs/db_template ON THE SERVER, overwriting the stored
+    // procedures currently in the database whether or not they are newer. On 20-08-2026 one click
+    // silently reverted a fix that had already been deployed and verified in production, and the
+    // old wording ("initialize", "Database Initialized Successfully!") gave no hint that anything
+    // had been overwritten -- it reported success even when nothing applied.
     async function handleInitDb() {
         showConfirm(
-            'DATABASE INITIALIZATION',
-            'This will update/initialize the database schema (Tables & Stored Procedures). Proceed?',
+            'RE-APPLY SCHEMA FROM DISK',
+            'This OVERWRITES every stored procedure in the database with the .sql files on the server, '
+            + 'even if the database currently holds a newer version. Any fix applied directly to the '
+            + 'database since those files were last updated will be lost. Proceed?',
             async () => {
                 setInitDbLoading(true);
                 try {
                     const res = await deviceApi.fixDb();
                     if (res.success) {
-                        showNotify('SYSTEM INITIALIZED', 'Database Initialized Successfully!', 'SUCCESS');
+                        showNotify('SCHEMA RE-APPLIED', res.message || 'Schema re-applied from disk.', 'SUCCESS');
                     } else {
                         showNotify('FAILED', res.message || 'Unknown error', 'ERROR');
                     }
                 } catch (error) {
-                    showNotify('CRITICAL ERROR', 'A critical error occurred while initializing the database.', 'ERROR');
+                    showNotify('CRITICAL ERROR', 'A critical error occurred while re-applying the schema.', 'ERROR');
                 } finally {
                     setInitDbLoading(false);
                     fetchDevices();
                 }
-            }
+            },
+            'DANGER'
         );
     }
 
@@ -533,7 +541,7 @@ export default function DevicesPage() {
                         {selectedIds.length === filteredDevices.length && filteredDevices.length > 0 ? 'Deselect All' : 'Select All'}
                     </button>
                     <button onClick={handleRefresh} className={`text-xl p-2 rounded-lg border border-white/10 hover:bg-white/10 transition-all ${refreshing ? 'animate-spin text-accent-cyan' : 'text-muted-foreground'}`}>↻</button>
-                    <button onClick={handleInitDb} disabled={initDbLoading} className="p-2 rounded-lg border border-white/10 hover:bg-white/10 text-xs font-bold uppercase text-muted-foreground">{initDbLoading ? 'Wait...' : 'Init DB'}</button>
+                    <button onClick={handleInitDb} disabled={initDbLoading} className="p-2 rounded-lg border border-white/10 hover:bg-white/10 text-xs font-bold uppercase text-muted-foreground">{initDbLoading ? 'Wait...' : 'Re-apply Schema'}</button>
                     <button onClick={handleCleanupZombies} className="px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-xs font-bold uppercase text-red-500 hover:bg-red-500 hover:text-white transition-all">Cleanup Zombies</button>
                 </div>
             </div>

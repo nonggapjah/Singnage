@@ -264,12 +264,26 @@ namespace SignageUnicorn.Api.Controllers
             }
         }
 
+        // Re-applies docs/db_template to the database. This OVERWRITES every stored procedure with
+        // the copy on this server's disk, newer or not -- see DeviceService.FixDatabaseAsync. The
+        // response now carries what actually applied and what failed; it used to return success
+        // unconditionally, which is how a reverted deployment went unnoticed on 20-08-2026.
         [HttpGet("fix-devices-db")]
         [Authorize(Roles = UserRoles.Admin)]
         public async Task<IActionResult> FixDb()
         {
-            await _deviceService.FixDatabaseAsync();
-            return Ok(new { success = true, message = "Devices DB Schema Updated" });
+            var report = await _deviceService.FixDatabaseAsync();
+
+            if (report.Skipped != null)
+                return StatusCode(500, ApiResponse<object>.ErrorResponse(500, $"Schema not applied: {report.Skipped}"));
+
+            if (!report.Success)
+                return StatusCode(500, ApiResponse<object>.ErrorResponse(500,
+                    $"Applied {report.Applied.Count} file(s), {report.Failed.Count} FAILED: {string.Join(" ; ", report.Failed)}"));
+
+            return Ok(ApiResponse<object>.SuccessResponse(
+                new { applied = report.Applied, source = report.SourcePath },
+                $"Schema re-applied from disk: {report.Applied.Count} file(s) overwritten."));
         }
     }
 }
