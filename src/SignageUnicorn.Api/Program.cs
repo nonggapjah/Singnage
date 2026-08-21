@@ -78,20 +78,26 @@ var jwtSettings = builder.Configuration.GetSection("JwtSettings");
 var jwtSecret = jwtSettings["Secret"];
 
 // This used to log "[FATAL] ... API cannot start securely" and then carry on with a hardcoded
-// constant -- one that is committed to a PUBLIC repository. Anyone who read it could mint a valid
-// admin token against any deployment that happened to be missing its secret. A fatal message
-// followed by starting anyway is not a safeguard.
+// constant committed to a PUBLIC repository. Anyone who read it could mint a valid admin token
+// against any deployment missing its secret. A fatal message followed by starting anyway is not a
+// safeguard.
 //
-// Production now refuses to start. Development gets a genuinely random per-process key, so tokens
-// simply stop working across restarts instead of being forgeable by anyone with the source.
-if (string.IsNullOrWhiteSpace(jwtSecret) ||
-    jwtSecret.StartsWith("CHANGE_THIS_SECRET", StringComparison.OrdinalIgnoreCase))
+// The rejected values are only the ones this repository has actually published -- deliberately
+// not a heuristic on length or wording, because a false positive here refuses to start a healthy
+// production deployment. appsettings.json now ships an empty Secret, so the blank check is the
+// one that normally fires; the two literals are kept for deployments still carrying an old copy.
+static bool IsPublishedPlaceholder(string s) =>
+    s.StartsWith("CHANGE_THIS_SECRET", StringComparison.OrdinalIgnoreCase) ||
+    s.StartsWith("THIS_IS_A_VERY_SECRET_KEY", StringComparison.OrdinalIgnoreCase);
+
+if (string.IsNullOrWhiteSpace(jwtSecret) || IsPublishedPlaceholder(jwtSecret))
 {
     if (builder.Environment.IsProduction())
     {
         throw new InvalidOperationException(
-            "JwtSettings:Secret is missing or still the placeholder. Set it in appsettings.Production.json " +
-            "(untracked) before starting in Production. Refusing to start with a guessable signing key.");
+            "JwtSettings:Secret is missing or is a placeholder published in this repository. Set a real " +
+            "value in appsettings.Production.json (untracked) before starting in Production. Refusing to " +
+            "start with a signing key anyone can read.");
     }
 
     var random = new byte[64];
@@ -99,6 +105,13 @@ if (string.IsNullOrWhiteSpace(jwtSecret) ||
     jwtSecret = Convert.ToBase64String(random);
     Console.WriteLine("[WARN] JwtSettings:Secret is not configured. Generated a random key for this " +
                       "process only -- every restart invalidates existing tokens. Development only.");
+}
+else if (jwtSecret.Length < 32)
+{
+    // Warn, do not refuse: a short key is weak for HS256 but stopping a running deployment over it
+    // would be worse than saying so.
+    Console.WriteLine($"[WARN] JwtSettings:Secret is only {jwtSecret.Length} characters. HS256 wants at " +
+                      "least 32; consider rotating to a longer key.");
 }
 var key = Encoding.ASCII.GetBytes(jwtSecret);
 builder.Services.AddAuthentication(x =>

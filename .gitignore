@@ -125,3 +125,11 @@ hooks/logs/
 
 # Claude Code local settings (machine-specific deployment permissions -- do not publish)
 .claude/settings.local.json
+
+# Certificates and private keys -- this repository is public
+*.pfx
+*.p12
+*.pem
+*.key
+id_rsa
+id_ed25519
