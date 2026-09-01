@@ -1,4 +1,4 @@
-using SignageUnicorn.Api.Models;
+﻿using SignageUnicorn.Api.Models;
 using SignageUnicorn.Api.Repositories.Interfaces;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -560,8 +560,37 @@ namespace SignageUnicorn.Api.Services
                     var videoStream = mediaInfo.VideoStreams.FirstOrDefault();
                     if (videoStream != null) {
                         conversion.AddStream(videoStream.SetCodec(Xabe.FFmpeg.VideoCodec.h264));
-                        // Baseline profile + FastStart for better streaming
-                        conversion.AddParameter("-profile:v baseline -level 3.0 -pix_fmt yuv420p -movflags +faststart");
+
+                        // High profile, not Baseline: Baseline has no CABAC and no B-frames, so it
+                        // costs 20-40% more bitrate for the same picture. Every screen downloads and
+                        // stores every file, so that overhead is paid on the whole fleet.
+                        //
+                        // Level 4.0, not 3.0: level 3.0 tops out at 1280x720. A 1080p frame is five
+                        // times the macroblocks that level allows, so the old parameters produced
+                        // streams whose declared level contradicted their contents. Hardware decoders
+                        // size their buffers from that declaration -- an Intel iGPU may then refuse
+                        // the stream and fall back to software (hopeless on the fleet's 2-core
+                        // Pentiums) or fail mid-decode. Both surface at the player as a decode error,
+                        // and the client deletes the file on any decode error, so a mis-tagged file
+                        // is downloaded and deleted forever. Level 4.0 covers 1080p30 honestly and
+                        // HD 510 decodes High@4.0 in hardware.
+                        var filters = new List<string>();
+
+                        // Only ever downscale, and keep the aspect ratio (-2 keeps height even,
+                        // which H.264 requires). Nothing is upscaled and files already within
+                        // 1080p are left untouched.
+                        if (videoStream.Width > 1920)
+                            filters.Add("scale='min(1920,iw)':-2");
+
+                        // Cap the framerate only when the source exceeds it. Forcing 30 on 24fps
+                        // material would duplicate frames and add judder for no benefit.
+                        if (videoStream.Framerate > 30)
+                            filters.Add("fps=30");
+
+                        if (filters.Count > 0)
+                            conversion.AddParameter($"-vf \"{string.Join(",", filters)}\"");
+
+                        conversion.AddParameter("-profile:v high -level 4.0 -pix_fmt yuv420p -movflags +faststart");
                     }
 
                     var audioStream = mediaInfo.AudioStreams.FirstOrDefault();

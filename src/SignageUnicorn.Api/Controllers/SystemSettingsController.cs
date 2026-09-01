@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
 using SignageUnicorn.Api.Constants;
@@ -37,9 +37,19 @@ namespace SignageUnicorn.Api.Controllers
         {
             var path = Path.Combine(_env.ContentRootPath, "wwwroot", "setup", "Signage_Unicorn_Setup_latest.exe");
             if (!System.IO.File.Exists(path)) return NotFound(ApiResponse<string>.ErrorResponse(404, "Setup file not found"));
-            
-            var bytes = await System.IO.File.ReadAllBytesAsync(path);
-            return File(bytes, "application/vnd.microsoft.portable-executable", "Signage_Unicorn_Setup_2.5.9.exe");
+
+            // The download name used to be hard-coded to 2.5.9 while the file behind it kept being
+            // replaced -- by 01-09-2026 it was handing out 2.7.4 under the 2.5.9 name. Take the
+            // version from the same setting the players read, so the name cannot drift again.
+            var version = await _repository.GetSettingAsync("LatestClientVersion");
+            var downloadName = string.IsNullOrWhiteSpace(version)
+                ? "Signage_Unicorn_Setup.exe"
+                : $"Signage_Unicorn_Setup_{version}.exe";
+
+            // Streamed, not ReadAllBytesAsync: the installer is ~70 MB and buffering a copy per
+            // request put that much on the heap for every screen downloading at once. Range
+            // processing also lets an interrupted download resume instead of restarting.
+            return PhysicalFile(path, "application/vnd.microsoft.portable-executable", downloadName, enableRangeProcessing: true);
         }
 
         [HttpPost]
