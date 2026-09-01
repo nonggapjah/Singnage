@@ -133,3 +133,11 @@ hooks/logs/
 *.key
 id_rsa
 id_ed25519
+
+# Installers are NOT kept in the repository. The `*.exe` rule above already covers them,
+# but the historical builds under src/signage-unicorn-web/public/setup/ stayed tracked from
+# before that rule existed and were untracked on 01-09-2026 (1.29 GB, 21 files).
+# The fleet is served from the SERVER's own copies (the API reads wwwroot/setup/), which
+# Publish-ClientUpdate.ps1 copies in directly at release time -- the repo was never the source
+# of truth. Proof: production serves 2.7.4 while the newest file ever committed here was 2.5.9.
+# A fresh clone therefore has no /setup/*.exe until a release is published; that is expected.
