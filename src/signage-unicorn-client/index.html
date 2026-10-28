@@ -3,6 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' file:; script-src 'self' file:; style-src 'self' file: 'unsafe-inline'; img-src 'self' file: data: blob:; media-src 'self' file: data: blob:; connect-src https: http:; font-src 'self' file: data:; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'">
     <title>Signage Unicorn - Native Player</title>
     <style>
         body,
@@ -28,7 +29,6 @@
         input:focus {
             outline: 3px solid #00f2ff !important;
             outline-offset: 2px;
-            box-shadow: 0 0 15px rgba(0, 242, 255, 0.5);
         }
 
         #player-container {
@@ -105,9 +105,9 @@
             position: absolute;
             bottom: 20px;
             right: 20px;
-            font-size: 10px;
+            font-size: 12px;
             font-family: monospace;
-            color: rgba(255, 255, 255, 0.2);
+            color: rgba(255, 255, 255, 0.45);
             z-index: 200;
         }
 
@@ -165,8 +165,7 @@
         }
 
         button:hover {
-            opacity: 0.8;
-            box-shadow: 0 0 15px rgba(0, 242, 255, 0.3);
+            opacity: 0.85;
         }
 
         #dashboard-screen {
@@ -193,7 +192,7 @@
             overflow: hidden;
             display: flex;
             flex-direction: column;
-            box-shadow: 0 0 100px rgba(0, 0, 0, 1), 0 0 40px rgba(0, 242, 255, 0.05);
+            box-shadow: 0 0 100px rgba(0, 0, 0, 1);
             position: relative;
         }
 
@@ -217,12 +216,11 @@
         }
 
         .status-pulse {
+            /* static indicator: a pulse would suggest live data this dot does not carry */
             width: 12px;
             height: 12px;
             background: #00f2ff;
             border-radius: 50%;
-            box-shadow: 0 0 15px #00f2ff;
-            animation: pulse 2s infinite;
         }
 
         @keyframes pulse {
@@ -263,8 +261,8 @@
         }
 
         .stat-label {
-            font-size: 10px;
-            color: #555;
+            font-size: 12px;
+            color: #9a9a9a;
             text-transform: uppercase;
             letter-spacing: 1px;
             font-weight: 800;
@@ -288,7 +286,6 @@
         .stat-bar {
             height: 100%;
             background: #00f2ff;
-            box-shadow: 0 0 10px rgba(0, 242, 255, 0.5);
             transition: width 0.5s ease-out;
         }
 
@@ -354,8 +351,8 @@
         }
 
         .btn-text div:last-child {
-            font-size: 10px;
-            color: #555;
+            font-size: 12px;
+            color: #9a9a9a;
             font-family: monospace;
         }
 
@@ -365,8 +362,8 @@
             border-radius: 12px;
             padding: 20px;
             font-family: monospace;
-            font-size: 11px;
-            color: #888;
+            font-size: 12px;
+            color: #9a9a9a;
             height: 100%;
             overflow-y: auto;
             min-height: 200px;
@@ -398,8 +395,8 @@
             border-top: 1px solid #222;
             background: #050505;
             text-align: center;
-            font-size: 10px;
-            color: #444;
+            font-size: 12px;
+            color: #8a8a8a;
             letter-spacing: 1px;
         }
 
@@ -424,14 +421,14 @@
             background: #222;
             border: 1px solid #333;
             border-radius: 5px;
-            font-size: 10px;
+            font-size: 12px;
             font-weight: 900;
             color: #fff;
         }
 
         .shortcut-label {
-            font-size: 8px;
-            color: #555;
+            font-size: 12px;
+            color: #9a9a9a;
             font-weight: 800;
         }
     </style>
@@ -449,7 +446,7 @@
             <span id="status-dot"
                 style="width: 8px; height: 8px; display: inline-block; border-radius: 50%; background: #555; margin-right: 5px;"></span>
             <span id="device-info">INITIALIZING...</span>
-            <span class="app-version" style="margin-left: 10px; opacity: 0.3; font-size: 9px;"></span>
+            <span class="app-version" style="margin-left: 10px; opacity: 0.6; font-size: 12px;"></span>
         </div>
 
         <div id="hud-overlay"></div>
@@ -484,11 +481,11 @@
             <!-- Settings Overlay (Hidden by default) -->
             <div id="config-overlay" class="hidden">
                 <h2 style="margin-bottom: 5px;">UPDATE CONFIGURATION</h2>
-                <p style="color: #555; font-size: 12px; margin-bottom: 30px;">Core system connection settings</p>
+                <p style="color: #9a9a9a; font-size: 14px; margin-bottom: 30px;">Core system connection settings</p>
 
                 <div style="width: 100%; max-width: 400px;">
                     <div class="input-group">
-                        <label>DEVICE ID <span style="color: #ff4d4d; font-size: 9px;">(CRITICAL)</span></label>
+                        <label>DEVICE ID <span style="color: #ff6b6b; font-size: 12px;">(CRITICAL)</span></label>
                         <input type="text" id="dash-device-id-input"
                             style="width: 100%; box-sizing: border-box; background: #000; color: #ff4d4d; border-color: #331111;">
                     </div>
@@ -519,13 +516,22 @@
                 <div>
                     <h2><span class="status-pulse"></span> DEVICE DASHBOARD</h2>
                     <p
-                        style="font-size: 10px; font-family: monospace; color: #555; margin-top: 10px; margin-left: 27px; text-transform: uppercase; letter-spacing: 2px;">
+                        style="font-size: 12px; font-family: monospace; color: #9a9a9a; margin-top: 10px; margin-left: 27px; text-transform: uppercase; letter-spacing: 2px;">
                         Local Diagnostics & Control</p>
+                    <div id="dash-security"
+                        style="font-size: 12px; font-family: monospace; color: #9a9a9a; margin-top: 6px; margin-left: 27px; letter-spacing: 1px;">
+                        DEVICE TOKEN: ---</div>
+                    <div id="dash-logdir"
+                        style="font-size: 12px; font-family: monospace; color: #9a9a9a; margin-top: 4px; margin-left: 27px; letter-spacing: 1px;">
+                        LOGS ---</div>
+                    <div id="dash-api"
+                        style="font-size: 12px; font-family: monospace; color: #9a9a9a; margin-top: 4px; margin-left: 27px; letter-spacing: 1px;">
+                        API ---</div>
                 </div>
                 <div style="text-align: right; display: flex; align-items: center; gap: 20px;">
-                    <div style="font-family: monospace; font-size: 11px;">
+                    <div style="font-family: monospace; font-size: 13px;">
                         <div id="dash-device-name-display" style="font-weight: 900; color: #fff;">NAME: ---</div>
-                        <div style="color: #444; margin-top: 2px;">ID: <span id="dash-device-id">---</span></div>
+                        <div style="color: #9a9a9a; margin-top: 2px;">ID: <span id="dash-device-id">---</span></div>
                     </div>
                     <button id="show-config"
                         style="background: #1a1a1a; padding: 10px; border-radius: 12px; border: 1px solid #333; cursor: pointer;">⚙️</button>
@@ -538,7 +544,7 @@
                         <div class="stat-label">Network Status</div>
                         <div id="dash-status" class="stat-value" style="color: #00f2ff;">ONLINE</div>
                         <div id="dash-ip"
-                            style="font-size: 10px; color: #444; font-family: monospace; margin-top: 5px;">127.0.0.1
+                            style="font-size: 12px; color: #9a9a9a; font-family: monospace; margin-top: 5px;">DIAG PORTAL http://127.0.0.1:8088
                         </div>
                     </div>
                     <div class="stat-card">
@@ -553,7 +559,7 @@
                         <div class="stat-label">Offline Readiness</div>
                         <div id="dash-ready-status" class="stat-value" style="color: #00f2ff;">READY</div>
                         <div
-                            style="display: flex; justify-content: space-between; font-size: 9px; margin-top: 5px; font-family: monospace; color: #444;">
+                            style="display: flex; justify-content: space-between; font-size: 12px; margin-top: 5px; font-family: monospace; color: #9a9a9a;">
                             <span>SYNCED</span>
                             <span><span id="dash-cached-count">0</span> / <span id="dash-total-count">0</span>
                                 CLIPS</span>
@@ -571,7 +577,7 @@
                             </div>
                             <div style="text-align: right;">
                                 <div class="stat-label">Playlist Loop</div>
-                                <div id="dash-loop-info" class="stat-value" style="font-size: 12px; color: #555;">ITEM 0
+                                <div id="dash-loop-info" class="stat-value" style="font-size: 14px; color: #bbbbbb;">ITEM 0
                                     / 0</div>
                             </div>
                         </div>
@@ -579,9 +585,9 @@
                             <div
                                 style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
                                 <div id="dash-current-media"
-                                    style="font-size: 11px; font-weight: 800; color: #00f2ff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px;">
+                                    style="font-size: 14px; font-weight: 800; color: #00f2ff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px;">
                                     ▶ INITIALIZING...</div>
-                                <div style="font-family: monospace; font-size: 10px;"><span id="dash-pos">00:00</span> /
+                                <div style="font-family: monospace; font-size: 12px;"><span id="dash-pos">00:00</span> /
                                     <span id="dash-dur">00:00</span>
                                 </div>
                             </div>
@@ -600,7 +606,8 @@
                             <span class="icon">🎬</span>
                             <div class="btn-text">
                                 <div>SELECT PLAYLIST</div>
-                                <div>Manual Local Override</div>
+                                <!-- #d0d6dc on #2c3e50 = 8.6:1; the shared grey (#9a9a9a) only reaches 3.9:1 on this blue-grey button -->
+                                <div style="color: #d0d6dc;">Manual Local Override</div>
                             </div>
                         </button>
                         <button id="force-sync" class="maintenance-btn primary">
@@ -614,7 +621,7 @@
                             <button id="clear-cache-btn" class="maintenance-btn" style="height: 50px;">
                                 <div class="btn-text">
                                     <div style="color: #ff4d4d;">CLEAR CACHE</div>
-                                    <div style="font-size: 8px;">Wipe local files</div>
+                                    <div style="font-size: 12px;">Wipe local files</div>
                                 </div>
                             </button>
                             <button id="refresh-app-btn" class="maintenance-btn" style="height: 50px;">
@@ -643,7 +650,7 @@
                             </div>
                         </button>
                         <div id="update-status-msg"
-                            style="font-size: 10px; color: #555; margin-top: 5px; font-family: monospace; padding-left: 10px;">
+                            style="font-size: 12px; color: #9a9a9a; margin-top: 5px; font-family: monospace; padding-left: 10px;">
                         </div>
                     </div>
 
@@ -727,7 +734,7 @@
             <div id="playlist-list-container"
                 style="flex: 1; overflow-y: auto; padding: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
                 <!-- Playlists injected here -->
-                <div style="color: #444; font-family: monospace;">Fetching playlists from server...</div>
+                <div style="color: #9a9a9a; font-family: monospace;">Fetching playlists from server...</div>
             </div>
         </div>
     </div>
@@ -763,6 +770,13 @@
         </div>
     </div>
 
+    <script src="src/lib/cache-name.js"></script>
+    <script src="src/lib/backoff.js"></script>
+    <script src="src/lib/job-queue.js"></script>
+    <script src="src/lib/health.js"></script>
+    <script src="src/lib/update-url.js"></script>
+    <script src="src/lib/claim.js"></script>
+    <script src="src/lib/playback-batch.js"></script>
     <script src="src/renderer.js"></script>
 </body>
 

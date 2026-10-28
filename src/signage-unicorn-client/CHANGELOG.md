@@ -3,6 +3,70 @@
 รายการอัปเดตและประวัติการแก้ไขระบบ (Patch Version History)
 
 ---
+## [2.8.0] - 2026-10-27 (protocol 2 client; requires API 2.8.0 for device tokens, works against older APIs without them)
+
+#### Round 3 (same day, after the second review)
+- **Update channel, every hop**: the https rule is now enforced on each redirect of the installer AND of the
+  settings that name it (the metadata is fetched by the main process for that reason); a `https -> http`
+  redirect is refused with `INSECURE_UPDATE_URL`. Plain http to loopback (127.0.0.1 / localhost) is accepted
+  as a secure context. Same rule and manual redirect following in UpdaterHelper / UpdaterLauncher / SmartUpdater,
+  whose downloads now carry an overall deadline plus a 60 s read-inactivity deadline.
+- **Token claim retries**: a boot claim that fails with 429 / 5xx / network error is retried on its own
+  bounded schedule (1 min doubling to 30 min, for 24 h); `409 TOKEN_RACE` is retried once after a short
+  jittered delay; the `RECLAIM_TOKEN` pseudo-command (sent after an admin reset) triggers an immediate claim.
+- **API capabilities**: one boot probe of `GET /api/v1/system/capabilities`, shown on the F7 panel (`API ...`).
+- **Superseded loads have no side effects**: the SQLite playlist cache is written only for the current load
+  generation and the fallback playlist is never applied by a stale load.
+- **Attribution-aware change detection**: the content hash includes each item's playlist/item id, so two
+  campaigns built from the same clips are distinguished and proof-of-play names the current campaign
+  (one re-sync pass after this update because the hash format changed; cached files are reused).
+- Smoke test: `npm run smoke:all` runs playback (now including RECLAIM_TOKEN), empty-schedule and
+  update-redirect (a real TLS mock redirecting to http; requires the openssl CLI, skipped otherwise).
+### Security & Reliability Hardening (audit follow-up)
+- **Sandboxed renderer**: `nodeIntegration` off, `contextIsolation` + `sandbox` + `webSecurity` on; all privileged calls go through `preload.js` with an explicit IPC allowlist. Server-provided strings are rendered as text only. Content-Security-Policy added to `index.html`. (F04)
+- **TLS validation restored**: the global `ignore-certificate-errors` switch and the `rejectUnauthorized: false` downloader are gone. Clock skew is detected at boot (`CLOCK_SKEW` log + `w32tm /resync`); only MEDIA downloads may retry without validation on `CERT_NOT_YET_VALID` / `CERT_HAS_EXPIRED`. Installers are never downloaded that way. (F03)
+- **Verified updates**: installer downloads are checked against the server's `ClientDownloadSha256` setting before launch; `update.lock` is written while an installer runs (watchdog and 4 AM relaunch respect it). (F03, F29)
+- **Safe media cache**: cache files are named after the server's stored file (basename of `blobUrl`), every file IPC validates the path stays inside `media_cache`, legacy files are renamed instead of re-downloaded. (F05, F21)
+- **Device token**: sent as `X-Device-Token` when the server issues one; claimed once at startup for existing devices (identity-checked); "TOKEN REJECTED" shown on the F7 dashboard. (F06)
+- **Diagnostics portal**: bound to 127.0.0.1, no wildcard CORS, 64 KB body cap, redacted config, actions require `X-Diag-Token` (token shown on the F7 dashboard). (F09)
+- **Commands**: acknowledged with EXECUTED/FAILED after real execution (restart-type commands ack first), duplicates in flight are ignored, unknown commands ack `UNSUPPORTED`. (F13)
+- **Bounded requests + heartbeat**: every request has a timeout; the heartbeat interval is installed before the first sync and failed heartbeats retry with backoff. (F24)
+- **Serialized sync worker**: playlist downloads use generation ids; switching playlists mid-download can no longer strand the new one. (F25)
+- **Proof-of-play**: each event carries a UUID; only server-accepted events are deleted locally; one in-flight batch. (F26-F28)
+- **Storage budget**: unreferenced cache files are pruned (after sync + daily), SQLite playback_logs capped at 50 000 rows, verified-file set bounded. Real disk numbers via `statfs`. (F31, F40)
+- **Atomic config**: `config.json` written via temp+rename with `config.json.bak` fallback. (F32)
+- **Duration override** is enforced for videos; item completion is atomic. (F34)
+- **Watchdog**: restarts on missing process OR stale `health.json`, skips during updates, max one restart per 2 min; scripts are now packaged. (F30)
+- **Schedule refresh** every 15 minutes while playing the device SCHEDULE. (F17)
+- **F7 dashboard legibility**: minimum 12 px text, grey labels raised to >= 4.5:1 contrast, decorative pulse/glow removed.
+
+### Round 2 (second-pass review follow-up)
+- **Device token claim** no longer goes through `register`: a dedicated `POST /devices/{id}/token/claim` keyed by the STORED device id with hardware evidence (machine uuid + MAC). `register` only yields a token when the client sends `tokenCapable: true` (setup screen / settings dialog). A 401 `DEVICE_TOKEN_INVALID` or 409 at claim schedules one re-claim per 10 minutes; the stored token is never cleared automatically. (Codex 1, 4, 5)
+- **`X-Client-Protocol: 2`** on every device call so the server can keep legacy restart semantics for old clients and lease everything as POLLING for us. (Codex 6)
+- **Empty schedule is authoritative**: a server answer with 0 items stops playback, shows the idle jingle, remembers `SCHEDULE`, cancels queued downloads; the local fallback folder is used only when the server is unreachable and nothing is cached. (Codex 7)
+- **Load generations** are taken before the first `await`; a playlist response that arrives after a newer load started is discarded. (Codex 8)
+- **Ready replacement playlists start** even while the current list is skipping missing files; `isPlaying` is only set once media is really on screen; after a full lap of skips the jingle is shown and retries slow down. (Codex 9)
+- **Fetch deadlines cover the body**, not just the headers (one AbortController per request, released when the JSON is consumed). (Codex 20)
+- **Single tracked skip/retry timer**, cancelled on every transition and bound to the playback token. (Codex 21)
+- **Renderer liveness**: the renderer reports `report-health` every 15 s; `health.json` is derived from those reports (`rendererStale` after 60 s, one page reload after 3 min). `Watchdog.ps1` treats `rendererStale` as unhealthy. (Codex 22)
+- **Proof-of-play upload**: 503 `RETRY_LATER`, any 5xx/4xx or a network failure keeps every event and backs off; only `rejected` events are parked. (Codex 10/11, contract T6)
+- **HTTPS only for updates**: the settings server and the installer URL must be https in the client and in all three updater helpers (`--allow-insecure` / `config.allowInsecureUpdates` is the documented UNSAFE override); `Publish-ClientUpdate.ps1` refuses a non-https `-ServerUrl`. (Codex 12)
+- **Persistent rotating log** at `<userData>/logs/app-YYYYMMDD.log` (5 MB x 7) with main output and renderer `addLog` lines; the folder is shown on the F7 dashboard.
+- **Watchdog self-registration**: `Watchdog.ps1` is copied to `<userData>/watchdog/` and a per-user ONLOGON task `SignageUnicornWatchdog` is created when missing (`config.watchdogAutoRegister: false` disables).
+- **Tests**: `npm test` (node:test over `src/lib/*`) and `npm run smoke` (boots the real app against a mock API in an isolated user-data folder; scenarios `playback` and `empty-schedule`).
+
+#### Round 5 (Codex focused fifth-pass review, 27-10-2026 night)
+- **Pending-playlist cancellation ordering** (`src/renderer.js`): when the server confirms the playing content as authoritative, a pending job for another version (and the swap it armed) is now dropped synchronously *before* the file-existence check yields; after the check the active hash is re-read and, if a swap already in flight completed meanwhile, the confirmed version is queued again instead of being reported ready while the other version plays (`decideAfterVerify` in `src/lib/job-queue.js`, unit-tested).
+
+#### Round 4 (Codex fourth-pass review, 27-10-2026 evening)
+- **Loopback exemption hardened** (Codex #1): the plain-http exemption for the update channel now applies only to a host that *parses* as a loopback IP (127.0.0.0/8, ::1, ::ffff:127.x) or is exactly `localhost`; names such as `127.attacker.example` no longer bypass the https rule. Same rule in `src/lib/update-url.js` (main process, every redirect hop) and in UpdaterHelper / UpdaterLauncher / SmartUpdater (`IPAddress.TryParse` + `IsLoopback`).
+- **Obsolete pending swap cancelled** (Codex #8): when the server confirms that the content already playing is the current one, a playlist that was still queued for a smooth swap (e.g. B queued while A played, then A requested again) is dropped together with its download ownership instead of swapping in later. Pure rule `jobQueue.reconcileWithActive()` is unit-tested.
+- **Legacy cache adoption requires a verified hash** (Codex #10): a file cached by an older client under its logical name is renamed to the new stored name only when the server sent a usable `fileHash` that verifies; without a hash the stored file is downloaded instead of trusting unverified bytes.
+
+## [2.7.7] - 2026-08-31
+### Release Build
+- **No functional change from 2.7.6.** Rebuilt as an installer so the fleet can move off the released 2.5.9 and pick up the 2.7.5/2.7.6 auto-playlist fixes (device resumes its assigned playlist after a reinstall instead of sitting idle).
+
 ## [2.7.6] - 2026-06-22
 ### Fix: Auto-Load Playlist on Boot Without Local State
 - **Server-Resolved Playlist Fallback**: On boot, if the device has no locally remembered playlist (`lastPlaylistId`) — which happens after a reinstall or any config reset — the client now asks the server what to play instead of sitting idle and requiring a manual selection. It first tries the device's last-known `currentPlaylistId`, then falls back to the device's assigned SCHEDULE. This fixes the 2.7.5 case where reinstalled devices (whose config bypasses the registration screen) still required picking a playlist by hand.

@@ -1,6 +1,6 @@
 {
   "name": "signage-unicorn-client",
-  "version": "2.7.6",
+  "version": "2.8.0",
   "description": "Standalone Player for Signage Unicorn",
   "main": "main.js",
   "author": "Signage Unicorn Team",
@@ -8,7 +8,12 @@
   "scripts": {
     "start": "electron .",
     "build": "electron-builder",
-    "rebuild": "electron-rebuild -f -w better-sqlite3"
+    "rebuild": "electron-rebuild -f -w better-sqlite3",
+    "test": "node --test",
+    "smoke": "node smoke/run-smoke.js",
+    "smoke:all": "node smoke/run-all.js",
+    "sqlite:prebuild": "cd node_modules/better-sqlite3 && node ../prebuild-install/bin.js -r electron -t 40.10.6",
+    "postinstall": "node scripts/postinstall-sqlite.js"
   },
   "dependencies": {
     "better-sqlite3": "^12.6.2",
@@ -16,7 +21,7 @@
   },
   "devDependencies": {
     "@electron/rebuild": "^4.0.3",
-    "electron": "^31.0.0",
+    "electron": "^40.10.6",
     "electron-builder": "^24.13.3",
     "electron-rebuild": "^3.2.9"
   },
@@ -29,12 +34,19 @@
       "**/better-sqlite3/build/**"
     ],
     "compression": "maximum",
+    "electronLanguages": [
+      "en-US",
+      "th"
+    ],
     "directories": {
       "output": "dist"
     },
     "files": [
       "main.js",
       "index.html",
+      "StartWatchdog.bat",
+      "Watchdog.ps1",
+      "preload.js",
       "src/**/*",
       "assets/**/*",
       "node_modules/**/*",
@@ -48,7 +60,16 @@
       "!node_modules/**/README*",
       "!node_modules/**/.github/**",
       "!node_modules/**/docs/**",
-      "!node_modules/**/examples/**"
+      "!node_modules/**/examples/**",
+      "!node_modules/better-sqlite3/deps/**",
+      "!node_modules/better-sqlite3/src/**",
+      "!node_modules/better-sqlite3/build/**/*.obj",
+      "!node_modules/better-sqlite3/build/**/*.pdb",
+      "!node_modules/better-sqlite3/build/**/*.iobj",
+      "!node_modules/better-sqlite3/build/**/*.ipdb",
+      "!node_modules/prebuild-install/**",
+      "!test/**",
+      "!smoke/**"
     ],
     "win": {
       "target": [
