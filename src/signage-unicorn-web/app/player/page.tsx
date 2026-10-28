@@ -1371,7 +1371,7 @@ export default function PlayerPage() {
                         <div className="text-4xl">{volume === 0 ? '🔇' : volume < 50 ? '🔉' : '🔊'}</div>
                         <div className="w-48 h-2 bg-white/10 rounded-full overflow-hidden border border-white/5">
                             <div
-                                className="h-full bg-gradient-to-r from-accent-purple to-accent-cyan transition-all duration-300 shadow-[0_0_10px_rgba(0,242,255,0.5)]"
+                                className="h-full bg-gradient-to-r from-accent-purple to-accent-cyan transition-all duration-300"
                                 style={{ width: `${volume}%` }}
                             />
                         </div>

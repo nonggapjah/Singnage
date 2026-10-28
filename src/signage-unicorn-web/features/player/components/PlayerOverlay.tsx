@@ -153,7 +153,7 @@ export const PlayerOverlay: React.FC<PlayerOverlayProps> = ({
     return (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/90 backdrop-blur-md animate-in fade-in duration-200 font-sans">
             <div className="w-full max-w-4xl p-4">
-                <div className="glass-panel rounded-2xl border border-accent-cyan/30 shadow-[0_0_80px_rgba(0,242,255,0.1)] relative overflow-hidden flex flex-col max-h-[80vh]">
+                <div className="glass-panel rounded-2xl border border-accent-cyan/30 relative overflow-hidden flex flex-col max-h-[80vh]">
 
                     {/* Header */}
                     <div className="p-8 border-b border-white/10 flex justify-between items-center bg-white/5">
@@ -225,7 +225,7 @@ export const PlayerOverlay: React.FC<PlayerOverlayProps> = ({
                                         <div className="text-[10px] text-gray-500 uppercase tracking-widest mb-2">Storage</div>
                                         <div className="text-white font-bold text-sm">42.5 GB / 128 GB</div>
                                         <div className="w-full h-1 bg-white/5 mt-2 rounded-full overflow-hidden">
-                                            <div className="w-[30%] h-full bg-accent-cyan shadow-[0_0_8px_rgba(0,242,255,0.4)]"></div>
+                                            <div className="w-[30%] h-full bg-accent-cyan"></div>
                                         </div>
                                     </div>
 
@@ -249,7 +249,7 @@ export const PlayerOverlay: React.FC<PlayerOverlayProps> = ({
 
                                         <div className="w-full h-1.5 bg-white/5 mt-2 rounded-full overflow-hidden">
                                             <div
-                                                className={`h-full transition-all duration-1000 ${hasSyncError ? 'bg-yellow-600' : cacheProgress === 100 ? 'bg-accent-cyan shadow-[0_0_8px_rgba(0,242,255,0.5)]' : 'bg-yellow-500'}`}
+                                                className={`h-full transition-all duration-1000 ${hasSyncError ? 'bg-yellow-600' : cacheProgress === 100 ? 'bg-accent-cyan' : 'bg-yellow-500'}`}
                                                 style={{ width: `${cacheProgress}%` }}
                                             />
                                         </div>

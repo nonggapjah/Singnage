@@ -189,7 +189,7 @@ export default function AdminLayout({
 
                 <div className={`p-8 pb-4 flex items-center ${sidebarCollapsed ? 'justify-center px-0' : 'justify-between'}`}>
                     <Link href="/" className="flex items-center gap-3 group rounded-xl" aria-label="Signage Unicorn home">
-                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-accent-purple to-accent-cyan flex items-center justify-center text-xl shadow-[0_0_20px_rgba(0,242,255,0.3)] group-hover:scale-110 transition-transform flex-shrink-0" aria-hidden="true">
+                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-accent-purple to-accent-cyan flex items-center justify-center text-xl group-hover:scale-110 transition-transform flex-shrink-0" aria-hidden="true">
                             🦄
                         </div>
                         {!sidebarCollapsed && (

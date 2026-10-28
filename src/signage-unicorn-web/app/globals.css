@@ -12,8 +12,6 @@
    ------------------------------------------------------------------ */
 @theme {
   --font-sans: var(--font-noto-sans-thai), ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
-  --color-accent-cyan: #00f2ff;
-  --color-accent-purple: #9d00ff;
 }
 
 @theme inline {
@@ -36,6 +34,12 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  /* Accent utilities (text-accent-cyan, from-accent-cyan, ...) now follow the
+     theme tokens instead of a hardcoded neon value, so they read correctly in
+     both themes. Both aliases point at the same calm accent, which also flattens
+     the old cyan->purple brand gradients into a single solid colour. */
+  --color-accent-cyan: var(--accent-cyan);
+  --color-accent-purple: var(--accent-purple);
 }
 
 /* `dark:` follows the in-app theme toggle (data-theme), not the OS setting. */
@@ -50,8 +54,8 @@
   --card-foreground: #ffffff;
   --popover: #18181b;
   --popover-foreground: #ffffff;
-  --primary: #00f2ff;
-  --primary-foreground: #000000;
+  --primary: #2563eb;
+  --primary-foreground: #ffffff;
   --secondary: #27272a;
   --secondary-foreground: #ffffff;
   --muted: #27272a;
@@ -62,11 +66,11 @@
   --destructive-foreground: #ffffff;
   --border: #27272a;
   --input: #27272a;
-  --ring: #00f2ff;
+  --ring: #3b82f6;
   --card-solid: #18181b;
 
-  --accent-cyan: #00f2ff;
-  --accent-purple: #9d00ff;
+  --accent-cyan: #60a5fa;
+  --accent-purple: #60a5fa;
   --glass-bg: rgba(255, 255, 255, 0.03);
   --glass-border: rgba(255, 255, 255, 0.08);
   --glass-blur: blur(16px);
@@ -75,29 +79,35 @@
 }
 
 [data-theme='light'] {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Soft off-white, not pure #fff: easier on the eyes, and it lets the white
+     cards stand out instead of the whole page being one flat glaring sheet. */
+  --background: #f3f5f8;
+  --foreground: #1f2733;
   --card: #ffffff;
-  --card-foreground: #171717;
+  --card-foreground: #1f2733;
   --popover: #ffffff;
-  --popover-foreground: #171717;
-  --primary: #00f2ff;
-  /* Black on cyan: ~13:1. The previous white-on-cyan was ~1.3:1. */
-  --primary-foreground: #000000;
-  --secondary: #f4f4f5;
-  --secondary-foreground: #18181b;
-  --muted: #f4f4f5;
-  --muted-foreground: #71717a;
-  --accent: #f4f4f5;
-  --accent-foreground: #18181b;
-  --destructive: #ef4444;
+  --popover-foreground: #1f2733;
+  /* Calm, professional blue (no neon). White on #2563eb is ~5.2:1. */
+  --primary: #2563eb;
+  --primary-foreground: #ffffff;
+  --secondary: #eceff4;
+  --secondary-foreground: #1f2733;
+  --muted: #eceff4;
+  --muted-foreground: #5a6473;
+  --accent: #eceff4;
+  --accent-foreground: #1f2733;
+  --destructive: #dc2626;
   --destructive-foreground: #ffffff;
-  --border: #e4e4e7;
-  --input: #e4e4e7;
-  --ring: #00f2ff;
+  --border: #dde2ea;
+  --input: #dde2ea;
+  --ring: #2563eb;
   --card-solid: #ffffff;
-  --glass-bg: rgba(0, 0, 0, 0.04);
-  --glass-border: rgba(0, 0, 0, 0.12);
+  /* Accent used as inline text/affordance colour. #2563eb is ~5.2:1 on white;
+     the old neon #00f2ff was ~1.3:1 (unreadable). */
+  --accent-cyan: #2563eb;
+  --accent-purple: #2563eb;
+  --glass-bg: rgba(255, 255, 255, 0.72);
+  --glass-border: rgba(15, 23, 42, 0.10);
 
   color-scheme: light;
 }
@@ -107,12 +117,8 @@ body {
   color: var(--foreground);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  /* Static gradient wash. `background-attachment: fixed` was removed: it
-     forces a full repaint of the gradient on every scroll frame. */
-  background-image:
-    radial-gradient(circle at 50% -20%, rgba(157, 0, 255, 0.12) 0%, transparent 50%),
-    radial-gradient(circle at 0% 100%, rgba(0, 242, 255, 0.06) 0%, transparent 40%);
-  background-repeat: no-repeat;
+  /* Flat background. The neon purple/cyan radial washes were removed for a
+     calmer, non-gradient look. */
 }
 
 /* Keyboard focus is always visible. Components may remove the default
@@ -150,14 +156,14 @@ body {
 
 .glass-card:hover {
   background: color-mix(in srgb, var(--foreground) 6%, transparent);
-  border-color: rgba(0, 242, 255, 0.4);
+  border-color: color-mix(in srgb, var(--foreground) 18%, transparent);
   transform: translateY(-2px);
-  box-shadow: 0 12px 30px -12px rgba(0, 242, 255, 0.15);
+  box-shadow: 0 12px 30px -12px rgba(0, 0, 0, 0.25);
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, var(--accent-purple), var(--accent-cyan));
-  color: white;
+  background: var(--primary);
+  color: var(--primary-foreground);
   padding: 0.6rem 1.8rem;
   border-radius: 0.75rem;
   font-weight: 700;
@@ -172,16 +178,15 @@ body {
 
 .btn-primary:hover {
   transform: translateY(-2px);
-  box-shadow: 0 0 30px rgba(0, 242, 255, 0.4);
-  filter: brightness(1.1);
+  box-shadow: 0 6px 18px -6px rgba(0, 0, 0, 0.35);
+  filter: brightness(1.08);
 }
 
-/* Headline accent: solid foreground colour with a faint glow. The old
-   gradient-clipped text had no real contrast guarantee and was invisible
-   in the light theme. */
+/* Headline: plain solid foreground colour. The neon glow (text-shadow) was
+   removed along with the rest of the neon treatment; the class name stays so
+   the markup does not need to change. */
 .neon-text {
   color: var(--foreground);
-  text-shadow: 0 0 18px rgba(0, 242, 255, 0.25);
 }
 
 .custom-scrollbar::-webkit-scrollbar {
