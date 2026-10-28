@@ -95,7 +95,14 @@ export default function UserManagementPage() {
                                 </div>
                                 <button
                                     type="button"
-                                    onClick={() => currentUser && handleEditUser(currentUser as User)}
+                                    onClick={() => {
+                                        // The auth-context profile has no userId, so editing it through
+                                        // EditUserModal would hit the create path (POST /users) and make a
+                                        // duplicate. Resolve the real management record (with userId) first.
+                                        const me = users.find(u => u.username === currentUser?.username);
+                                        if (me) handleEditUser(me);
+                                        else alert('Could not load your account record yet. Refresh and try again.');
+                                    }}
                                     className="absolute bottom-0 right-0 w-8 h-8 rounded-full bg-foreground text-background flex items-center justify-center hover:scale-110 transition-transform shadow-lg cursor-pointer"
                                     title="Edit my profile"
                                     aria-label="Edit my profile"

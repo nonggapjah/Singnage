@@ -40,6 +40,7 @@ export const DevicePlaylistModal: React.FC<DevicePlaylistModalProps> = ({ isOpen
     const { showModal } = useUI();
     const [assignments, setAssignments] = useState<Assignment[]>([]);
     const [loading, setLoading] = useState(true);
+    const [loadFailed, setLoadFailed] = useState(false);
     const [saving, setSaving] = useState(false);
     const [resetting, setResetting] = useState(false);
     const [resettingToken, setResettingToken] = useState(false);
@@ -65,6 +66,7 @@ export const DevicePlaylistModal: React.FC<DevicePlaylistModalProps> = ({ isOpen
 
     const fetchAssignments = async () => {
         setLoading(true);
+        setLoadFailed(false);
         try {
             const res = await deviceApi.getAssignedPlaylists(deviceId);
             if (res.success && res.data) {
@@ -75,15 +77,24 @@ export const DevicePlaylistModal: React.FC<DevicePlaylistModalProps> = ({ isOpen
                     endDate: parseUtcToLocalInput(a.endDate),
                 }));
                 setAssignments(formatted);
+            } else {
+                // Load failed (not a device with an empty schedule). Leaving assignments as [] and
+                // allowing a save would overwrite the real schedule with nothing -- block it.
+                setLoadFailed(true);
             }
         } catch (e) {
             console.error(e);
+            setLoadFailed(true);
         } finally {
             setLoading(false);
         }
     };
 
     const handleSave = async () => {
+        if (loadFailed) {
+            showModal({ title: 'ERROR', message: 'The current schedule could not be loaded, so it cannot be saved (that would erase it). Close and reopen to retry.', type: 'ERROR' });
+            return;
+        }
         setSaving(true);
         try {
             const payload = assignments.map(a => ({
@@ -370,7 +381,8 @@ export const DevicePlaylistModal: React.FC<DevicePlaylistModalProps> = ({ isOpen
                 <button
                     type="button"
                     onClick={handleSave}
-                    disabled={saving || loading}
+                    disabled={saving || loading || loadFailed}
+                    title={loadFailed ? 'The schedule could not be loaded; saving is blocked to avoid erasing it.' : undefined}
                     className="flex-[2] py-4 rounded-xl bg-primary text-primary-foreground font-black uppercase tracking-[0.2em] hover:brightness-110 disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-xs"
                 >
                     {saving ? 'Saving schedule…' : 'Save & sync'}

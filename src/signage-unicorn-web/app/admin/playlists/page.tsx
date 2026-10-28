@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Playlist } from '@/features/playlists/types/playlist';
 import { playlistApi } from '@/features/playlists/api/playlist-api';
 import { PlaylistTable } from '@/features/playlists/components/PlaylistTable';
@@ -33,17 +33,21 @@ export default function PlaylistsPage() {
         return () => clearTimeout(timer);
     }, [searchQuery, filterStatus, sortBy]);
 
+    const playlistSeq = useRef(0);
     const loadPlaylists = async () => {
+        const seq = ++playlistSeq.current;   // only the latest load may commit its result
         setLoading(true);
         try {
             const res = await playlistApi.getAll(false, searchQuery);
+            if (seq !== playlistSeq.current) return; // a newer load superseded this response
             if (res.success && res.data) {
                 setPlaylists(res.data);
             }
         } catch (error) {
+            if (seq !== playlistSeq.current) return;
             console.error("Failed to load playlists", error);
         } finally {
-            setLoading(false);
+            if (seq === playlistSeq.current) setLoading(false);
         }
     };
 

@@ -27,12 +27,11 @@ export const userApi = {
     },
 
     create: async (data: CreateUserData): Promise<ApiResponse<boolean>> => {
+        // No default password: a caller that omits one is a bug, not a request for a shared
+        // well-known credential. The create form requires and validates the password.
         return apiFetch('/users', {
             method: 'POST',
-            body: JSON.stringify({
-                ...data,
-                password: data.password || '123456' // Default password if not provided
-            }),
+            body: JSON.stringify(data),
         });
     },
 

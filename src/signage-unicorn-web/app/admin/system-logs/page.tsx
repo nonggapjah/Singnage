@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { apiFetch } from '@/lib/api-fetch';
 import { useUI } from '@/features/ui/context/UIContext';
 import { useVisibleInterval } from '@/features/ui/hooks/useVisibleInterval';
@@ -83,7 +83,9 @@ export default function SystemLogsPage() {
     const [loading, setLoading] = useState(false);
     const [autoRefresh, setAutoRefresh] = useState(false);
 
+    const logsSeq = useRef(0);
     const fetchLogs = useCallback(async () => {
+        const seq = ++logsSeq.current;   // only the latest fetch may commit its result
         setLoading(true);
         try {
             // Local wall-clock inputs -> UTC "Z" on a 2.8+ API, bare local string on 2.7.x (#18).
@@ -104,15 +106,17 @@ export default function SystemLogsPage() {
             }
 
             const res = await apiFetch(`/logs?${query.toString()}`);
+            if (seq !== logsSeq.current) return; // a newer fetch superseded this response
             if (res.success && res.data) {
                 setLogs(res.data);
             } else {
                 setLogs([]);
             }
         } catch (error) {
+            if (seq !== logsSeq.current) return;
             console.error('Failed to fetch logs', error);
         } finally {
-            setLoading(false);
+            if (seq === logsSeq.current) setLoading(false);
         }
     }, [startDate, startTime, endDate, endTime, filterType, page]);
 

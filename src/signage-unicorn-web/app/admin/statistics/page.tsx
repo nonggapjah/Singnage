@@ -105,23 +105,31 @@ export default function StatisticsPage() {
             const res = await statisticsApi.getExportData(startISO, endISO);
 
             if (res.success && res.data) {
+                // One encoder for every cell: quote the field, double any embedded quote, and prefix a
+                // single quote to anything starting with a formula character so a media name like
+                // Sale "October" or =cmd() can neither break the CSV nor run in a spreadsheet.
+                const csvCell = (v: unknown) => {
+                    let s = v === null || v === undefined ? '' : String(v);
+                    if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+                    return `"${s.replace(/"/g, '""')}"`;
+                };
                 const header = ['Played At', 'Device ID', 'Device Name', 'Branch Code', 'Supplier', 'Playlist ID', 'Playlist Name', 'Media ID', 'Media Name', 'File Name', 'Duration (s)', 'Result'];
                 const rows = res.data.map(d => [
-                    `"${d.playedAt}"`,
-                    `"${d.deviceId || ''}"`,
-                    `"${d.deviceName || ''}"`,
-                    `"${d.branchCode || ''}"`,
-                    `"${d.supplierCode || ''}"`,
-                    `"${d.playlistId || ''}"`,
-                    `"${d.playlistName || (d.playlistId ? (playlistMap[d.playlistId] || '') : '')}"`,
-                    `"${d.mediaId || ''}"`,
-                    `"${d.mediaName || ''}"`,
-                    `"${d.fileName || ''}"`,
-                    d.durationSec,
-                    `"${d.result || ''}"`
+                    csvCell(d.playedAt),
+                    csvCell(d.deviceId || ''),
+                    csvCell(d.deviceName || ''),
+                    csvCell(d.branchCode || ''),
+                    csvCell(d.supplierCode || ''),
+                    csvCell(d.playlistId || ''),
+                    csvCell(d.playlistName || (d.playlistId ? (playlistMap[d.playlistId] || '') : '')),
+                    csvCell(d.mediaId || ''),
+                    csvCell(d.mediaName || ''),
+                    csvCell(d.fileName || ''),
+                    csvCell(d.durationSec),
+                    csvCell(d.result || '')
                 ]);
 
-                const csvContent = [header.join(','), ...rows.map(r => r.join(','))].join('\n');
+                const csvContent = [header.map(csvCell).join(','), ...rows.map(r => r.join(','))].join('\r\n');
                 const blob = new Blob(["﻿" + csvContent], { type: 'text/csv;charset=utf-8;' });
                 const url = URL.createObjectURL(blob);
                 const link = document.createElement('a');

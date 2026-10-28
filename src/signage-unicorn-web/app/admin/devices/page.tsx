@@ -94,6 +94,9 @@ export default function DevicesPage() {
     const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
     const [screenshotLoading, setScreenshotLoading] = useState(false);
     const screenshotUrlRef = useRef<string | null>(null);
+    // The device the screenshot viewer is currently showing. A ref (not just the state) so an
+    // in-flight loadScreenshot can tell, at commit time, whether the viewer has since switched.
+    const activeScreenshotDeviceIdRef = useRef<string | null>(null);
     const screenshotPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     const [mediaMap, setMediaMap] = useState<Record<string, string>>({});
@@ -357,6 +360,12 @@ export default function DevicesPage() {
     const loadScreenshot = async (deviceId: string) => {
         setScreenshotLoading(true);
         const url = await deviceApi.fetchScreenshot(deviceId);
+        // The viewer may have closed or switched to another device while this was in flight; a stale
+        // response must not paint over the current device, and its object URL must be released.
+        if (activeScreenshotDeviceIdRef.current !== deviceId) {
+            if (url) URL.revokeObjectURL(url);
+            return;
+        }
         replaceScreenshotUrl(url);
         setScreenshotLoading(false);
     };
@@ -373,6 +382,7 @@ export default function DevicesPage() {
     };
 
     const viewScreenshot = (deviceId: string) => {
+        activeScreenshotDeviceIdRef.current = deviceId;
         setActiveScreenshotDeviceId(deviceId);
         loadScreenshot(deviceId);
         deviceApi.sendCommand(deviceId, 'CAPTURE_SCREEN').catch(console.error);
@@ -391,6 +401,7 @@ export default function DevicesPage() {
 
     const closeScreenshot = () => {
         stopScreenshotPolling();
+        activeScreenshotDeviceIdRef.current = null;
         replaceScreenshotUrl(null);
         setActiveScreenshotDeviceId(null);
     };

@@ -63,37 +63,30 @@ export const EditUserModal: React.FC<EditUserModalProps> = ({ user, isOpen, onCl
     }, [isOpen, user]);
 
     const handleSave = async () => {
+        const fullName = `${formData.firstName} ${formData.lastName}`.trim();
+        const username = formData.contactValue.trim();
+        const isCreate = !(user && user.userId);
+
+        // Validate before touching the API. A create with no password used to silently become the
+        // shared "123456"; now it is rejected.
+        if (!fullName) { alert('Please enter a name.'); return; }
+        if (!username) { alert('Please enter a username (email or phone).'); return; }
+        if (isCreate && !formData.newPassword) { alert('Please set a password for the new account.'); return; }
+        if (formData.newPassword && formData.newPassword.length < 6) { alert('Password must be at least 6 characters.'); return; }
+
         setLoading(true);
         try {
-            const fullName = `${formData.firstName} ${formData.lastName}`.trim();
-            const username = formData.contactValue;
-
-            if (user && user.userId) {
-                // Update
-                const updateData: UserUpdateData = {
-                    fullName,
-                    role: formData.role,
-                };
-
-                await userApi.update(user.userId, updateData);
-
+            if (!isCreate) {
+                // apiFetch resolves (does not throw) on 4xx/5xx, so check success explicitly and
+                // keep the form open on failure instead of closing as if it saved.
+                const res = await userApi.update(user!.userId, { fullName, role: formData.role });
+                if (!res.success) { alert(res.message || 'Failed to update the account.'); return; }
                 if (formData.newPassword) {
-                    // This is tricky as we need old password for current user change,
-                    // but for admin resetting another user's password, we usually have a different endpoint or logic.
-                    // The current API `changePassword` requires oldPassword.
-                    // If this is an Admin function, we might need a `resetPassword` endpoint.
-                    // For now, I'll alert if they try to change password that it might not work without old pw logic or backend support.
-                    // However, if creating NEW user, we use it.
-                    alert("Password update for existing users might require 'Reset Password' flow (not implemented in this mock).");
+                    alert("To change an existing user's password, use the Reset Password flow (not available here).");
                 }
             } else {
-                // Create
-                await userApi.create({
-                    username,
-                    password: formData.newPassword || '123456',
-                    fullName,
-                    role: formData.role
-                });
+                const res = await userApi.create({ username, password: formData.newPassword, fullName, role: formData.role });
+                if (!res.success) { alert(res.message || 'Failed to create the account.'); return; }
             }
             await onSave();
             onClose();

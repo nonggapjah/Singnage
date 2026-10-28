@@ -32,8 +32,10 @@ export const playlistApi = {
         return apiFetch(`/playlists${qs ? `?${qs}` : ''}`);
     },
 
-    getActive: async (): Promise<ApiResponse<Playlist[]>> => {
-        return apiFetch('/playlists/active');
+    getActive: async (init?: ApiFetchInit): Promise<ApiResponse<Playlist[]>> => {
+        // init lets the web player pass { scope: 'device' } (and a token) so the list loads from the
+        // DEVICE API base URL, not the same-origin admin API, when the two are configured separately.
+        return apiFetch('/playlists/active', init);
     },
 
     /** `init` lets the web player pass `{ scope: 'device', deviceToken }` so the call uses the device base URL (round-4 #9). */

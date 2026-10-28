@@ -108,7 +108,7 @@ export const PlayerOverlay: React.FC<PlayerOverlayProps> = ({
     const loadPlaylists = async () => {
         setLoading(true);
         try {
-            const res = await playlistApi.getActive(); // Dedicated endpoint for Active only
+            const res = await playlistApi.getActive({ scope: 'device' }); // device-scoped: use the device API base, not the admin origin
             if (res.success && res.data) {
                 setPlaylists(res.data);
             }
@@ -151,7 +151,7 @@ export const PlayerOverlay: React.FC<PlayerOverlayProps> = ({
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/90 backdrop-blur-md animate-in fade-in duration-200 font-sans">
+        <div data-theme="dark" className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/90 backdrop-blur-md animate-in fade-in duration-200 font-sans">
             <div className="w-full max-w-4xl p-4">
                 <div className="glass-panel rounded-2xl border border-accent-cyan/30 relative overflow-hidden flex flex-col max-h-[80vh]">
 

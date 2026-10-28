@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { expiryDateForApi, parseApiDate, utcIsoToLocalDateInput } from '@/features/ui/utils/datetime';
 import { getCapabilities, peekCapabilities, LEGACY_CAPABILITIES } from '@/lib/api-capabilities';
 import Link from 'next/link';
@@ -146,7 +146,9 @@ export default function MediaLibraryPage() {
         }
     };
 
+    const mediaSeq = useRef(0);
     const loadMedia = async () => {
+        const seq = ++mediaSeq.current;   // only the latest load may commit its result
         setLoading(true);
         try {
             // backend expects: searchTerm, supplierCode, remark1, remark2, status, mediaType
@@ -158,13 +160,15 @@ export default function MediaLibraryPage() {
                 status: filters.status, // 'active' | 'inactive' | 'all'
                 mediaType: filters.mediaType // 'video' | 'image' | 'all'
             });
+            if (seq !== mediaSeq.current) return; // a newer load superseded this response
             if (res.success && res.data) {
                 setMediaList(res.data);
             }
         } catch (error) {
+            if (seq !== mediaSeq.current) return;
             console.error("Failed to load media", error);
         } finally {
-            setLoading(false);
+            if (seq === mediaSeq.current) setLoading(false);
         }
     };
 
