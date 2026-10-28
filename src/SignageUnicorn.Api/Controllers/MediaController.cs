@@ -77,6 +77,11 @@ namespace SignageUnicorn.Api.Controllers
                 }
                 return BadRequest(ApiResponse<MediaFile>.ErrorResponse(400, "Failed to upload media"));
             }
+            catch (MediaValidationException ex)
+            {
+                // F07: disallowed type, or content that does not match its extension.
+                return BadRequest(ApiResponse<MediaFile>.ErrorResponse(400, ex.Message));
+            }
             catch (Exception ex)
             {
                 var userId = GetUserId();
@@ -148,11 +153,13 @@ namespace SignageUnicorn.Api.Controllers
                 var userId = GetUserId();
                 var result = await _service.ReplaceMediaAsync(request.OldMediaId, request.NewMediaId, request.ArchiveOld, userId);
                 
-                if (result)
+                // Round 5 (item 10): a swap that completed while the new media was being re-encoded
+                // reports that in its message (its file name was not versioned); nothing stale was written.
+                if (result.Success)
                 {
-                    return Ok(ApiResponse<bool>.SuccessResponse(true, "Media swapped successfully"));
+                    return Ok(ApiResponse<bool>.SuccessResponse(true, result.Message));
                 }
-                return BadRequest(ApiResponse<bool>.ErrorResponse(400, "Failed to swap media. Verify IDs exist."));
+                return BadRequest(ApiResponse<bool>.ErrorResponse(400, ("Failed to swap media. " + result.Message).Trim()));
             }
             catch (Exception ex)
             {
@@ -165,6 +172,8 @@ namespace SignageUnicorn.Api.Controllers
         [HttpPost("{id}/replace")]
         [Authorize(Roles = UserRoles.Admin + "," + UserRoles.Editor)]
         [Consumes("multipart/form-data")]
+        [RequestFormLimits(MultipartBodyLengthLimit = 2147483648)] // 2 GB
+        [DisableRequestSizeLimit]
         public async Task<IActionResult> Replace(string id, [FromForm] MediaUploadRequest request)
         {
             try
@@ -177,6 +186,11 @@ namespace SignageUnicorn.Api.Controllers
                     return Ok(ApiResponse<MediaFile>.SuccessResponse(result, "Media content replaced successfully"));
                 }
                 return BadRequest(ApiResponse<MediaFile>.ErrorResponse(400, "Failed to replace media content. Verify ID exists."));
+            }
+            catch (MediaValidationException ex)
+            {
+                // F07: disallowed type, or content that does not match its extension.
+                return BadRequest(ApiResponse<MediaFile>.ErrorResponse(400, ex.Message));
             }
             catch (Exception ex)
             {

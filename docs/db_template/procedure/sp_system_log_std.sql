@@ -34,12 +34,11 @@ BEGIN
     DECLARE @err_code INT = 0;
     DECLARE @err_flag BIT = 0;
     DECLARE @msg NVARCHAR(4000) = N'';
-    
+
     /* =============================================
        TIMEZONE ADJUSTMENT (Local +7 -> UTC)
     ============================================= */
-    IF @p_start_date IS NOT NULL SET @p_start_date = DATEADD(HOUR, -7, @p_start_date);
-    IF @p_end_date IS NOT NULL SET @p_end_date = DATEADD(HOUR, -7, @p_end_date);
+    -- Times are UTC end to end (contract item 4): the +7/-7 hour shifts were removed.
 
     IF @p_action IS NULL
     BEGIN
@@ -111,17 +110,17 @@ BEGIN
     IF @p_action = 'CLEANUP'
     BEGIN
         DECLARE @DeletedRows INT = 1;
-        
+
         -- Delete in batches of 5000 to prevent long table locks and log growth issues
         WHILE @DeletedRows > 0
         BEGIN
             DELETE TOP (5000) FROM sn_system_logs
             WHERE created_at < DATEADD(DAY, -@p_retention_days, SYSUTCDATETIME());
-            
+
             SET @DeletedRows = @@ROWCOUNT;
-            
+
             -- Small delay if many batches are expected (optional, but keeps system responsive)
-            -- IF @DeletedRows > 0 WAITFOR DELAY '00:00:00.100'; 
+            -- IF @DeletedRows > 0 WAITFOR DELAY '00:00:00.100';
         END
 
         SET @msg = N'Old logs cleaned';
@@ -131,38 +130,38 @@ BEGIN
 ResultSection:
     -- 1. Status Result Set (Always First)
     SELECT @err_code AS err_code, @err_flag AS err_flag, @msg AS msg;
-    
+
     -- 2. Data Result Set
-    IF @err_flag = 0 
+    IF @err_flag = 0
     BEGIN
         IF @p_action = 'GET_LATEST'
         BEGIN
-            SELECT TOP (@p_top) 
-                log_id AS LogId, 
-                log_level AS LogLevel, 
-                source_system AS SourceSystem, 
-                category AS Category, 
-                message AS Message, 
-                stack_trace AS StackTrace, 
-                user_id AS UserId, 
-                ip_address AS IpAddress, 
-                DATEADD(HOUR, 7, created_at) AS CreatedAt
+            SELECT TOP (@p_top)
+                log_id AS LogId,
+                log_level AS LogLevel,
+                source_system AS SourceSystem,
+                category AS Category,
+                message AS Message,
+                stack_trace AS StackTrace,
+                user_id AS UserId,
+                ip_address AS IpAddress,
+                created_at AS CreatedAt
             FROM sn_system_logs
             ORDER BY created_at DESC;
         END
 
         IF @p_action = 'GET_FILTERED'
         BEGIN
-            SELECT 
-                log_id AS LogId, 
-                log_level AS LogLevel, 
-                source_system AS SourceSystem, 
-                category AS Category, 
-                message AS Message, 
-                stack_trace AS StackTrace, 
-                user_id AS UserId, 
-                ip_address AS IpAddress, 
-                DATEADD(HOUR, 7, created_at) AS CreatedAt
+            SELECT
+                log_id AS LogId,
+                log_level AS LogLevel,
+                source_system AS SourceSystem,
+                category AS Category,
+                message AS Message,
+                stack_trace AS StackTrace,
+                user_id AS UserId,
+                ip_address AS IpAddress,
+                created_at AS CreatedAt
             FROM sn_system_logs
             WHERE
                 (@p_start_date IS NULL OR created_at >= @p_start_date)
@@ -177,16 +176,16 @@ ResultSection:
 
         IF @p_action = 'GET_BY_ID'
         BEGIN
-            SELECT 
-                log_id AS LogId, 
-                log_level AS LogLevel, 
-                source_system AS SourceSystem, 
-                category AS Category, 
-                message AS Message, 
-                stack_trace AS StackTrace, 
-                user_id AS UserId, 
-                ip_address AS IpAddress, 
-                DATEADD(HOUR, 7, created_at) AS CreatedAt
+            SELECT
+                log_id AS LogId,
+                log_level AS LogLevel,
+                source_system AS SourceSystem,
+                category AS Category,
+                message AS Message,
+                stack_trace AS StackTrace,
+                user_id AS UserId,
+                ip_address AS IpAddress,
+                created_at AS CreatedAt
             FROM sn_system_logs
             WHERE log_id = @p_log_id;
         END

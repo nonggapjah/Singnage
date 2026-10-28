@@ -14,6 +14,10 @@ namespace SignageUnicorn.Api.Models
         public string? Active { get; set; }
         public string? AvatarUrl { get; set; }
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        // F12: session revocation and lockout state (read from sn_auth_user).
+        public int TokenVersion { get; set; } = 1;
+        public int FailedLoginCount { get; set; }
+        public DateTime? LockedUntil { get; set; }
     }
 
     public class LoginRequest
@@ -44,5 +48,8 @@ namespace SignageUnicorn.Api.Models
         public string FullName { get; set; } = string.Empty;
         public string Role { get; set; } = string.Empty;
         public string? AvatarUrl { get; set; }
+        // Contract T12: "cookie" when the API also set the HttpOnly su_session cookie. The admin
+        // console then stops keeping the token itself; kiosk/web-player paths keep using Token.
+        public string? AuthMode { get; set; }
     }
 }

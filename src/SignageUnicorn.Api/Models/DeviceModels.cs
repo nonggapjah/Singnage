@@ -21,6 +21,18 @@ namespace SignageUnicorn.Api.Models
         public string? AppVersion { get; set; }
         public DateTime? LastCheckIn { get; set; }
         public string? Active { get; set; }
+        // Contract item 6: 'inherit' | 'explicit' (see migration 002).
+        public string? ScheduleMode { get; set; }
+        // Contract item 1: set ONLY on the register response when a token was issued or rotated.
+        // Never populated from the database (only the hash is stored) and never listed.
+        public string? DeviceToken { get; set; }
+        // Contract T11: rollout visibility. Operators switch Security:DeviceAuth to Required only once
+        // every screen shows HasDeviceToken and ClientProtocol >= 2.
+        public bool HasDeviceToken { get; set; }
+        public DateTime? DeviceTokenIssuedAt { get; set; }
+        public int ClientProtocol { get; set; } = 1;
+        // Round 3 (R2): an operator cleared the token and the screen has not claimed a new one yet.
+        public bool TokenResetPending { get; set; }
     }
 
     public class DeviceCommandDto
@@ -50,6 +62,34 @@ namespace SignageUnicorn.Api.Models
 
         [JsonPropertyName("location")]
         public string? Location { get; set; }
+
+        // Contract T1: only a client that can persist a token asks for one (header
+        // X-Device-Token-Capable: 1 is equivalent). Absent on deployed v2.7.x clients.
+        [JsonPropertyName("tokenCapable")]
+        public bool? TokenCapable { get; set; }
+
+        [JsonPropertyName("macAddress")]
+        public string? MacAddress { get; set; }
+    }
+
+    // Contract T2: body of POST /devices/{id}/token/claim.
+    public class DeviceTokenClaimRequest
+    {
+        [JsonPropertyName("deviceKey")]
+        public string? DeviceKey { get; set; }
+
+        [JsonPropertyName("macAddress")]
+        public string? MacAddress { get; set; }
+
+        [JsonPropertyName("appVersion")]
+        public string? AppVersion { get; set; }
+    }
+
+    public class DeviceTokenClaimResponse
+    {
+        public string DeviceId { get; set; } = string.Empty;
+        public string? DeviceUuid { get; set; }
+        public string DeviceToken { get; set; } = string.Empty;
     }
 
     public class HeartbeatRequest
@@ -59,6 +99,11 @@ namespace SignageUnicorn.Api.Models
 
         [JsonPropertyName("deviceKey")]
         public string? DeviceKey { get; set; }
+
+        // Contract item 1: the X-Device-Token header is preferred; the body field is accepted for
+        // clients that cannot set headers.
+        [JsonPropertyName("deviceToken")]
+        public string? DeviceToken { get; set; }
 
         [JsonPropertyName("deviceName")]
         public string? DeviceName { get; set; }
@@ -102,6 +147,27 @@ namespace SignageUnicorn.Api.Models
 
         [JsonPropertyName("macAddress")]
         public string? MacAddress { get; set; }
+
+        // Contract T5: 1 = legacy, 2+ = lease/ack client. The X-Client-Protocol header wins.
+        [JsonPropertyName("clientProtocol")]
+        public int? ClientProtocol { get; set; }
+
+        // Contract T3: filled by the controller after authentication with the ONE row the request
+        // was authenticated as. When set, the repository passes this pair to the procedure instead of
+        // the raw deviceId/deviceKey, so a token for screen A can never update screen B.
+        [JsonIgnore]
+        public long? CanonicalDeviceId { get; set; }
+
+        [JsonIgnore]
+        public string? CanonicalDeviceUuid { get; set; }
+
+        [JsonIgnore]
+        public int ResolvedProtocol { get; set; } = 1;
+
+        // Round 3 (#1): set to false by the controller when sp_device_std must not adopt a
+        // token-protected row by MAC for this (unknown-key) heartbeat.
+        [JsonIgnore]
+        public bool AllowMacAdoption { get; set; } = true;
     }
 
     public class BatchCommandRequest
@@ -149,6 +215,10 @@ namespace SignageUnicorn.Api.Models
 
         [JsonPropertyName("status")]
         public string Status { get; set; } = "EXECUTED";
+
+        // Contract item 2: free-text reason stored in fail_reason when status is FAILED.
+        [JsonPropertyName("message")]
+        public string? Message { get; set; }
     }
 
     public class ScreenshotUploadRequest

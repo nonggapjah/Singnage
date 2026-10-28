@@ -23,6 +23,14 @@ namespace SignageUnicorn.Api.Controllers
             _authService = authService;
         }
 
+        private string? CurrentUserId => User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+        // F02: the role check used to compare the raw string against "admin" while the repository
+        // lower-cased it before storing. "Admin" or "ADMIN" sailed past the editor guard and was
+        // stored as admin. Every role now goes through this one canonical form BEFORE any
+        // authorization decision, and anything outside the known set is rejected outright.
+        private static string? CanonicalRole(string? role) => UserRoles.Canonical(role);
+
         [HttpGet]
         [Authorize(Roles = UserRoles.Admin + "," + UserRoles.Editor)]
         public async Task<IActionResult> GetAll()
@@ -44,12 +52,17 @@ namespace SignageUnicorn.Api.Controllers
         [Authorize(Roles = UserRoles.Admin + "," + UserRoles.Editor)]
         public async Task<IActionResult> Create([FromBody] RegisterRequest request)
         {
+            var role = CanonicalRole(string.IsNullOrWhiteSpace(request.Role) ? UserRoles.Viewer : request.Role);
+            if (role == null)
+                return BadRequest(ApiResponse<bool>.ErrorResponse(400, "Role must be one of admin, editor, viewer."));
+            request.Role = role;
+
             // Safeguard: Editor cannot create Admin
-            if (request.Role == UserRoles.Admin && !User.IsInRole(UserRoles.Admin))
+            if (role == UserRoles.Admin && !User.IsInRole(UserRoles.Admin))
             {
                 return StatusCode(403, ApiResponse<bool>.ErrorResponse(403, "Editors cannot create Admin users."));
             }
-            var executorId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            var executorId = CurrentUserId;
             var success = await _authService.RegisterAsync(request, executorId);
             if (success)
             {
@@ -64,19 +77,37 @@ namespace SignageUnicorn.Api.Controllers
         {
             // Safeguard: Verify target user first
             var target = await _userRepository.GetByIdAsync(id);
-            if (target != null)
-            {
-                // Editor cannot edit Admin
-                if (target.Role == UserRoles.Admin && !User.IsInRole(UserRoles.Admin))
-                    return StatusCode(403, ApiResponse<bool>.ErrorResponse(403, "Editors cannot edit Admin users."));
-            }
+            if (target == null)
+                return NotFound(ApiResponse<bool>.ErrorResponse(404, "User not found"));
 
-            // Safeguard: Editor cannot promote to Admin
-            if (user.Role == UserRoles.Admin && !User.IsInRole(UserRoles.Admin))
-                 return StatusCode(403, ApiResponse<bool>.ErrorResponse(403, "Editors cannot set Admin role."));
+            // Editor cannot edit Admin
+            if (target.Role == UserRoles.Admin && !User.IsInRole(UserRoles.Admin))
+                return StatusCode(403, ApiResponse<bool>.ErrorResponse(403, "Editors cannot edit Admin users."));
+
+            string? role = null;
+            if (!string.IsNullOrWhiteSpace(user.Role))
+            {
+                role = CanonicalRole(user.Role);
+                if (role == null)
+                    return BadRequest(ApiResponse<bool>.ErrorResponse(400, "Role must be one of admin, editor, viewer."));
+
+                // Safeguard: Editor cannot promote to Admin
+                if (role == UserRoles.Admin && !User.IsInRole(UserRoles.Admin))
+                    return StatusCode(403, ApiResponse<bool>.ErrorResponse(403, "Editors cannot set Admin role."));
+
+                // Nobody edits their own role through this endpoint: an editor could otherwise grant
+                // themselves whatever the previous checks let through, and an admin demoting
+                // themselves by accident locks the console.
+                bool isSelf = !string.IsNullOrEmpty(CurrentUserId) && CurrentUserId == id;
+                if (isSelf && !string.Equals(role, target.Role, StringComparison.OrdinalIgnoreCase))
+                    return StatusCode(403, ApiResponse<bool>.ErrorResponse(403, "You cannot change your own role."));
+
+                // Round 4 (#11): the same role is not a role change; do not send it to UPDATE_ROLE.
+                role = UserRoles.ChangeOrNull(target.Role, role);
+            }
+            user.Role = role; // canonical or null (= unchanged)
             user.UserId = id;
-            var executorId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-            var result = await _userRepository.UpdateAsync(user, executorId);
+            var result = await _userRepository.UpdateAsync(user, CurrentUserId);
             if (result.Success)
             {
                 return Ok(ApiResponse<bool>.SuccessResponse(true, "User updated successfully"));
@@ -95,19 +126,23 @@ namespace SignageUnicorn.Api.Controllers
                 if (target.Role == UserRoles.Admin && !User.IsInRole(UserRoles.Admin))
                     return StatusCode(403, ApiResponse<bool>.ErrorResponse(403, "Editors cannot delete Admin users."));
             }
-            var result = await _userRepository.DeleteAsync(id);
+            if (!string.IsNullOrEmpty(CurrentUserId) && CurrentUserId == id)
+                return StatusCode(403, ApiResponse<bool>.ErrorResponse(403, "You cannot deactivate your own account."));
+
+            // F12: this is a real deactivation now (status inactive + all sessions revoked).
+            var result = await _userRepository.DeleteAsync(id, CurrentUserId);
             if (result.Success)
             {
                 return Ok(ApiResponse<bool>.SuccessResponse(true, "User deactivated successfully"));
             }
-            return NotFound(ApiResponse<bool>.ErrorResponse(404, "User not found"));
+            return NotFound(ApiResponse<bool>.ErrorResponse(404, result.Message ?? "User not found"));
         }
 
         [HttpPost("change-password")]
         public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest request)
         {
             // Usually we get UserId from token
-            var userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            var userId = CurrentUserId;
             if (string.IsNullOrEmpty(userId)) return Unauthorized();
 
             var userProfile = await _userRepository.GetByIdAsync(userId);
@@ -124,13 +159,18 @@ namespace SignageUnicorn.Api.Controllers
                 return BadRequest(ApiResponse<bool>.ErrorResponse(400, "Invalid old password"));
             }
 
-            // Update with new password
+            if (string.IsNullOrWhiteSpace(request.NewPassword) || request.NewPassword.Length < 8)
+            {
+                return BadRequest(ApiResponse<bool>.ErrorResponse(400, "New password must be at least 8 characters."));
+            }
+
+            // Update with new password (the procedure bumps token_version, so other sessions end)
             var newHash = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
             var result = await _userRepository.UpdatePasswordAsync(userId, newHash, userId);
-            
+
             if (result.Success)
             {
-                return Ok(ApiResponse<bool>.SuccessResponse(true, "Password changed successfully"));
+                return Ok(ApiResponse<bool>.SuccessResponse(true, "Password changed successfully. Sign in again on other devices."));
             }
             return BadRequest(ApiResponse<bool>.ErrorResponse(500, "Failed to update password"));
         }

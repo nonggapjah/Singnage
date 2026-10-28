@@ -1,4 +1,4 @@
-﻿using SignageUnicorn.Api.Models;
+using SignageUnicorn.Api.Models;
 using SignageUnicorn.Api.Repositories.Interfaces;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -97,52 +97,20 @@ namespace SignageUnicorn.Api.Services
             bool needsTranscoding = false;
             string? localFilePath = null;
 
-            // Handle Local File Upload
+            // Handle Local File Upload (allowlist + magic bytes + staging, see StoreUploadAsync)
             if (request.File != null && request.File.Length > 0)
             {
-                // Ensure wwwroot/media exists
-                string webRootPath = _environment.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
-                string uploadsFolder = Path.Combine(webRootPath, "media");
-                
-                if (!Directory.Exists(uploadsFolder))
-                {
-                     Directory.CreateDirectory(uploadsFolder);
-                }
-
-                // Generate unique filename to prevent overwrites
-                string fileExtension = Path.GetExtension(request.File.FileName);
-                string uniqueFileName = $"{Guid.NewGuid()}{fileExtension}";
-                string filePath = Path.Combine(uploadsFolder, uniqueFileName);
-                localFilePath = filePath;
-
-                // Save file stream
-                using (var fileStream = new FileStream(filePath, FileMode.Create))
-                {
-                    await request.File.CopyToAsync(fileStream);
-                }
-
-                var ext = fileExtension?.ToLowerInvariant();
-                if (ext == ".mp4" || ext == ".mov" || ext == ".avi" || ext == ".webm")
-                {
-                    needsTranscoding = true;
-                }
-
-                var fileInfo = new FileInfo(filePath);
+                var stored = await StoreUploadAsync(request.File);
+                localFilePath = stored.FilePath;
+                needsTranscoding = stored.NeedsTranscoding;
+                fileHash = stored.Hash;
 
                 // Save as relative path for portability, transform to absolute on output
-                finalUrl = $"/media/{uniqueFileName}";
-                
+                finalUrl = $"/media/{stored.UniqueFileName}";
+
                 // Auto-fill metadata if missing
                 if (string.IsNullOrEmpty(request.FileName)) request.FileName = request.File.FileName;
-                if (request.FileSizeKb == null || request.FileSizeKb == 0) request.FileSizeKb = (int)(fileInfo.Length / 1024);
-
-                // Compute MD5 Hash for integrity check
-                using (var md5 = System.Security.Cryptography.MD5.Create())
-                using (var stream = File.OpenRead(filePath))
-                {
-                    var hashBytes = md5.ComputeHash(stream);
-                    fileHash = BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
-                }
+                if (request.FileSizeKb == null || request.FileSizeKb == 0) request.FileSizeKb = stored.SizeKb;
             }
 
             var media = new MediaFile
@@ -168,53 +136,13 @@ namespace SignageUnicorn.Api.Services
                 var createdMedia = TransformToAbsoluteUrl(result.Value);
                 await _systemLog.LogAsync(null, "INFO", $"[MediaService] UPLOAD_SUCCESS | FileName: {createdMedia.FileName} | MediaID: {createdMedia.MediaId}", "API", userId);
 
-                // Start background transcoding if needed, to prevent request timeouts (500)
+                // F22: transcode in the background and publish the result under a NEW file name
+                // with blob_url + hash + size updated in one step (see PublishTranscodedAsync).
                 if (needsTranscoding && !string.IsNullOrEmpty(localFilePath))
                 {
                     var mediaId = result.Value.MediaId;
-                    _ = Task.Run(async () =>
-                    {
-                        try
-                        {
-                            await _systemLog.LogAsync(null, "INFO", $"[MediaService] ASYNC_TRANSCODE_START | MediaID: {mediaId} | FilePath: {localFilePath}", "SYSTEM", userId);
-                            
-                            var convertedPath = await ConvertToBaselineFormatAsync(localFilePath);
-                            var fileInfo = new FileInfo(convertedPath);
-                            
-                            string? finalHash = null;
-                            using (var md5 = System.Security.Cryptography.MD5.Create())
-                            using (var stream = File.OpenRead(convertedPath))
-                            {
-                                var hashBytes = md5.ComputeHash(stream);
-                                finalHash = BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
-                            }
-
-                            // Update database record with converted file details
-                            var existingMedia = await _repository.GetByIdAsync(mediaId);
-                            if (existingMedia != null)
-                            {
-                                existingMedia.FileSizeKb = (int)(fileInfo.Length / 1024);
-                                existingMedia.FileHash = finalHash;
-                                await _repository.ReplaceAsync(existingMedia, userId);
-                                await _systemLog.LogAsync(null, "INFO", $"[MediaService] ASYNC_TRANSCODE_SUCCESS | MediaID: {mediaId}", "SYSTEM", userId);
-
-                                // Trigger Sync in case it was assigned to a playlist/device in the meantime
-                                try
-                                {
-                                    var affectedDevices = await _deviceRepository.GetDevicesByMediaIdAsync(mediaId);
-                                    foreach (var dev in affectedDevices)
-                                    {
-                                        await _deviceRepository.AddCommandAsync(dev.DeviceId, "FORCE_SYNC");
-                                    }
-                                }
-                                catch { }
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            await _systemLog.LogAsync(null, "ERROR", $"[MediaService] ASYNC_TRANSCODE_FAILED | MediaID: {mediaId} | Error: {ex.Message}", "SYSTEM", userId);
-                        }
-                    });
+                    var sourcePath = localFilePath;
+                    _ = Task.Run(() => PublishTranscodedAsync(mediaId, sourcePath, userId, "ASYNC_TRANSCODE"));
                 }
 
                 return createdMedia;
@@ -272,17 +200,37 @@ namespace SignageUnicorn.Api.Services
             return await _repository.GetMediaUsageAsync(id);
         }
 
-        public async Task<bool> ReplaceMediaAsync(string oldId, string newId, bool archiveOld, long? userId = null)
+        public async Task<MediaSwapResult> ReplaceMediaAsync(string oldId, string newId, bool archiveOld, long? userId = null)
         {
             // 1. Validate Both Exist
             var oldMedia = await _repository.GetByIdAsync(oldId);
             var newMedia = await _repository.GetByIdAsync(newId);
 
-            if (oldMedia == null || newMedia == null) return false;
+            if (oldMedia == null || newMedia == null) return MediaSwapResult.Failed("Old or new media not found.");
 
             // 2. Perform Swap
             var swapResult = await _repository.SwapMediaAsync(oldId, newId, userId);
-            if (!swapResult.Success) return false;
+            if (!swapResult.Success) return MediaSwapResult.Failed(swapResult.Message ?? "Swap failed.");
+
+            // Round 4 (#3) / Round 5 (Codex round-5 items 3 and 10): screens on the deployed v2.7.x client key
+            // their cache by the LOGICAL file name and existence-check it without the hash, so when the new
+            // row shares the old row's stem ("clip.mp4" vs "clip.v2.mp4") they would keep playing the old
+            // bytes. The new row therefore gets a FRESH version (one above every version in use for that
+            // stem) through a filename-ONLY conditional rename: blob_url / hash / size are never rewritten
+            // from the snapshot read above, so a transcode that completes meanwhile cannot be overwritten
+            // (its publish changes the blob name, the rename then fails with 409 and is retried against
+            // the current row once).
+            bool renameConflict = false;
+            string? renamedTo = null;
+            if (MediaFileNaming.SharesStem(oldMedia.FileName, newMedia.FileName))
+            {
+                var inUse = await ActiveFileNamesAsync();
+                inUse.Add(oldMedia.FileName);
+                inUse.Add(newMedia.FileName);
+                var outcome = await RenameToFreshVersionAsync(newMedia, inUse, userId);
+                renameConflict = outcome.Conflict;
+                renamedTo = outcome.NewName;
+            }
 
             // 3. Log Swap
             await _systemLog.LogAsync(null, "INFO", $"[MediaService] REPLACE_USAGE | OldID: {oldId} | NewID: {newId} | Result: Success", "API", userId);
@@ -315,7 +263,69 @@ namespace SignageUnicorn.Api.Services
                  await _systemLog.LogAsync(null, "INFO", $"[MediaService] ARCHIVED (SOFT-RETIRED) | MediaID: {oldId}", "API", userId);
             }
 
-            return true;
+            var message = renamedTo != null
+                ? $"Media swapped successfully; new file name '{renamedTo}'."
+                : renameConflict
+                    ? "Media swapped, but the new media's content changed concurrently (a conversion finished), so its file name was not versioned; screens re-sync on the next content change."
+                    : "Media swapped successfully";
+            return new MediaSwapResult { Success = true, Message = message, RenameConflict = renameConflict, NewFileName = renamedTo };
+        }
+
+        // Round 5 (item 10): versions `row`'s logical name without ever writing blob/hash/size. A 409 means
+        // the stored blob changed between our read and the rename (a transcode published); the CURRENT
+        // row is re-read and renamed once more. Two conflicts in a row are reported, not forced.
+        private async Task<(bool Conflict, string? NewName)> RenameToFreshVersionAsync(MediaFile row, List<string?> inUse, long? userId)
+        {
+            var current = row;
+            for (int attempt = 0; attempt < 2; attempt++)
+            {
+                var fresh = MediaFileNaming.NextVersion(current.FileName, inUse);
+                if (fresh == null) return (false, null);
+
+                var rename = await _repository.RenameFileAsync(current.MediaId, fresh, BlobName(current.BlobUrl), userId);
+                if (rename.Success) return (false, fresh);
+                if (rename.ErrorCode != 409)
+                {
+                    await _systemLog.LogAsync(null, "WARN", $"[MediaService] SWAP_RENAME_FAILED | MediaID: {current.MediaId} | {rename.Message}", "API", userId);
+                    return (false, null);
+                }
+
+                var reread = await _repository.GetByIdAsync(current.MediaId);
+                if (reread == null) return (true, null);
+                inUse.Add(current.FileName);
+                inUse.Add(reread.FileName);
+                current = reread;
+            }
+
+            await _systemLog.LogAsync(null, "WARN", $"[MediaService] SWAP_RENAME_CONFLICT | MediaID: {current.MediaId} | content kept changing; logical name left as '{current.FileName}'", "API", userId);
+            return (true, null);
+        }
+
+        // File part of a blob url ("/media/abc.mp4" or an absolute url) without any query string.
+        private static string BlobName(string? blobUrl)
+        {
+            if (string.IsNullOrWhiteSpace(blobUrl)) return string.Empty;
+            var path = blobUrl;
+            var q = path.IndexOf('?');
+            if (q >= 0) path = path[..q];
+            var slash = path.LastIndexOf('/');
+            return slash >= 0 ? path[(slash + 1)..] : path;
+        }
+
+        // Logical names of every media row, so a fresh version is above ANY row sharing the stem
+        // (Round 5, item 3). A failed scan degrades to versioning against the row itself.
+        private async Task<List<string?>> ActiveFileNamesAsync()
+        {
+            try
+            {
+                var all = await _repository.GetAllAsync();
+                return all.Select(m => m.FileName).Where(n => !string.IsNullOrWhiteSpace(n)).ToList<string?>();
+            }
+            catch (Exception ex)
+            {
+                await _systemLog.LogAsync(null, "WARN", $"[MediaService] NAME_SCAN_FAILED | {ex.Message}", "API");
+                return new List<string?>();
+            }
         }
 
         public async Task<MediaFile?> ReplaceMediaContentAsync(string id, MediaUploadRequest request, long? userId = null)
@@ -328,48 +338,38 @@ namespace SignageUnicorn.Api.Services
             bool needsTranscoding = false;
             string? localFilePath = null;
 
-            // Handle Local File Upload (logic duplicated from CreateMediaAsync for now, could be refactored)
+            // Handle Local File Upload (same allowlist + staging path as CreateMediaAsync)
             if (request.File != null && request.File.Length > 0)
             {
-                string webRootPath = _environment.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
-                string uploadsFolder = Path.Combine(webRootPath, "media");
-                if (!Directory.Exists(uploadsFolder)) Directory.CreateDirectory(uploadsFolder);
-
-                string fileExtension = Path.GetExtension(request.File.FileName);
-                string uniqueFileName = $"{Guid.NewGuid()}{fileExtension}";
-                string filePath = Path.Combine(uploadsFolder, uniqueFileName);
-                localFilePath = filePath;
-
-                using (var fileStream = new FileStream(filePath, FileMode.Create))
-                {
-                    await request.File.CopyToAsync(fileStream);
-                }
-
-                var ext = fileExtension?.ToLowerInvariant();
-                if (ext == ".mp4" || ext == ".mov" || ext == ".avi" || ext == ".webm")
-                {
-                    needsTranscoding = true;
-                }
-
-                var fileInfo = new FileInfo(filePath);
-
-                finalUrl = $"/media/{uniqueFileName}";
+                var stored = await StoreUploadAsync(request.File);
+                localFilePath = stored.FilePath;
+                needsTranscoding = stored.NeedsTranscoding;
+                fileHash = stored.Hash;
+                finalUrl = $"/media/{stored.UniqueFileName}";
 
                 if (string.IsNullOrEmpty(request.FileName)) request.FileName = request.File.FileName;
-                if (request.FileSizeKb == null || request.FileSizeKb == 0) request.FileSizeKb = (int)(fileInfo.Length / 1024);
+                if (request.FileSizeKb == null || request.FileSizeKb == 0) request.FileSizeKb = stored.SizeKb;
+            }
 
-                using (var md5 = System.Security.Cryptography.MD5.Create())
-                using (var stream = File.OpenRead(filePath))
-                {
-                    var hashBytes = md5.ComputeHash(stream);
-                    fileHash = BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
-                }
+            // Round 4 (#3): new bytes under an unchanged logical name would be ignored by the
+            // deployed v2.7.x cache (keyed by that name, existence-checked without the hash).
+            bool bytesChanged = request.File != null
+                || (!string.IsNullOrEmpty(request.BlobUrl) && !string.Equals(request.BlobUrl, existing.BlobUrl, StringComparison.OrdinalIgnoreCase));
+            var logicalName = request.FileName ?? existing.FileName;
+            if (bytesChanged)
+            {
+                // Round 5 (item 3): always a FRESH version above everything in use for the stem, so an
+                // upload named "clip.mp4" over a row at "clip.v2.mp4" becomes "clip.v3.mp4" (never the
+                // bare name again, never a number already used).
+                var inUse = await ActiveFileNamesAsync();
+                inUse.Add(existing.FileName);
+                logicalName = MediaFileNaming.NextVersion(logicalName, inUse) ?? logicalName;
             }
 
             var media = new MediaFile
             {
                 MediaId = id,
-                FileName = request.FileName ?? existing.FileName,
+                FileName = logicalName,
                 BlobUrl = finalUrl,
                 DurationSec = request.DurationSec != 0 ? request.DurationSec : existing.DurationSec,
                 Ratio = request.Ratio ?? existing.Ratio,
@@ -383,65 +383,15 @@ namespace SignageUnicorn.Api.Services
             {
                 await _systemLog.LogAsync(null, "INFO", $"[MediaService] CONTENT_REPLACED | FileName: {media.FileName} | MediaID: {id}", "API", userId);
 
-                // Start background transcoding if needed, to prevent request timeouts (500)
                 if (needsTranscoding && !string.IsNullOrEmpty(localFilePath))
                 {
-                    _ = Task.Run(async () =>
-                    {
-                        try
-                        {
-                            await _systemLog.LogAsync(null, "INFO", $"[MediaService] ASYNC_REPLACE_TRANSCODE_START | MediaID: {id} | FilePath: {localFilePath}", "SYSTEM", userId);
-                            
-                            var convertedPath = await ConvertToBaselineFormatAsync(localFilePath);
-                            var fileInfo = new FileInfo(convertedPath);
-                            
-                            string? finalHash = null;
-                            using (var md5 = System.Security.Cryptography.MD5.Create())
-                            using (var stream = File.OpenRead(convertedPath))
-                            {
-                                var hashBytes = md5.ComputeHash(stream);
-                                finalHash = BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
-                            }
-
-                            var existingMedia = await _repository.GetByIdAsync(id);
-                            if (existingMedia != null)
-                            {
-                                existingMedia.FileSizeKb = (int)(fileInfo.Length / 1024);
-                                existingMedia.FileHash = finalHash;
-                                await _repository.ReplaceAsync(existingMedia, userId);
-                                await _systemLog.LogAsync(null, "INFO", $"[MediaService] ASYNC_REPLACE_TRANSCODE_SUCCESS | MediaID: {id}", "SYSTEM", userId);
-
-                                // Trigger Sync now that the database has the transcoded file hash
-                                try
-                                {
-                                    var affectedDevices = await _deviceRepository.GetDevicesByMediaIdAsync(id);
-                                    foreach (var dev in affectedDevices)
-                                    {
-                                        await _deviceRepository.AddCommandAsync(dev.DeviceId, "FORCE_SYNC");
-                                    }
-                                }
-                                catch { }
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            await _systemLog.LogAsync(null, "ERROR", $"[MediaService] ASYNC_REPLACE_TRANSCODE_FAILED | MediaID: {id} | Error: {ex.Message}", "SYSTEM", userId);
-                        }
-                    });
+                    var sourcePath = localFilePath;
+                    _ = Task.Run(() => PublishTranscodedAsync(id, sourcePath, userId, "ASYNC_REPLACE_TRANSCODE"));
                 }
-
-                // Trigger Sync immediately only if no transcoding is needed.
-                // Otherwise, the background transcoding task will trigger it once it finishes.
-                if (!needsTranscoding)
+                else
                 {
-                    try
-                    {
-                        var affectedDevices = await _deviceRepository.GetDevicesByMediaIdAsync(id);
-                        foreach (var dev in affectedDevices)
-                        {
-                            await _deviceRepository.AddCommandAsync(dev.DeviceId, "FORCE_SYNC");
-                        }
-                    } catch { }
+                    // Nothing to convert: screens can fetch the new bytes right away.
+                    await NotifyDevicesForMediaAsync(id);
                 }
 
                 return TransformToAbsoluteUrl(result.Value);
@@ -528,12 +478,15 @@ namespace SignageUnicorn.Api.Services
             return count;
         }
 
-        private async Task<string> ConvertToBaselineFormatAsync(string filePath)
+        // Converts into media/temp_conversion and returns the staged output path, or null when the
+        // file needs no conversion or conversion failed. Never touches the published file itself;
+        // PublishTranscodedAsync decides what becomes visible to clients.
+        private async Task<string?> TranscodeToStagingAsync(string filePath)
         {
             try
             {
                 var ext = Path.GetExtension(filePath)?.ToLowerInvariant();
-                if (ext != ".mp4" && ext != ".mov" && ext != ".avi" && ext != ".webm") return filePath;
+                if (!MediaFileValidator.IsVideoExtension(ext)) return null;
 
                 string ffmpegPath = Path.Combine(Directory.GetCurrentDirectory(), "ffmpeg");
                 if (!Directory.Exists(ffmpegPath)) Directory.CreateDirectory(ffmpegPath);
@@ -602,46 +555,197 @@ namespace SignageUnicorn.Api.Services
                     Console.WriteLine($"[FFmpeg] Starting conversion for {Path.GetFileName(filePath)}");
                     await conversion.Start();
 
-                    // Robust swap with retry logic
-                    bool swapped = false;
-                    for (int i = 0; i < 3; i++)
+                    if (!File.Exists(tempOutputPath) || new FileInfo(tempOutputPath).Length == 0)
                     {
-                        try
-                        {
-                            if (File.Exists(filePath)) File.Delete(filePath);
-                            File.Move(tempOutputPath, filePath);
-                            swapped = true;
-                            break;
-                        }
-                        catch (IOException)
-                        {
-                            if (i < 2) await Task.Delay(1000);
-                        }
+                        Console.WriteLine($"[FFmpeg] Conversion produced no output for {Path.GetFileName(filePath)}");
+                        return null;
                     }
 
-                    if (swapped)
-                    {
-                        Console.WriteLine($"[FFmpeg] Conversion successful for {Path.GetFileName(filePath)}");
-                        return filePath;
-                    }
-                    else
-                    {
-                         // Fallback: If original is locked, use the new file with its unique name
-                         string safeName = Path.Combine(uploadsFolder, Path.GetFileName(tempOutputPath));
-                         File.Move(tempOutputPath, safeName);
-                         Console.WriteLine($"[FFmpeg] Warning: Original file locked. Using fallback path: {Path.GetFileName(safeName)}");
-                         return safeName;
-                    }
+                    Console.WriteLine($"[FFmpeg] Conversion finished for {Path.GetFileName(filePath)} -> staging {Path.GetFileName(tempOutputPath)}");
+                    return tempOutputPath;
                 }
-                finally
+                catch (Exception ex)
                 {
-                    if (File.Exists(tempOutputPath)) File.Delete(tempOutputPath);
+                    try { if (File.Exists(tempOutputPath)) File.Delete(tempOutputPath); } catch { }
+                    Console.WriteLine($"[FFmpeg Error] {ex.Message}");
+                    return null;
                 }
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"[FFmpeg Error] {ex.Message}");
-                return filePath; // Return original on absolute failure
+                return null; // caller keeps the original file
+            }
+        }
+
+        private sealed class StoredUpload
+        {
+            public string UniqueFileName = string.Empty;
+            public string FilePath = string.Empty;
+            public string Hash = string.Empty;
+            public int SizeKb;
+            public bool NeedsTranscoding;
+        }
+
+        private string UploadsFolder()
+        {
+            string webRootPath = _environment.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+            string uploadsFolder = Path.Combine(webRootPath, "media");
+            Directory.CreateDirectory(uploadsFolder);
+            return uploadsFolder;
+        }
+
+        // Contract item 9 / F07 / F23: the upload is written to media/_staging first, checked by
+        // extension AND leading bytes, and only then moved into media/ under a new GUID name. The
+        // orphan sweep never looks inside the staging folder, so a file cannot be collected while
+        // its database row is still being written.
+        private async Task<StoredUpload> StoreUploadAsync(IFormFile file)
+        {
+            var ext = (Path.GetExtension(file.FileName) ?? string.Empty).ToLowerInvariant();
+            if (!MediaFileValidator.IsAllowedExtension(ext))
+                throw new MediaValidationException($"File type '{ext}' is not allowed. Allowed: {string.Join(", ", MediaFileValidator.AllowedExtensions)}");
+
+            var uploadsFolder = UploadsFolder();
+            var stagingFolder = Path.Combine(uploadsFolder, "_staging");
+            Directory.CreateDirectory(stagingFolder);
+
+            var uniqueFileName = $"{Guid.NewGuid()}{ext}";
+            var stagingPath = Path.Combine(stagingFolder, uniqueFileName);
+            try
+            {
+                using (var fs = new FileStream(stagingPath, FileMode.Create))
+                {
+                    await file.CopyToAsync(fs);
+                }
+
+                var head = new byte[16];
+                int read;
+                using (var fs = File.OpenRead(stagingPath))
+                {
+                    read = fs.Read(head, 0, head.Length);
+                }
+                var problem = MediaFileValidator.CheckMagic(ext, head.AsSpan(0, read));
+                if (problem != null) throw new MediaValidationException($"Upload rejected: {problem}.");
+
+                var finalPath = Path.Combine(uploadsFolder, uniqueFileName);
+                File.Move(stagingPath, finalPath);
+
+                var info = new FileInfo(finalPath);
+                return new StoredUpload
+                {
+                    UniqueFileName = uniqueFileName,
+                    FilePath = finalPath,
+                    Hash = ComputeMd5(finalPath),
+                    SizeKb = (int)(info.Length / 1024),
+                    NeedsTranscoding = MediaFileValidator.IsVideoExtension(ext)
+                };
+            }
+            catch
+            {
+                try { if (File.Exists(stagingPath)) File.Delete(stagingPath); } catch { }
+                throw;
+            }
+        }
+
+        private static string ComputeMd5(string path)
+        {
+            using var md5 = System.Security.Cryptography.MD5.Create();
+            using var stream = File.OpenRead(path);
+            return BitConverter.ToString(md5.ComputeHash(stream)).Replace("-", "").ToLowerInvariant();
+        }
+
+        // F22 / contract item 3. The converted file is published under a NEW GUID name and the row's
+        // blob_url, file_hash and file_size_kb change in ONE update; the previous file is deleted only
+        // after that update succeeded. Clients key their cache by the url basename, so the new name is
+        // what makes every screen fetch the converted bytes instead of trusting a stale copy. Before,
+        // the file was swapped in place under the same name while the row still carried the old hash,
+        // and when the original was locked the converted file went live under a name the row never
+        // learned about.
+        private async Task PublishTranscodedAsync(string mediaId, string sourcePath, long? userId, string logPrefix)
+        {
+            try
+            {
+                await _systemLog.LogAsync(null, "INFO", $"[MediaService] {logPrefix}_START | MediaID: {mediaId} | FilePath: {sourcePath}", "SYSTEM", userId);
+
+                var stagedPath = await TranscodeToStagingAsync(sourcePath);
+                if (stagedPath == null)
+                {
+                    await _systemLog.LogAsync(null, "WARNING", $"[MediaService] {logPrefix}_SKIPPED | MediaID: {mediaId} | original kept", "SYSTEM", userId);
+                    await NotifyDevicesForMediaAsync(mediaId);
+                    return;
+                }
+
+                var uploadsFolder = UploadsFolder();
+                var newName = $"{Guid.NewGuid()}.mp4";
+                var finalPath = Path.Combine(uploadsFolder, newName);
+                File.Move(stagedPath, finalPath);
+
+                var existing = await _repository.GetByIdAsync(mediaId);
+                if (existing == null)
+                {
+                    try { File.Delete(finalPath); } catch { }
+                    return;
+                }
+
+                var info = new FileInfo(finalPath);
+                // Round 4 (#3) / Round 5 (item 3): the logical name is what v2.7.x screens key their cache
+                // by; keeping it would leave them playing the unconverted bytes. Version it above every
+                // version in use for the stem (clip.v2.mp4 -> clip.v3.mp4, never a reused number).
+                var namesInUse = await ActiveFileNamesAsync();
+                namesInUse.Add(existing.FileName);
+                var update = new MediaFile
+                {
+                    MediaId = existing.MediaId,
+                    FileName = MediaFileNaming.NextVersion(existing.FileName, namesInUse, ".mp4") ?? newName,
+                    BlobUrl = $"/media/{newName}",
+                    DurationSec = existing.DurationSec,
+                    Ratio = existing.Ratio,
+                    FileSizeKb = (int)(info.Length / 1024),
+                    FileHash = ComputeMd5(finalPath),
+                    EndDate = null // REPLACE_FILE keeps the stored end_date when null
+                };
+                // Contract T10 / Codex round-2 finding 13: publish only if the row still points at the
+                // file this conversion started from. A replacement that landed meanwhile wins; the
+                // stale conversion output is discarded instead of silently restoring older content.
+                var expectedName = Path.GetFileName(sourcePath);
+                var result = await _repository.ReplaceAsync(update, userId, expectedName);
+                if (!result.Success)
+                {
+                    try { File.Delete(finalPath); } catch { }
+                    if (result.ErrorCode == 409)
+                    {
+                        await _systemLog.LogAsync(null, "WARNING", $"[MediaService] {logPrefix}_SUPERSEDED | MediaID: {mediaId} | source {expectedName} is no longer the stored file; converted output dropped", "SYSTEM", userId);
+                        return;
+                    }
+                    await _systemLog.LogAsync(null, "ERROR", $"[MediaService] {logPrefix}_DB_FAILED | MediaID: {mediaId} | {result.Message}", "SYSTEM", userId);
+                    return;
+                }
+
+                // Only now is the unconverted upload unreachable through the database.
+                try { if (File.Exists(sourcePath)) File.Delete(sourcePath); } catch { }
+
+                await _systemLog.LogAsync(null, "INFO", $"[MediaService] {logPrefix}_SUCCESS | MediaID: {mediaId} | {newName}", "SYSTEM", userId);
+                await NotifyDevicesForMediaAsync(mediaId);
+            }
+            catch (Exception ex)
+            {
+                await _systemLog.LogAsync(null, "ERROR", $"[MediaService] {logPrefix}_FAILED | MediaID: {mediaId} | Error: {ex.Message}", "SYSTEM", userId);
+            }
+        }
+
+        private async Task NotifyDevicesForMediaAsync(string mediaId)
+        {
+            try
+            {
+                var affectedDevices = await _deviceRepository.GetDevicesByMediaIdAsync(mediaId);
+                foreach (var dev in affectedDevices)
+                {
+                    await _deviceRepository.AddCommandAsync(dev.DeviceId, "FORCE_SYNC");
+                }
+            }
+            catch (Exception ex)
+            {
+                await _systemLog.LogAsync(null, "WARN", $"[MediaService] NOTIFY_FAILED | MediaID: {mediaId} | {ex.Message}", "API");
             }
         }
     }

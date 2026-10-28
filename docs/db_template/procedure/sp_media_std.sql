@@ -26,6 +26,9 @@ CREATE OR ALTER PROCEDURE [dbo].[sp_media_std]
     @p_storage_provider   NVARCHAR(20)  = NULL,
     @p_force_delete       BIT           = 0, -- New parameter for force delete
     @p_end_date           DATETIME2(7)  = NULL, -- New parameter for expiration
+    -- Contract T10: REPLACE_FILE publishes only if blob_url still ends in '/<this name>' (the file
+    -- the caller converted). A later replacement of the same media wins; the stale conversion is dropped.
+    @p_expected_blob_name NVARCHAR(255) = NULL,
 
     -- Filters (legacy compatible)
     @p_filter_status      NVARCHAR(1)   = NULL, -- kept for compatibility
@@ -165,6 +168,11 @@ BEGIN
             GOTO ResultSection;
         END
 
+        -- Contract T10 / Codex round-2 finding 13 / round-3 finding 6: a slow transcode must not
+        -- overwrite a replacement that landed while it ran. The expected file name is part of the
+        -- UPDATE's own predicate (a separate EXISTS check left a window between check and write):
+        -- when the stored url no longer ends in '/<expected>', zero rows change and the publish is
+        -- reported as superseded (409) so the caller discards the stale output.
         UPDATE sn_media_files
         SET file_name     = ISNULL(@p_file_name, file_name),
             blob_url      = @p_blob_url,
@@ -173,13 +181,76 @@ BEGIN
             file_size_kb  = ISNULL(@p_file_size_kb, file_size_kb),
             file_hash     = ISNULL(@p_file_hash, file_hash),
             storage_provider = ISNULL(@p_storage_provider, storage_provider),
-            end_date      = @p_end_date, -- Update end_date if provided
+            end_date      = ISNULL(@p_end_date, end_date), -- keep the stored expiry when the caller sends none (transcode publish)
             updated_at    = SYSUTCDATETIME(),
             updated_by    = @p_userid
         WHERE is_deleted = 0
-          AND (media_id = @p_media_id OR media_uuid = @p_media_uuid);
+          AND (media_id = @p_media_id OR media_uuid = @p_media_uuid)
+          AND (@p_expected_blob_name IS NULL
+               OR RIGHT(blob_url, LEN(@p_expected_blob_name) + 1) = '/' + @p_expected_blob_name);
+
+        IF @@ROWCOUNT = 0
+        BEGIN
+            IF @p_expected_blob_name IS NOT NULL
+               AND EXISTS (SELECT 1 FROM sn_media_files WHERE is_deleted = 0 AND (media_id = @p_media_id OR media_uuid = @p_media_uuid))
+            BEGIN
+                SET @err_code = 409; SET @err_flag = 1;
+                SET @msg = N'Media content changed since the conversion started; publish skipped.';
+            END
+            ELSE
+            BEGIN
+                SET @err_code = 404; SET @err_flag = 1;
+                SET @msg = N'Media not found.';
+            END
+            GOTO ResultSection;
+        END
 
         SET @msg = N'Media content replaced.';
+        GOTO ResultSection;
+    END
+
+    /* =============================================
+       RENAME_FILE (Round 5, Codex round-5 item 10)
+       Filename-ONLY update used after a usage swap to version the new row's logical name
+       for legacy caches. It is conditional on the stored blob: when blob_url no longer ends
+       in '/<expected>' (a transcode published new bytes meanwhile) nothing is written and 409
+       is reported, so blob_url / file_hash / file_size_kb are never rewritten from a stale read.
+    ============================================= */
+    IF @p_action = 'RENAME_FILE'
+    BEGIN
+        IF @p_file_name IS NULL OR LTRIM(RTRIM(@p_file_name)) = N''
+        BEGIN
+            SET @err_code = 1; SET @err_flag = 1;
+            SET @msg = N'file_name is required for a rename.';
+            GOTO ResultSection;
+        END
+
+        UPDATE sn_media_files
+        SET file_name  = @p_file_name,
+            updated_at = SYSUTCDATETIME(),
+            updated_by = @p_userid
+        WHERE is_deleted = 0
+          AND (media_id = @p_media_id OR media_uuid = @p_media_uuid)
+          AND (@p_expected_blob_name IS NULL
+               OR RIGHT(blob_url, LEN(@p_expected_blob_name) + 1) = '/' + @p_expected_blob_name);
+
+        IF @@ROWCOUNT = 0
+        BEGIN
+            IF @p_expected_blob_name IS NOT NULL
+               AND EXISTS (SELECT 1 FROM sn_media_files WHERE is_deleted = 0 AND (media_id = @p_media_id OR media_uuid = @p_media_uuid))
+            BEGIN
+                SET @err_code = 409; SET @err_flag = 1;
+                SET @msg = N'Media content changed since it was read; rename skipped.';
+            END
+            ELSE
+            BEGIN
+                SET @err_code = 404; SET @err_flag = 1;
+                SET @msg = N'Media not found.';
+            END
+            GOTO ResultSection;
+        END
+
+        SET @msg = N'Media file name updated.';
         GOTO ResultSection;
     END
 
@@ -247,7 +318,7 @@ BEGIN
             SET is_deleted = 1,
                 deleted_at = SYSUTCDATETIME(),
                 deleted_by = @p_userid
-            WHERE media_id = @p_media_id 
+            WHERE media_id = @p_media_id
               AND is_deleted = 0;
         END
 
@@ -293,7 +364,7 @@ BEGIN
         -- Usage: @blob_url = NEW_URL_BASE, @remark1 = TARGET_URL_BASE (to be replaced)
         IF @p_blob_url IS NULL OR @p_remark1 IS NULL
         BEGIN
-             SET @err_code = 1; 
+             SET @err_code = 1;
              SET @msg = N'blob_url (New URL) and remark1 (Target URL) are required for SYNC_BLOB_URL.';
              GOTO ResultSection;
         END
@@ -316,14 +387,14 @@ ResultSection:
     SELECT @err_code AS err_code, @err_flag AS err_flag, @msg AS msg;
 
     -- Result Set 2: Data (Depends on Action)
-    IF @err_flag = 0 
+    IF @err_flag = 0
     BEGIN
-        IF @p_action IN ('CREATE','UPDATE','GET_BY_ID', 'REPLACE_FILE', 'REPLACE_USAGE')
+        IF @p_action IN ('CREATE','UPDATE','GET_BY_ID', 'REPLACE_FILE', 'RENAME_FILE', 'REPLACE_USAGE')
         BEGIN
             SELECT TOP 1 media_id,media_uuid,file_name,display_name,blob_url,duration_sec,ratio,file_size_kb
 				,supplier_code,remark1,remark2,storage_provider,file_hash
 				,created_at as UploadedAt,created_by as UploadedBy,updated_at,updated_by,is_deleted,deleted_at,deleted_by
-				,row_version,dateadd(HH,+7,end_date) end_date 
+				,row_version,end_date
 			FROM sn_media_files
             WHERE media_id = @p_media_id OR media_uuid = @p_media_uuid;
         END
@@ -333,14 +404,14 @@ ResultSection:
             SELECT media_id,media_uuid,file_name,display_name,blob_url,duration_sec,ratio,file_size_kb
 				,supplier_code,remark1,remark2,storage_provider,file_hash
 				,created_at as UploadedAt,created_by as UploadedBy,updated_at,updated_by,is_deleted,deleted_at,deleted_by
-				,row_version,dateadd(HH,+7,end_date) end_date
+				,row_version,end_date
 				, CASE WHEN is_deleted = 1 THEN 'N' ELSE 'Y' END AS Active
             FROM sn_media_files
-            WHERE 
+            WHERE
                 (@p_filter_status IS NULL OR
                  (@p_filter_status = 'Y' AND is_deleted = 0) OR
                  (@p_filter_status = 'N' AND is_deleted = 1) OR
-                 (@p_filter_status = '') 
+                 (@p_filter_status = '')
                 )
               AND (@p_supplier_code IS NULL OR supplier_code = @p_supplier_code)
               AND (@p_remark1 IS NULL OR remark1 LIKE '%' + @p_remark1 + '%')
@@ -371,7 +442,7 @@ ResultSection:
             SELECT media_id,media_uuid,file_name,display_name,blob_url,duration_sec,ratio,file_size_kb
 				,supplier_code,remark1,remark2,storage_provider,file_hash
 				,created_at as UploadedAt,created_by as UploadedBy,updated_at,updated_by,is_deleted,deleted_at,deleted_by
-				,row_version,dateadd(HH,+7,end_date) end_date
+				,row_version,end_date
             FROM sn_media_files
             WHERE is_deleted = 0
               AND (@p_supplier_code IS NULL OR supplier_code = @p_supplier_code)
@@ -406,9 +477,9 @@ ResultSection:
                 p.playlist_name,
                 CASE WHEN p.status = 'active' THEN 'Y' ELSE 'N' END AS Active,
                 COUNT(pi.playlist_item_id) AS usage_count,
-                (SELECT ISNULL(SUM(ISNULL(pi2.duration_override, m2.duration_sec)), 0) 
-                 FROM sn_playlist_items pi2 
-                 JOIN sn_media_files m2 ON pi2.media_id = m2.media_id 
+                (SELECT ISNULL(SUM(ISNULL(pi2.duration_override, m2.duration_sec)), 0)
+                 FROM sn_playlist_items pi2
+                 JOIN sn_media_files m2 ON pi2.media_id = m2.media_id
                  WHERE pi2.playlist_id = p.playlist_id AND pi2.is_deleted = 0) AS duration_sec,
                 (SELECT COUNT(*) FROM sn_devices d WHERE d.current_playlist_id = p.playlist_id AND d.is_deleted = 0) AS device_count
             FROM sn_playlist_items pi

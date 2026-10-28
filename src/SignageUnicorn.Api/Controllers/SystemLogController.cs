@@ -1,7 +1,9 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using SignageUnicorn.Api.Models;
 using SignageUnicorn.Api.Models.Responses;
 using SignageUnicorn.Api.Repositories.Interfaces;
+using SignageUnicorn.Api.Services;
 using System.Data;
 using Microsoft.AspNetCore.Authorization;
 using System.Threading.Tasks;
@@ -24,19 +26,25 @@ namespace SignageUnicorn.Api.Controllers
     [Authorize]
     public class SystemLogController : ControllerBase
     {
+        private const int MaxBatch = 100;
         private readonly ISystemLogRepository _repo;
+        private readonly DeviceAuthService _deviceAuth;
 
-        public SystemLogController(ISystemLogRepository repo)
+        public SystemLogController(ISystemLogRepository repo, DeviceAuthService deviceAuth)
         {
             _repo = repo;
+            _deviceAuth = deviceAuth;
         }
+
+        private string? PresentedToken => Request.Headers.TryGetValue(DeviceAuthService.HeaderName, out var v) ? v.ToString() : null;
+        private string? RemoteIp => HttpContext.Connection.RemoteIpAddress?.ToString();
 
         [HttpGet]
         public async Task<IActionResult> GetLogs(
-            [FromQuery] DateTime? startDate, 
-            [FromQuery] DateTime? endDate, 
-            [FromQuery] string? logType, 
-            [FromQuery] int page = 1, 
+            [FromQuery] DateTime? startDate,
+            [FromQuery] DateTime? endDate,
+            [FromQuery] string? logType,
+            [FromQuery] int page = 1,
             [FromQuery] int pageSize = 50,
             [FromQuery] int? top = null)
         {
@@ -50,28 +58,11 @@ namespace SignageUnicorn.Api.Controllers
                  logEntries = await _repo.GetFilteredLogsAsync(startDate, endDate, logType, page, pageSize);
             }
 
-            var logs = logEntries.Select(entry => 
+            var logs = logEntries.Select(entry =>
             {
-                // Logic to extract DeviceID if embedded in message, although Repository might map it to 'DeviceId' property if it parsed it.
-                // Assuming SystemLogEntry has DeviceId property if relevant, OR we parse it here if SystemLogEntry.Message contains it.
-                // But SystemLogEntry in DashboardModels.cs HAS DeviceId. 
-                // Repository creates SystemLogEntry from DB. 
-                // DB 'message' might contain "[Device: ...]".
-                // BUT SpSystemLogRepository maps DB columns to SystemLogEntry. 
-                // Use Dapper's matching. DB columns: log_id, log_level, ..., message.
-                // SP result set has columns matching SystemLogEntry properties? 
-                // SystemLogEntry: LogId, DeviceId, LogType, Message, Source, CreatedAt.
-                // SP Result: LogId, LogLevel(map to LogType?), SourceSystem(map to Source?), Category(map to LogType?), Message, UserId, IpAddress, CreatedAt.
-                // Mismatches:
-                // LogLevel -> map to ? 
-                // Category -> map to LogType
-                // SourceSystem -> map to Source
-                // DeviceId -> Missing in SP result.
-                
-                // We should probably rely on parsing Message for DeviceId in the Controller for now, just like before, OR fix the DTO mapping.
-                // Let's re-implement the parsing logic on the objects.
-                
-                string deviceId = entry.DeviceId; // Might be null from DB
+                // The repository embeds the device id in the message ("[Device: 123] ...") because the
+                // table has no device column; recover it here for the console.
+                string deviceId = entry.DeviceId;
                 string msg = entry.Message ?? "";
 
                 if (string.IsNullOrEmpty(deviceId) && msg.StartsWith("[Device: "))
@@ -84,7 +75,7 @@ namespace SignageUnicorn.Api.Controllers
                 {
                     LogId = entry.LogId.ToString(),
                     DeviceId = deviceId,
-                    LogType = entry.LogType ?? "INFO", // Check mapping
+                    LogType = entry.LogType ?? "INFO",
                     Message = msg,
                     Source = entry.Source ?? "API",
                     CreatedAt = entry.CreatedAt
@@ -93,21 +84,95 @@ namespace SignageUnicorn.Api.Controllers
 
             return Ok(new { success = true, data = logs });
         }
- 
+
+        // Contract item 5 / F28. These endpoints used to answer "captured" while discarding every
+        // entry, so screens deleted the only copy of their diagnostics. WARN/ERROR entries are now
+        // persisted (INFO is acknowledged but dropped by design: it was the volume that exhausted the
+        // pool before), batches are bounded, rate-limited per IP, and the device token rule applies
+        // when a device id is present.
         [AllowAnonymous]
+        [EnableRateLimiting("logs")]
         [HttpPost]
+        [RequestSizeLimit(64 * 1024)]
         public async Task<IActionResult> CreateLog([FromBody] SystemLogDto log)
         {
-            // DISABLED: Stopped logging to DB to prevent disk/pool queue exhaustion
-            return Ok(ApiResponse<bool>.SuccessResponse(true, "Log captured (Disabled)"));
+            if (log == null) return BadRequest(ApiResponse<object>.ErrorResponse(400, "Body required"));
+            return await StoreAsync(new List<SystemLogDto> { log });
         }
 
         [AllowAnonymous]
+        [EnableRateLimiting("logs")]
         [HttpPost("batch")]
+        [RequestSizeLimit(512 * 1024)]
         public async Task<IActionResult> CreateBatch([FromBody] List<SystemLogDto> logs)
         {
-            // DISABLED: Stopped logging to DB to prevent disk/pool queue exhaustion
-            return Ok(ApiResponse<int>.SuccessResponse(logs?.Count ?? 0, "Batch captured (Disabled)"));
+            if (logs == null || logs.Count == 0)
+                return Ok(ApiResponse<object>.SuccessResponse(new { stored = 0, dropped = 0 }, "Nothing to store"));
+            if (logs.Count > MaxBatch)
+                return BadRequest(ApiResponse<object>.ErrorResponse(400, $"Batch too large (max {MaxBatch} entries)"));
+            return await StoreAsync(logs);
+        }
+
+        private static bool IsKeptLevel(string? level)
+        {
+            var l = (level ?? string.Empty).Trim().ToUpperInvariant();
+            return l is "WARN" or "WARNING" or "ERROR" or "CRITICAL" or "FATAL";
+        }
+
+        private async Task<IActionResult> StoreAsync(List<SystemLogDto> logs)
+        {
+            // Contract T3: entries of a token-protected screen are stored under the row it authenticated as.
+            var canonical = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var deviceId in logs.Select(l => l.DeviceId).Where(d => !string.IsNullOrWhiteSpace(d)).Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                var auth = await _deviceAuth.ResolveAsync(deviceId, null, PresentedToken, RemoteIp);
+                if (!auth.Ok) return Unauthorized(ApiResponse<object>.ErrorResponse(401, auth.Message));
+                if (auth.Resolved && auth.HasToken) canonical[deviceId!] = auth.DeviceId!.Value.ToString();
+            }
+            if (canonical.Count > 0)
+            {
+                foreach (var l in logs)
+                    if (!string.IsNullOrWhiteSpace(l.DeviceId) && canonical.TryGetValue(l.DeviceId, out var id)) l.DeviceId = id;
+            }
+
+            var kept = logs.Where(l => IsKeptLevel(l.LogType)).Select(l =>
+            {
+                var type = l.LogType.Trim().ToUpperInvariant();
+                var isError = type is "ERROR" or "CRITICAL" or "FATAL";
+                var message = (l.Message ?? string.Empty);
+                if (message.Length > 4000) message = message.Substring(0, 4000);
+                return new SystemLogWrite
+                {
+                    DeviceId = string.IsNullOrWhiteSpace(l.DeviceId) ? null : l.DeviceId.Trim(),
+                    Level = isError ? "Error" : "Warning",
+                    Category = isError ? "ERROR" : "WARNING",
+                    Message = message,
+                    Source = string.IsNullOrWhiteSpace(l.Source) ? "Device" : l.Source.Trim(),
+                    CreatedAt = l.CreatedAt == default ? null : l.CreatedAt
+                };
+            }).ToList();
+
+            int stored = 0;
+            if (kept.Count > 0)
+            {
+                try
+                {
+                    stored = await _repo.LogBatchAsync(kept);
+                }
+                catch (Exception ex) when (SignageUnicorn.Api.Repositories.SqlTransientErrors.IsDataError(ex))
+                {
+                    return StatusCode(400, ApiResponse<object>.ErrorResponse(400, $"Log entries rejected: {ex.Message}"));
+                }
+                catch (Exception ex)
+                {
+                    // Contract T6 / R4: any store failure that is not about the data (transient, schema
+                    // mismatch, missing procedure) -> the screen keeps its queue and retries later.
+                    Console.WriteLine($"[SystemLog] RETRY_LATER | {ex.Message}");
+                    return StatusCode(503, ApiResponse<object>.ErrorResponse(503, "RETRY_LATER"));
+                }
+            }
+
+            return Ok(ApiResponse<object>.SuccessResponse(new { stored, dropped = logs.Count - stored }, $"Stored {stored}, dropped {logs.Count - stored}"));
         }
 
         [HttpDelete]

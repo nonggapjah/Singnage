@@ -218,12 +218,14 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             return RepositoryResult<MediaFile>.Fail(status?.err_code ?? -1, status?.msg ?? "Database Error");
         }
 
-        public async Task<RepositoryResult<MediaFile>> ReplaceAsync(MediaFile media, long? userId = null)
+        public async Task<RepositoryResult<MediaFile>> ReplaceAsync(MediaFile media, long? userId = null, string? expectedBlobName = null)
         {
             using var db = CreateConnection();
             var p = new DynamicParameters();
             p.Add("@p_action", "REPLACE_FILE");
             p.Add("@p_userid", userId);
+            // T10: conditional publish (see sp_media_std REPLACE_FILE).
+            p.Add("@p_expected_blob_name", string.IsNullOrWhiteSpace(expectedBlobName) ? null : expectedBlobName);
             
             if (long.TryParse(media.MediaId, out var idLong))
                 p.Add("@p_media_id", idLong);
@@ -241,6 +243,32 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             using var multi = await db.QueryMultipleAsync("sp_media_std", p, commandType: CommandType.StoredProcedure);
             var status = await multi.ReadFirstOrDefaultAsync<SpStdResult>();
             
+            if (status != null && !status.err_flag)
+            {
+                var data = await multi.ReadFirstOrDefaultAsync<MediaFile>();
+                return RepositoryResult<MediaFile>.Ok(data, status.msg);
+            }
+            return RepositoryResult<MediaFile>.Fail(status?.err_code ?? -1, status?.msg ?? "Database Error");
+        }
+
+        public async Task<RepositoryResult<MediaFile>> RenameFileAsync(string mediaId, string newFileName, string? expectedBlobName, long? userId = null)
+        {
+            using var db = CreateConnection();
+            var p = new DynamicParameters();
+            p.Add("@p_action", "RENAME_FILE");
+            p.Add("@p_userid", userId);
+            p.Add("@p_file_name", newFileName);
+            // Round 5 (item 10): the rename is conditional on the stored blob (see sp_media_std RENAME_FILE).
+            p.Add("@p_expected_blob_name", string.IsNullOrWhiteSpace(expectedBlobName) ? null : expectedBlobName);
+
+            if (long.TryParse(mediaId, out var idLong))
+                p.Add("@p_media_id", idLong);
+            else
+                p.Add("@p_media_uuid", mediaId);
+
+            using var multi = await db.QueryMultipleAsync("sp_media_std", p, commandType: CommandType.StoredProcedure);
+            var status = await multi.ReadFirstOrDefaultAsync<SpStdResult>();
+
             if (status != null && !status.err_flag)
             {
                 var data = await multi.ReadFirstOrDefaultAsync<MediaFile>();

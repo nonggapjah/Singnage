@@ -57,6 +57,15 @@ namespace SignageUnicorn.Api.Models.Domain
         [JsonPropertyName("totalDuration")]
         public int TotalDuration { get; set; }
 
+        // Contract item 6: only populated on the device schedule (GET /devices/{id}/schedule).
+        // scheduleVersion changes whenever the resolved assignments change; nextTransitionAtUtc is
+        // the next start/end boundary so a client can refresh exactly when it matters.
+        [JsonPropertyName("scheduleVersion")]
+        public string? ScheduleVersion { get; set; }
+
+        [JsonPropertyName("nextTransitionAtUtc")]
+        public DateTime? NextTransitionAtUtc { get; set; }
+
         // IMPORTANT: Database compatibility layer
         // DB returns 'status' column as 'active' or 'inactive'
         // This setter intercepts that value and converts it to our 'Active' property format (Y/N)

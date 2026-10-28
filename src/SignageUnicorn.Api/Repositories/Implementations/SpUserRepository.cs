@@ -56,7 +56,12 @@ namespace SignageUnicorn.Api.Repositories.Implementations
                 Role = result.role?.ToString() ?? "viewer",
                 Active = (result.status?.ToString() == "active") ? "Y" : "N",
                 AvatarUrl = result.avatar_url?.ToString(),
-                PasswordHash = result.password_hash != null ? System.Text.Encoding.UTF8.GetString((byte[])result.password_hash) : null
+                PasswordHash = result.password_hash != null ? System.Text.Encoding.UTF8.GetString((byte[])result.password_hash) : null,
+                // F12: lockout + revocation state. token_version is absent until migration 006 ran;
+                // treat a missing column as version 1 rather than failing every login.
+                TokenVersion = TryInt(result, "token_version") ?? 1,
+                FailedLoginCount = TryInt(result, "failed_login_count") ?? 0,
+                LockedUntil = TryDate(result, "locked_until")
             };
         }
 
@@ -187,9 +192,75 @@ namespace SignageUnicorn.Api.Repositories.Implementations
                 : RepositoryResult.Fail(result?.err_code ?? -1, result?.msg ?? "DB Error");
         }
 
-        public async Task<RepositoryResult> DeleteAsync(string userId)
+        private static int? TryInt(dynamic row, string column)
         {
-             return await Task.FromResult(RepositoryResult.Fail(501, "Not Implemented"));
+            try
+            {
+                var dict = (IDictionary<string, object>)row;
+                if (!dict.TryGetValue(column, out var v) || v == null) return null;
+                return Convert.ToInt32(v);
+            }
+            catch { return null; }
+        }
+
+        private static DateTime? TryDate(dynamic row, string column)
+        {
+            try
+            {
+                var dict = (IDictionary<string, object>)row;
+                if (!dict.TryGetValue(column, out var v) || v == null) return null;
+                var dt = Convert.ToDateTime(v);
+                return DateTime.SpecifyKind(dt, DateTimeKind.Utc);
+            }
+            catch { return null; }
+        }
+
+        // F12: "delete" is a deactivation -- status = inactive and token_version bumped so every
+        // token the account still holds is refused within the revocation cache window.
+        public async Task<RepositoryResult> DeleteAsync(string userId, string? executorId = null)
+        {
+            using var db = CreateConnection();
+            var parameters = new
+            {
+                p_action = "DEACTIVATE",
+                p_userid = userId,
+                p_executor_id = executorId
+            };
+            var result = await db.QueryFirstOrDefaultAsync<SpStdContract>("sp_auth_user_std", parameters, commandType: CommandType.StoredProcedure);
+            return result != null && !result.err_flag
+                ? RepositoryResult.Ok(result.msg ?? "Deactivated")
+                : RepositoryResult.Fail(result?.err_code ?? -1, result?.msg ?? "DB Error");
+        }
+
+        public async Task<int?> GetTokenVersionAsync(string userId)
+        {
+            if (!long.TryParse(userId, out var id)) return null;
+            using var db = CreateConnection();
+            // Column may not exist until migration 006 ran; a null here is treated by the caller as
+            // "cannot verify", which fails open to version 1 (the value every legacy token carries).
+            try
+            {
+                return await db.ExecuteScalarAsync<int?>(
+                    "SELECT token_version FROM sn_auth_user WHERE user_id = @id AND is_deleted = 0", new { id });
+            }
+            catch (SqlException)
+            {
+                return null;
+            }
+        }
+
+        // F12: wires the lockout counters that sp_auth_user_std already implemented (LOGIN_SUCCESS /
+        // LOGIN_FAIL take only @p_userid). Failures here are logged and swallowed by the caller: a
+        // bookkeeping problem must never block a correct login or mask a wrong password.
+        public async Task RecordLoginOutcomeAsync(string userId, bool success)
+        {
+            using var db = CreateConnection();
+            var parameters = new
+            {
+                p_action = success ? "LOGIN_SUCCESS" : "LOGIN_FAIL",
+                p_userid = userId
+            };
+            await db.QueryFirstOrDefaultAsync<SpStdContract>("sp_auth_user_std", parameters, commandType: CommandType.StoredProcedure);
         }
 
         public async Task<IEnumerable<User>> GetAllAsync()

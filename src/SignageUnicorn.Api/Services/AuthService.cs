@@ -3,28 +3,43 @@ using SignageUnicorn.Api.Models;
 using SignageUnicorn.Api.Repositories.Interfaces;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
-using System.Text;
 using BCrypt.Net;
 
 namespace SignageUnicorn.Api.Services
 {
     public class AuthService
     {
+        // F12: the JWT claim that carries the user's token_version at issue time.
+        public const string TokenVersionClaim = "tv";
+
         private readonly IUserRepository _userRepository;
         private readonly ISystemLogRepository _systemLog;
-        private readonly IConfiguration _configuration;
+        private readonly JwtOptions _jwt;
 
-        public AuthService(IUserRepository userRepository, ISystemLogRepository systemLog, IConfiguration configuration)
+        public AuthService(IUserRepository userRepository, ISystemLogRepository systemLog, JwtOptions jwt)
         {
             _userRepository = userRepository;
             _systemLog = systemLog;
-            _configuration = configuration;
+            _jwt = jwt;
         }
 
         public async Task<LoginResponse?> LoginAsync(LoginRequest request)
         {
             var user = await _userRepository.GetByUsernameAsync(request.Username);
-            
+
+            // F12: an inactive (deactivated) account or a locked one is refused BEFORE the password
+            // is checked, and with the same message as a wrong password so nothing leaks.
+            if (user != null && user.Active != "Y")
+            {
+                await _systemLog.LogAsync("WARNING", "AUTH", $"Login refused for inactive account: {request.Username}");
+                return null;
+            }
+            if (user != null && user.LockedUntil.HasValue && user.LockedUntil.Value > DateTime.UtcNow)
+            {
+                await _systemLog.LogAsync("WARNING", "AUTH", $"Login refused for locked account: {request.Username} (until {user.LockedUntil:O})");
+                return null;
+            }
+
             bool isVerified = false;
             if (user != null && !string.IsNullOrEmpty(user.PasswordHash))
             {
@@ -41,9 +56,11 @@ namespace SignageUnicorn.Api.Services
             if (user == null || !isVerified)
             {
                 await _systemLog.LogAsync("WARNING", "AUTH", $"Failed login attempt for username: {request.Username}");
+                if (user?.UserId != null) await RecordOutcomeSafe(user.UserId, success: false);
                 return null;
             }
 
+            if (user.UserId != null) await RecordOutcomeSafe(user.UserId, success: true);
             await _systemLog.LogAsync("INFO", "AUTH", $"User '{user.Username}' ({user.FullName}) logged in.");
 
             var token = GenerateJwtToken(user);
@@ -57,41 +74,28 @@ namespace SignageUnicorn.Api.Services
             };
         }
 
-        public async Task<LoginResponse?> AutoAdminLoginAsync()
+        // The lockout counters live in the database (LOGIN_SUCCESS / LOGIN_FAIL). A failure to record
+        // the outcome is logged and ignored: it must never turn a correct password into a refusal, and
+        // the per-IP rate limiter still bounds guessing if the counters are unavailable.
+        private async Task RecordOutcomeSafe(string userId, bool success)
         {
-            // 1. Try specific 'admin' user
-            var user = await _userRepository.GetByUsernameAsync("admin");
-            
-            // 2. Fallback: Find ANY admin user (in case 'admin' doesn't exist but another admin does)
-            if (user == null)
+            try
             {
-                 var allUsers = await _userRepository.GetAllAsync();
-                 user = allUsers.FirstOrDefault(u => u.Role?.ToLower() == "admin" && u.Active == "Y");
+                await _userRepository.RecordLoginOutcomeAsync(userId, success);
             }
-
-            if (user == null) 
+            catch (Exception ex)
             {
-                await _systemLog.LogAsync("WARNING", "AUTH", "Auto-Admin failed: No admin user found in database.");
-                return null;
+                Console.WriteLine($"[WARN] Could not record login outcome for user {userId}: {ex.Message}");
             }
-
-            await _systemLog.LogAsync("INFO", "AUTH", $"Auto-Admin login detected.");
-
-            var token = GenerateJwtToken(user);
-            return new LoginResponse
-            {
-                Token = token,
-                Username = user.Username ?? "",
-                FullName = user.FullName ?? "",
-                Role = user.Role ?? "viewer",
-                AvatarUrl = user.AvatarUrl
-            };
         }
+
+        // F01: the anonymous "local auto admin" login that minted an administrator token for whoever
+        // reached the endpoint has been removed. Nothing replaces it: use a real account.
 
         public async Task<bool> RegisterAsync(RegisterRequest request, string? executorId = null)
         {
             var existing = await _userRepository.GetByUsernameAsync(request.Username);
-            if (existing != null) 
+            if (existing != null)
             {
                 await _systemLog.LogAsync("WARNING", "AUTH", $"Registration failed: Username '{request.Username}' already exists.");
                 return false;
@@ -121,21 +125,21 @@ namespace SignageUnicorn.Api.Services
 
         private string GenerateJwtToken(User user)
         {
-            var jwtSettings = _configuration.GetSection("JwtSettings");
-            var key = Encoding.ASCII.GetBytes(jwtSettings["Secret"] ?? "DEFAULT_SECRET_KEY_FOR_DEVELOPMENT_ONLY");
-
+            // F11: same key object the bearer validator uses -- no second read of configuration, no
+            // fallback literal.
             var tokenDescriptor = new SecurityTokenDescriptor
             {
                 Subject = new ClaimsIdentity(new[]
                 {
                     new Claim(ClaimTypes.NameIdentifier, user.UserId ?? "0"),
                     new Claim(ClaimTypes.Name, user.Username ?? "Unknown"),
-                    new Claim(ClaimTypes.Role, user.Role ?? "viewer")
+                    new Claim(ClaimTypes.Role, user.Role ?? "viewer"),
+                    new Claim(TokenVersionClaim, user.TokenVersion.ToString())
                 }),
-                Expires = DateTime.UtcNow.AddMinutes(double.Parse(jwtSettings["ExpiryMinutes"] ?? "1440")),
-                SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature),
-                Issuer = jwtSettings["Issuer"],
-                Audience = jwtSettings["Audience"]
+                Expires = DateTime.UtcNow.AddMinutes(_jwt.ExpiryMinutes),
+                SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(_jwt.KeyBytes), SecurityAlgorithms.HmacSha256Signature),
+                Issuer = _jwt.Issuer,
+                Audience = _jwt.Audience
             };
 
             var tokenHandler = new JwtSecurityTokenHandler();

@@ -107,12 +107,43 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             return data;
         }
 
-        public async Task ClearOldLogsAsync()
+        // Contract item 5: one connection per batch. Levels are already filtered by the controller
+        // (WARN/ERROR only); the category carries the console-facing type so the dashboard's
+        // "recent alerts" (which hides INFO) picks device problems up.
+        public async Task<int> LogBatchAsync(IEnumerable<SystemLogWrite> entries)
+        {
+            var list = entries?.ToList() ?? new List<SystemLogWrite>();
+            if (list.Count == 0) return 0;
+
+            using var db = CreateConnection();
+            if (db is SqlConnection sqlConn) await sqlConn.OpenAsync(); else db.Open();
+
+            int stored = 0;
+            foreach (var e in list)
+            {
+                string finalMessage = string.IsNullOrEmpty(e.DeviceId) ? e.Message : $"[Device: {e.DeviceId}] {e.Message}";
+                var parameters = new
+                {
+                    p_action = "INSERT",
+                    p_log_level = e.Level,
+                    p_category = e.Category,
+                    p_message = finalMessage,
+                    p_source_system = e.Source,
+                    p_userid = (long?)null,
+                    p_created_at = e.CreatedAt
+                };
+                var status = await db.QueryFirstOrDefaultAsync<SpStdResult>("sp_system_log_std", parameters, commandType: CommandType.StoredProcedure);
+                if (status != null && !status.err_flag) stored++;
+            }
+            return stored;
+        }
+
+        public async Task ClearOldLogsAsync(int retentionDays = 30)
         {
             using var db = CreateConnection();
             var p = new DynamicParameters();
             p.Add("@p_action", "CLEANUP");
-            p.Add("@p_retention_days", 30);
+            p.Add("@p_retention_days", retentionDays);
 
             var status = await db.QueryFirstOrDefaultAsync<SpStdResult>("sp_system_log_std", p, commandType: CommandType.StoredProcedure);
         }

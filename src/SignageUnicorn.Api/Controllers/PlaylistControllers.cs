@@ -51,9 +51,9 @@ namespace SignageUnicorn.Api.Controllers
         public async Task<ActionResult<ApiResponse<PlaylistDto>>> Create([FromBody] PlaylistDto playlist)
         {
             var userId = GetUserId();
-            var success = await _playlistService.CreatePlaylistAsync(playlist, userId);
-            if (!success) return BadRequest(ApiResponse<PlaylistDto>.ErrorResponse(400, "Could not create playlist"));
-            return CreatedAtAction(nameof(GetById), new { id = playlist.PlaylistId }, ApiResponse<PlaylistDto>.SuccessResponse(playlist));
+            var result = await _playlistService.CreatePlaylistAsync(playlist, userId);
+            if (!result.Success) return BadRequest(ApiResponse<PlaylistDto>.ErrorResponse(400, $"Could not create playlist: {result.Message}"));
+            return CreatedAtAction(nameof(GetById), new { id = playlist.PlaylistId }, ApiResponse<PlaylistDto>.SuccessResponse(playlist, result.Message));
         }
 
         [HttpPut("{id}")]
@@ -63,9 +63,10 @@ namespace SignageUnicorn.Api.Controllers
             try
             {
                 var userId = GetUserId();
-                var success = await _playlistService.UpdatePlaylistAsync(id, playlist, userId);
-                if (!success) return BadRequest(ApiResponse<bool>.ErrorResponse(400, "Could not update playlist"));
-                return Ok(ApiResponse<bool>.SuccessResponse(true));
+                var result = await _playlistService.UpdatePlaylistAsync(id, playlist, userId);
+                if (!result.Success) return BadRequest(ApiResponse<bool>.ErrorResponse(400, $"Could not update playlist: {result.Message}"));
+                // The message says whether every screen was notified (F16/F20).
+                return Ok(ApiResponse<bool>.SuccessResponse(true, result.Message));
             }
             catch (Exception ex)
             {

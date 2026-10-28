@@ -42,9 +42,20 @@ CREATE OR ALTER PROCEDURE [dbo].[sp_device_std]
 
     -- Audit
     @p_userid              BIGINT        = NULL,
-    
+
     -- Config
-    @p_cleanup_days        INT           = 14
+    @p_cleanup_days        INT           = 14,
+
+    -- Contract T5: protocol the heart-beating client speaks. 1 = legacy v2.7.x (restart-type
+    -- commands are marked EXECUTED on delivery, exactly as the deployed procedure always did, because
+    -- those clients reboot before their acknowledgement); 2+ = lease/ack client (every command stays
+    -- POLLING until acknowledged).
+    @p_protocol            INT           = 1,
+
+    -- Round 3 (#1): whether HEARTBEAT may adopt an existing row by MAC when the hardware uuid is
+    -- unknown. The API sets 0 when the MAC-matching row is token-protected and the request did not
+    -- prove its token; the beat then creates a new row instead of taking over the protected one.
+    @p_allow_mac_adopt     BIT           = 1
 )
 AS
 BEGIN
@@ -54,7 +65,7 @@ BEGIN
     DECLARE @err_code INT = 0;
     DECLARE @err_flag BIT = 0;
     DECLARE @msg NVARCHAR(4000) = N'';
-    
+
     -- Table Variable for Command Polling (Used in HEARTBEAT)
     DECLARE @PollTbl TABLE (
         CommandId BIGINT,
@@ -67,7 +78,7 @@ BEGIN
         CreatedAt DATETIME2
     );
 
-    IF @p_cleanup_days IS NULL SET @p_cleanup_days = 14; 
+    IF @p_cleanup_days IS NULL SET @p_cleanup_days = 14;
 
     IF @p_action IS NULL OR @p_action = ''
     BEGIN
@@ -147,7 +158,7 @@ BEGIN
         BEGIN
              DECLARE @real_uuid NVARCHAR(36);
              SELECT TOP 1 @real_uuid = device_uuid FROM sn_devices WITH (NOLOCK) WHERE device_id = TRY_CAST(@p_device_uuid AS BIGINT) AND is_deleted = 0;
-             
+
              IF @real_uuid IS NOT NULL AND @real_uuid <> @p_device_uuid
              BEGIN
                   UPDATE sn_devices SET is_deleted = 1, status = 'OFFLINE' WHERE device_uuid = @p_device_uuid;
@@ -199,6 +210,7 @@ BEGIN
 
              IF @p_mac_address IS NOT NULL AND LTRIM(RTRIM(@p_mac_address)) <> ''
                 AND @p_mac_address <> '00:00:00:00:00:00'
+                AND ISNULL(@p_allow_mac_adopt, 1) = 1
              BEGIN
                   SELECT @mac_match_id = MIN(device_id)
                   FROM sn_devices WITH (NOLOCK)
@@ -261,26 +273,46 @@ BEGIN
             (0, NEWID(), NEWID(), @actual_id, 'UPDATE_DEVICE_ID:' + CAST(@actual_id AS NVARCHAR(20)), NULL, 'EXECUTED', SYSUTCDATETIME());
         END
 
-        -- Expire stale POLLING commands that have been active for more than 3 minutes
+        -- Contract T5: remember which protocol this screen speaks (the admin console shows it; the
+        -- switch to Security:DeviceAuth = Required waits until every row reads 2).
+        IF @p_protocol IS NOT NULL AND @p_protocol > 0
+            UPDATE sn_devices SET client_protocol = @p_protocol
+            WHERE device_id = @actual_id AND ISNULL(client_protocol, 1) <> @p_protocol;
+
+        -- Contract item 2: a command the device never acknowledged is EXPIRED after 10 minutes of
+        -- POLLING (was 3), long enough for an UPDATE_CLIENT download on a slow branch line.
         UPDATE sn_device_commands
         SET status = 'EXPIRED',
             updated_at = SYSUTCDATETIME(),
-            fail_reason = 'Command execution timed out (3 minutes in POLLING status)'
-        WHERE device_id = @actual_id 
-          AND status = 'POLLING' 
-          AND updated_at < DATEADD(MINUTE, -3, SYSUTCDATETIME());
+            fail_reason = 'Command not acknowledged within 10 minutes of delivery'
+        WHERE device_id = @actual_id
+          AND status = 'POLLING'
+          AND updated_at < DATEADD(MINUTE, -10, SYSUTCDATETIME());
+
+        -- Contract item 2 / F13: delivery is NOT execution. Every command handed to a protocol-2
+        -- client is leased as POLLING and only the device's acknowledgement makes it EXECUTED or
+        -- FAILED. A command still POLLING after 120 s (was 30) is handed out again; those clients ack
+        -- restart-type commands BEFORE executing them, so a lost ack is rare and a duplicate harmless.
+        --
+        -- Contract T5 / Codex round-2 finding 6: a LEGACY client (protocol 1) reboots or reloads the
+        -- moment it sees a restart-type command and only acknowledges afterwards, so leasing those
+        -- would re-deliver them every 120 s and could reboot the screen in a loop. For protocol 1 the
+        -- restart-type commands (REFRESH, RELOAD, WIPE_CACHE, REBOOT, UPDATE_CLIENT, RESTART*) are
+        -- marked EXECUTED on delivery exactly as the deployed procedure always did; everything else
+        -- is POLLING for both protocols.
+        DECLARE @legacy BIT = CASE WHEN ISNULL(@p_protocol, 1) < 2 THEN 1 ELSE 0 END;
 
         UPDATE sn_device_commands
-        SET status = CASE 
-                        WHEN command_type IN ('REFRESH', 'RELOAD', 'WIPE_CACHE', 'REBOOT', 'UPDATE_CLIENT') OR command_type LIKE 'RESTART%' THEN 'EXECUTED'
+        SET status = CASE
+                        WHEN @legacy = 1 AND (command_type IN ('REFRESH', 'RELOAD', 'WIPE_CACHE', 'REBOOT', 'UPDATE_CLIENT') OR command_type LIKE 'RESTART%') THEN 'EXECUTED'
                         ELSE 'POLLING'
                      END,
-            executed_at = CASE 
-                             WHEN command_type IN ('REFRESH', 'RELOAD', 'WIPE_CACHE', 'REBOOT', 'UPDATE_CLIENT') OR command_type LIKE 'RESTART%' THEN SYSUTCDATETIME()
+            executed_at = CASE
+                             WHEN @legacy = 1 AND (command_type IN ('REFRESH', 'RELOAD', 'WIPE_CACHE', 'REBOOT', 'UPDATE_CLIENT') OR command_type LIKE 'RESTART%') THEN SYSUTCDATETIME()
                              ELSE executed_at
                           END,
             updated_at = SYSUTCDATETIME()
-        OUTPUT 
+        OUTPUT
             INSERTED.command_id AS CommandId,
             INSERTED.command_uuid AS CommandUuid,
             INSERTED.command_uuid AS DeviceCommandId, -- Alias for DTO
@@ -290,7 +322,7 @@ BEGIN
             INSERTED.status AS Status,
             INSERTED.created_at AS CreatedAt
         INTO @PollTbl
-        WHERE device_id = @actual_id AND (status = 'PENDING' OR (status = 'POLLING' AND updated_at < DATEADD(SECOND, -30, SYSUTCDATETIME())));
+        WHERE device_id = @actual_id AND (status = 'PENDING' OR (status = 'POLLING' AND updated_at < DATEADD(SECOND, -120, SYSUTCDATETIME())));
 
         GOTO ResultSection;
     END
@@ -342,7 +374,7 @@ BEGIN
         SET @msg = N'Offline devices cleaned.';
         GOTO ResultSection;
     END
-    
+
     /* =====================================================
        COUNT_OFFLINE_ZOMBIES (NEW)
     ===================================================== */
@@ -358,18 +390,18 @@ BEGIN
 ResultSection:
     -- 1. Status Result Set
     SELECT @err_code AS err_code, @err_flag AS err_flag, @msg AS msg;
-    
+
     -- 2. Data Result Set
-    IF @err_flag = 0 
+    IF @err_flag = 0
     BEGIN
         IF @p_action = 'REGISTER_OR_LOGIN'
         BEGIN
-            SELECT 
-                CAST(d.device_id AS NVARCHAR(36)) AS DeviceId, 
-                d.device_uuid AS DeviceUuid, 
+            SELECT
+                CAST(d.device_id AS NVARCHAR(36)) AS DeviceId,
+                d.device_uuid AS DeviceUuid,
                 d.device_uuid AS DeviceKey,
-                d.device_name AS DeviceName, 
-                d.location AS Location, 
+                d.device_name AS DeviceName,
+                d.location AS Location,
                 d.ratio AS Ratio,
                 d.branch_code AS BranchCode,
                 d.ip_address AS IpAddress,
@@ -381,14 +413,19 @@ ResultSection:
                 d.cache_progress AS CacheProgress,
                 d.app_version AS AppVersion,
                 d.last_check_in AS LastCheckIn,
+                d.schedule_mode AS ScheduleMode,
+                CAST(CASE WHEN d.device_token_hash IS NULL THEN 0 ELSE 1 END AS BIT) AS HasDeviceToken,
+                d.device_token_issued_at AS DeviceTokenIssuedAt,
+                ISNULL(d.client_protocol, 1) AS ClientProtocol,
+                CAST(CASE WHEN d.device_token_hash IS NULL AND d.device_token_reset_at IS NOT NULL THEN 1 ELSE 0 END AS BIT) AS TokenResetPending,
                 'Y' AS Active
-            FROM sn_devices d WITH (NOLOCK) 
+            FROM sn_devices d WITH (NOLOCK)
             WHERE d.device_uuid = @p_device_uuid;
         END
 
         IF @p_action = 'HEARTBEAT'
         BEGIN
-            SELECT 
+            SELECT
                 CAST(CommandId AS NVARCHAR(36)) AS CommandId,
                 CommandUuid,
                 DeviceCommandId,
@@ -397,25 +434,25 @@ ResultSection:
                 Payload,
                 Status,
                 CreatedAt
-            FROM @PollTbl 
+            FROM @PollTbl
             ORDER BY CreatedAt ASC;
         END
 
         IF @p_action = 'GET_ALL'
         BEGIN
-            SELECT 
-                CAST(d.device_id AS NVARCHAR(36)) AS DeviceId, 
-                d.device_uuid AS DeviceUuid, 
+            SELECT
+                CAST(d.device_id AS NVARCHAR(36)) AS DeviceId,
+                d.device_uuid AS DeviceUuid,
                 d.device_uuid AS DeviceKey,
-                d.device_name AS DeviceName, 
-                d.location AS Location, 
+                d.device_name AS DeviceName,
+                d.location AS Location,
                 d.ratio AS Ratio,
                 d.branch_code AS BranchCode,
                 d.ip_address AS IpAddress,
-                
+
                 CASE
                     WHEN d.last_check_in IS NULL THEN 'OFFLINE'
-                    WHEN DATEDIFF(SECOND, d.last_check_in, SYSUTCDATETIME()) > 60 THEN 'OFFLINE' 
+                    WHEN DATEDIFF(SECOND, d.last_check_in, SYSUTCDATETIME()) > 60 THEN 'OFFLINE'
                     ELSE d.status
                 END AS Status,
 
@@ -426,6 +463,11 @@ ResultSection:
                 d.cache_progress AS CacheProgress,
                 d.app_version AS AppVersion,
                 d.last_check_in AS LastCheckIn,
+                d.schedule_mode AS ScheduleMode,
+                CAST(CASE WHEN d.device_token_hash IS NULL THEN 0 ELSE 1 END AS BIT) AS HasDeviceToken,
+                d.device_token_issued_at AS DeviceTokenIssuedAt,
+                ISNULL(d.client_protocol, 1) AS ClientProtocol,
+                CAST(CASE WHEN d.device_token_hash IS NULL AND d.device_token_reset_at IS NOT NULL THEN 1 ELSE 0 END AS BIT) AS TokenResetPending,
                 'Y' AS Active
 
             FROM sn_devices d WITH (NOLOCK)
@@ -435,18 +477,18 @@ ResultSection:
 
         IF @p_action IN ('GET_BY_ID','GET_BY_UUID')
         BEGIN
-            SELECT TOP 1 
-                CAST(d.device_id AS NVARCHAR(36)) AS DeviceId, 
-                d.device_uuid AS DeviceUuid, 
+            SELECT TOP 1
+                CAST(d.device_id AS NVARCHAR(36)) AS DeviceId,
+                d.device_uuid AS DeviceUuid,
                 d.device_uuid AS DeviceKey,
-                d.device_name AS DeviceName, 
-                d.location AS Location, 
+                d.device_name AS DeviceName,
+                d.location AS Location,
                 d.ratio AS Ratio,
                 d.branch_code AS BranchCode,
                 d.ip_address AS IpAddress,
                 CASE
                     WHEN d.last_check_in IS NULL THEN 'OFFLINE'
-                    WHEN DATEDIFF(SECOND, d.last_check_in, SYSUTCDATETIME()) > 60 THEN 'OFFLINE' 
+                    WHEN DATEDIFF(SECOND, d.last_check_in, SYSUTCDATETIME()) > 60 THEN 'OFFLINE'
                     ELSE d.status
                 END AS Status,
                 CAST(d.current_playlist_id AS NVARCHAR(36)) AS CurrentPlaylistId,
@@ -456,6 +498,11 @@ ResultSection:
                 d.cache_progress AS CacheProgress,
                 d.app_version AS AppVersion,
                 d.last_check_in AS LastCheckIn,
+                d.schedule_mode AS ScheduleMode,
+                CAST(CASE WHEN d.device_token_hash IS NULL THEN 0 ELSE 1 END AS BIT) AS HasDeviceToken,
+                d.device_token_issued_at AS DeviceTokenIssuedAt,
+                ISNULL(d.client_protocol, 1) AS ClientProtocol,
+                CAST(CASE WHEN d.device_token_hash IS NULL AND d.device_token_reset_at IS NOT NULL THEN 1 ELSE 0 END AS BIT) AS TokenResetPending,
                 'Y' AS Active
             FROM sn_devices d WITH (NOLOCK)
             WHERE d.is_deleted = 0
@@ -471,7 +518,7 @@ ResultSection:
                      CASE WHEN d.device_id  = @p_device_id  THEN 0 ELSE 1 END,
                      d.device_id DESC;
         END
-        
+
         IF @p_action = 'COUNT_OFFLINE_ZOMBIES'
         BEGIN
              SELECT Count(*) as Count

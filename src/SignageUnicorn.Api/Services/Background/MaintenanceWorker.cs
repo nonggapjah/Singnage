@@ -150,7 +150,12 @@ namespace SignageUnicorn.Api.Services.Background
 
                 _logger.LogInformation("[Maintenance] Starting Daily Cleanup...");
 
-                // 1. Clear Old System Logs (> 2 Days)
+                // F36: retention used to be a hard-coded 2 days while the dashboard and statistics
+                // pages ask for 7, so reports silently undercounted after every nightly purge.
+                int systemLogDays = Math.Max(1, config.GetValue<int?>("Maintenance:SystemLogRetentionDays") ?? 14);
+                int playbackLogDays = Math.Max(1, config.GetValue<int?>("Maintenance:PlaybackLogRetentionDays") ?? 90);
+
+                // 1. Clear Old System Logs
                 try
                 {
                     var sql = @"
@@ -158,18 +163,18 @@ namespace SignageUnicorn.Api.Services.Background
                         DECLARE @Deleted INT = 1;
                         WHILE @Deleted > 0
                         BEGIN
-                            DELETE TOP (5000) FROM sn_system_logs WHERE created_at < DATEADD(day, -2, SYSUTCDATETIME());
+                            DELETE TOP (5000) FROM sn_system_logs WHERE created_at < DATEADD(day, -@days, SYSUTCDATETIME());
                             SET @Deleted = @@ROWCOUNT;
                         END";
-                    await deviceRepo.ExecuteSqlAsync(sql);
-                    _logger.LogInformation("[Maintenance] Old system logs (> 2 days) cleared.");
+                    await deviceRepo.ExecuteSqlAsync(sql, new { days = systemLogDays });
+                    _logger.LogInformation("[Maintenance] Old system logs (> {Days} days) cleared.", systemLogDays);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "[Maintenance] Failed to clear system logs.");
                 }
 
-                // 2. Clear Old Playback Logs (> 2 Days)
+                // 2. Clear Old Playback Logs (proof-of-play; retention is configurable, default 90 days)
                 try
                 {
                     var sql = @"
@@ -177,11 +182,11 @@ namespace SignageUnicorn.Api.Services.Background
                         DECLARE @Deleted INT = 1;
                         WHILE @Deleted > 0
                         BEGIN
-                            DELETE TOP (5000) FROM sn_playback_logs WHERE created_at < DATEADD(day, -2, SYSUTCDATETIME());
+                            DELETE TOP (5000) FROM sn_playback_logs WHERE created_at < DATEADD(day, -@days, SYSUTCDATETIME());
                             SET @Deleted = @@ROWCOUNT;
                         END";
-                    await deviceRepo.ExecuteSqlAsync(sql);
-                    _logger.LogInformation("[Maintenance] Old playback logs (> 2 days) cleared.");
+                    await deviceRepo.ExecuteSqlAsync(sql, new { days = playbackLogDays });
+                    _logger.LogInformation("[Maintenance] Old playback logs (> {Days} days) cleared.", playbackLogDays);
                 }
                 catch (Exception ex)
                 {
@@ -242,6 +247,14 @@ namespace SignageUnicorn.Api.Services.Background
                         int deletedCount = 0;
                         long reclaimedBytes = 0;
 
+                        // F23: the sweep used to compare a snapshot of the database against the disk
+                        // and delete every unmatched file at once. A file written by an upload whose
+                        // row was committed a moment after the snapshot -- or a transcode published
+                        // after it -- was deleted as an orphan, leaving a valid row pointing at nothing.
+                        // Two guards: only files older than 24 h are candidates, and the database is
+                        // re-checked for the exact name immediately before each delete.
+                        var minAgeUtc = DateTime.UtcNow.AddHours(-24);
+
                         foreach (var file in files)
                         {
                             var fileName = Path.GetFileName(file);
@@ -256,6 +269,15 @@ namespace SignageUnicorn.Api.Services.Background
                                 try
                                 {
                                     var fileInfo = new FileInfo(file);
+                                    if (fileInfo.LastWriteTimeUtc > minAgeUtc || fileInfo.CreationTimeUtc > minAgeUtc)
+                                        continue; // too young to judge
+
+                                    var stillReferenced = await deviceRepo.QueryScalarAsync<int>(
+                                        "SELECT COUNT(*) FROM sn_media_files WHERE blob_url LIKE '%/' + @name",
+                                        new { name = fileName });
+                                    if (stillReferenced > 0)
+                                        continue;
+
                                     reclaimedBytes += fileInfo.Length;
                                     File.Delete(file);
                                     deletedCount++;

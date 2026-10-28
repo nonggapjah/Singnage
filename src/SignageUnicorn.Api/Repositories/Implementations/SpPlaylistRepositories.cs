@@ -155,6 +155,131 @@ namespace SignageUnicorn.Api.Repositories.Implementations
                 : RepositoryResult.Fail(status?.err_code ?? -1, status?.msg ?? "DB Error");
         }
 
+        // F16. Header update, item clear and every item insert used to be separate connections, so a
+        // failure half-way left an empty or partial playlist on every screen that used it. Everything
+        // below runs on ONE connection inside ONE transaction and is rolled back on the first failure.
+        // The stored procedures run SET XACT_ABORT ON, so a runtime error inside them dooms the outer
+        // transaction as well -- hence the guarded Rollback.
+        public async Task<RepositoryResult> SavePlaylistAsync(string playlistId, string playlistName, string description, string active, IReadOnlyList<PlaylistItemWrite> items, long? userId = null)
+        {
+            using var db = new SqlConnection(_connectionString);
+            await db.OpenAsync();
+            using var tx = db.BeginTransaction();
+            try
+            {
+                long? pId = null; string? pUuid = null;
+                if (long.TryParse(playlistId, out var idVal)) pId = idVal; else pUuid = playlistId;
+                bool isActive = (active?.Trim().ToUpper() == "Y" || active == "1" || active?.ToLower() == "true");
+
+                var header = await db.QueryFirstOrDefaultAsync<SpStdResult>("sp_playlist_std", new
+                {
+                    p_action = "UPDATE",
+                    p_playlist_name = playlistName,
+                    p_description = description,
+                    p_active_only = isActive ? 1 : 0,
+                    p_playlist_id = pId,
+                    p_playlist_uuid = pUuid,
+                    p_userid = userId
+                }, tx, commandType: CommandType.StoredProcedure);
+                if (header == null || header.err_flag)
+                    throw new InvalidOperationException($"header update failed: {header?.msg ?? "no status"}");
+
+                var cleared = await db.QueryFirstOrDefaultAsync<SpStdResult>("sp_playlist_std", new
+                {
+                    p_action = "CLEAR_ITEMS",
+                    p_playlist_id = pId,
+                    p_playlist_uuid = pUuid,
+                    p_userid = userId
+                }, tx, commandType: CommandType.StoredProcedure);
+                if (cleared == null || cleared.err_flag)
+                    throw new InvalidOperationException($"clearing items failed: {cleared?.msg ?? "no status"}");
+
+                await InsertItemsAsync(db, tx, pId, pUuid, items, userId);
+
+                tx.Commit();
+                return RepositoryResult.Ok("Playlist saved");
+            }
+            catch (Exception ex)
+            {
+                try { tx.Rollback(); } catch { /* already rolled back by XACT_ABORT */ }
+                return RepositoryResult.Fail(500, ex.Message);
+            }
+        }
+
+        public async Task<RepositoryResult> CreatePlaylistWithItemsAsync(string playlistId, string playlistName, string description, string active, IReadOnlyList<PlaylistItemWrite> items, long? userId = null)
+        {
+            using var db = new SqlConnection(_connectionString);
+            await db.OpenAsync();
+            using var tx = db.BeginTransaction();
+            try
+            {
+                bool isActive = (active?.Trim().ToUpper() == "Y" || active == "1" || active?.ToLower() == "true");
+                var created = await db.QueryFirstOrDefaultAsync<SpStdResult>("sp_playlist_std", new
+                {
+                    p_action = "CREATE",
+                    p_playlist_uuid = playlistId,
+                    p_playlist_name = playlistName,
+                    p_description = description,
+                    p_active_only = isActive ? 1 : 0,
+                    p_userid = userId
+                }, tx, commandType: CommandType.StoredProcedure);
+                if (created == null || created.err_flag)
+                    throw new InvalidOperationException($"create failed: {created?.msg ?? "no status"}");
+
+                // CREATE always writes status 'active'; honour the requested flag in the same transaction.
+                if (!isActive)
+                {
+                    var header = await db.QueryFirstOrDefaultAsync<SpStdResult>("sp_playlist_std", new
+                    {
+                        p_action = "UPDATE",
+                        p_playlist_name = playlistName,
+                        p_description = description,
+                        p_active_only = 0,
+                        p_playlist_uuid = playlistId,
+                        p_userid = userId
+                    }, tx, commandType: CommandType.StoredProcedure);
+                    if (header == null || header.err_flag)
+                        throw new InvalidOperationException($"status update failed: {header?.msg ?? "no status"}");
+                }
+
+                await InsertItemsAsync(db, tx, null, playlistId, items, userId);
+
+                tx.Commit();
+                return RepositoryResult.Ok("Playlist created");
+            }
+            catch (Exception ex)
+            {
+                try { tx.Rollback(); } catch { }
+                return RepositoryResult.Fail(500, ex.Message);
+            }
+        }
+
+        private static async Task InsertItemsAsync(SqlConnection db, SqlTransaction tx, long? pId, string? pUuid, IReadOnlyList<PlaylistItemWrite> items, long? userId)
+        {
+            foreach (var item in items)
+            {
+                if (string.IsNullOrWhiteSpace(item.MediaId)) continue;
+                long? mId = null; string? mUuid = null;
+                if (long.TryParse(item.MediaId, out var mIdVal)) mId = mIdVal; else mUuid = item.MediaId;
+
+                using var multi = await db.QueryMultipleAsync("sp_playlist_std", new
+                {
+                    p_action = "ADD_ITEM",
+                    p_playlist_item_uuid = Guid.NewGuid().ToString(),
+                    p_position_order = item.PositionOrder,
+                    p_duration_override = item.DurationOverride,
+                    p_playlist_id = pId,
+                    p_playlist_uuid = pUuid,
+                    p_media_id = mId,
+                    p_media_uuid = mUuid,
+                    p_userid = userId
+                }, tx, commandType: CommandType.StoredProcedure);
+                var status = await multi.ReadFirstOrDefaultAsync<SpStdResult>();
+                if (status == null || status.err_flag)
+                    throw new InvalidOperationException($"adding media {item.MediaId} failed: {status?.msg ?? "no status"}");
+            }
+        }
+
         public async Task<IEnumerable<PlaylistItemDto>> GetPlaylistItemsAsync(string playlistId)
         {
             using var db = CreateConnection();

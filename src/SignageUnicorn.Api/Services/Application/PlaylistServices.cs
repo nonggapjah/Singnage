@@ -66,19 +66,29 @@ namespace SignageUnicorn.Api.Services.Application
 
         // ... (GetAllPlaylistsAsync and GetPlaylistByIdAsync remain same) ...
 
-        private async Task NotifyAffectedDevices(string playlistId)
+        // Returns null when every affected screen was queued a FORCE_SYNC, otherwise a description of
+        // what failed. F20: this used to be swallowed, so an edit reported success while no screen was
+        // told about it.
+        private async Task<string?> NotifyAffectedDevices(string playlistId)
         {
             try
             {
-                var affectedDevices = await _deviceRepo.GetDevicesByPlaylistIdAsync(playlistId);
+                var affectedDevices = (await _deviceRepo.GetDevicesByPlaylistIdAsync(playlistId)).ToList();
+                var failures = new List<string>();
                 foreach (var dev in affectedDevices)
                 {
-                    await _deviceRepo.AddCommandAsync(dev.DeviceId, "FORCE_SYNC");
+                    var r = await _deviceRepo.AddCommandAsync(dev.DeviceId, "FORCE_SYNC");
+                    if (!r.Success) failures.Add($"{dev.DeviceId}: {r.Message}");
                 }
+                if (failures.Count == 0) return null;
+                var msg = $"{failures.Count} of {affectedDevices.Count} screen(s) could not be notified: {string.Join("; ", failures)}";
+                await _logRepo.LogAsync(null, "WARN", $"[PlaylistService] NOTIFY_PARTIAL | Playlist: {playlistId} | {msg}", "API");
+                return msg;
             }
             catch (Exception ex)
             {
-                await _logRepo.LogAsync(null, "WARN", $"[PlaylistService] NOTIFY_FAILED | {ex.Message}", "API");
+                await _logRepo.LogAsync(null, "WARN", $"[PlaylistService] NOTIFY_FAILED | Playlist: {playlistId} | {ex.Message}", "API");
+                return $"screens could not be notified: {ex.Message}";
             }
         }
 
@@ -130,50 +140,40 @@ namespace SignageUnicorn.Api.Services.Application
             return playlist;
         }
 
-        public async Task<bool> CreatePlaylistAsync(PlaylistDto playlist, long? userId = null)
+        public async Task<RepositoryResult> CreatePlaylistAsync(PlaylistDto playlist, long? userId = null)
         {
             // Case 5: Validation (P06) - Prevent activating empty playlist
             if (playlist.Active == "Y" && (playlist.Items == null || !playlist.Items.Any()))
             {
                 await _logRepo.LogAsync(null, "WARNING", $"[PlaylistService] VALIDATION_ERROR | Attempted to create empty ACTIVE playlist: {playlist.PlaylistName}", "API", userId);
-                return false;
+                return RepositoryResult.Fail(400, "An active playlist must contain at least one item");
             }
 
             if (string.IsNullOrEmpty(playlist.PlaylistId)) playlist.PlaylistId = Guid.NewGuid().ToString();
-            
-            // 1. Create Header
-            var result = await _playlistRepo.CreatePlaylistAsync(
-                playlist.PlaylistId, playlist.PlaylistName, playlist.Description ?? string.Empty, userId?.ToString() ?? playlist.CreatedBy ?? "system", playlist.Active);
-            
+
+            // F16: header + items in one transaction (see SpPlaylistRepository.CreatePlaylistWithItemsAsync)
+            var items = BuildItems(playlist);
+            var result = await _playlistRepo.CreatePlaylistWithItemsAsync(
+                playlist.PlaylistId, playlist.PlaylistName, playlist.Description ?? string.Empty, playlist.Active, items, userId);
+
             if (!result.Success)
             {
                 await _logRepo.LogAsync(null, "ERROR", $"[PlaylistService] CREATE_FAILED | Code: {result.ErrorCode} | Msg: {result.Message}", "API", userId);
-                return false;
+                return result;
             }
 
-            // 2. Add Items
-            if (playlist.Items != null && playlist.Items.Any())
-            {
-                foreach (var item in playlist.Items)
-                {
-                    await _playlistRepo.AddPlaylistItemAsync(Guid.NewGuid().ToString(), playlist.PlaylistId, item.MediaId, item.PositionOrder, item.DurationOverride, userId);
-                }
-            }
-
-            await _logRepo.LogAsync(null, "INFO", $"[PlaylistService] CREATED | Playlist: {playlist.PlaylistName} | ID: {playlist.PlaylistId}", "API", userId);
-            
+            await _logRepo.LogAsync(null, "INFO", $"[PlaylistService] CREATED | Playlist: {playlist.PlaylistName} | ID: {playlist.PlaylistId} | Items: {items.Count}", "API", userId);
             // Note: Notify not needed for *New* playlist as no devices use it yet
-            
-            return true;
+            return RepositoryResult.Ok("Playlist created");
         }
 
-        public async Task<bool> UpdatePlaylistAsync(string id, PlaylistDto playlist, long? userId = null)
+        public async Task<RepositoryResult> UpdatePlaylistAsync(string id, PlaylistDto playlist, long? userId = null)
         {
             // Case 5: Validation (P06) - Prevent activating empty playlist
             if (playlist.Active == "Y" && (playlist.Items == null || !playlist.Items.Any()))
             {
                 await _logRepo.LogAsync(null, "WARNING", $"[PlaylistService] VALIDATION_ERROR | Attempted to set playlist {id} to ACTIVE without items", "API", userId);
-                return false;
+                return RepositoryResult.Fail(400, "An active playlist must contain at least one item");
             }
 
             // Log Input for Debugging
@@ -182,34 +182,34 @@ namespace SignageUnicorn.Api.Services.Application
             var itemsJson = System.Text.Json.JsonSerializer.Serialize(itemMediaIds);
             await _logRepo.LogAsync(null, "INFO", $"[PlaylistService] UPDATE | PlaylistID: {id} | Name: '{playlist.PlaylistName}' | Count: {itemCount} | MediaSeq: {itemsJson}", "API", userId);
 
-            // 1. Update Header
-            var headerResult = await _playlistRepo.UpdatePlaylistAsync(id, playlist.PlaylistName, playlist.Description ?? string.Empty, playlist.Active, userId);
-            if (!headerResult.Success)
+            // F16: header update, item clear and item inserts in ONE transaction. A failure anywhere
+            // leaves the playlist exactly as it was instead of empty or half-replaced.
+            var items = BuildItems(playlist);
+            var result = await _playlistRepo.SavePlaylistAsync(id, playlist.PlaylistName, playlist.Description ?? string.Empty, playlist.Active, items, userId);
+            if (!result.Success)
             {
-                await _logRepo.LogAsync(null, "ERROR", $"[PlaylistService] UPDATE_HEADER_FAILED | Code: {headerResult.ErrorCode} | Msg: {headerResult.Message}", "API", userId);
-                return false;
-            }
-            
-            // 2. Sync Items (Strategy: Soft-delete all existing, then add new)
-            await _playlistRepo.ClearPlaylistItemsAsync(id, userId);
-
-            // 3. Add New Items
-            if (playlist.Items != null && playlist.Items.Any())
-            {
-                int order = 1;
-                foreach (var item in playlist.Items)
-                {
-                    if (!string.IsNullOrEmpty(item.MediaId))
-                    {
-                        await _playlistRepo.AddPlaylistItemAsync(Guid.NewGuid().ToString(), id, item.MediaId, order++, item.DurationOverride, userId);
-                    }
-                }
+                await _logRepo.LogAsync(null, "ERROR", $"[PlaylistService] UPDATE_FAILED | Code: {result.ErrorCode} | Msg: {result.Message}", "API", userId);
+                return result;
             }
 
-            // 4. Notify affected devices
-            await NotifyAffectedDevices(id);
+            // Notify affected devices; a notification problem is reported, not hidden.
+            var notifyProblem = await NotifyAffectedDevices(id);
+            return notifyProblem == null
+                ? RepositoryResult.Ok("Playlist saved and screens notified")
+                : RepositoryResult.Ok($"Playlist saved, but {notifyProblem}");
+        }
 
-            return true;
+        private static List<PlaylistItemWrite> BuildItems(PlaylistDto playlist)
+        {
+            var list = new List<PlaylistItemWrite>();
+            if (playlist.Items == null) return list;
+            int order = 1;
+            foreach (var item in playlist.Items)
+            {
+                if (string.IsNullOrEmpty(item.MediaId)) continue;
+                list.Add(new PlaylistItemWrite { MediaId = item.MediaId, PositionOrder = order++, DurationOverride = item.DurationOverride });
+            }
+            return list;
         }
 
         public async Task<bool> DeletePlaylistAsync(string id, long? userId = null)

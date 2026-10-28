@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using SignageUnicorn.Api.Models;
 using SignageUnicorn.Api.Models.Domain;
 using SignageUnicorn.Api.Repositories.Interfaces;
+using SignageUnicorn.Api.Services.Database;
 
 namespace SignageUnicorn.Api.Services
 {
@@ -34,6 +35,31 @@ namespace SignageUnicorn.Api.Services
         public async Task UpdateAssignedPlaylistsAsync(string deviceId, List<DevicePlaylistDto> playlists)
         {
             await _deviceRepository.UpdateAssignedPlaylistsAsync(deviceId, playlists);
+            await NotifyScheduleInheritorsAsync(deviceId);
+        }
+
+        // Round 3 (#11 / Codex round-3 finding 11). A screen in 'inherit' mode plays what its sibling
+        // (same branch + name) is assigned, so every change to that sibling's assignments -- replace,
+        // clear, reset to inherit -- must reach the inheritors too, or they keep the previous content
+        // until a boundary or restart. Best effort: a notification failure never fails the edit.
+        public async Task NotifyScheduleInheritorsAsync(string deviceId)
+        {
+            try
+            {
+                var inheritors = (await _deviceRepository.GetScheduleInheritorsAsync(deviceId)).ToList();
+                foreach (var id in inheritors)
+                {
+                    var result = await _deviceRepository.AddCommandAsync(id, "SYNC_SCHEDULE");
+                    if (!result.Success)
+                        await _logRepo.LogAsync(id, "WARNING", $"[DeviceService] INHERITOR_NOTIFY_FAILED | owner={deviceId} | {result.Message}", "API");
+                }
+                if (inheritors.Count > 0)
+                    await _logRepo.LogAsync(deviceId, "INFO", $"[DeviceService] INHERITORS_NOTIFIED | count={inheritors.Count}", "API");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[DeviceService] INHERITOR_NOTIFY_ERROR | owner={deviceId} | {ex.Message}");
+            }
         }
 
         public async Task<SignageUnicorn.Api.Models.Domain.PlaylistDto> GetDeviceScheduleAsync(string deviceId)
@@ -57,7 +83,13 @@ namespace SignageUnicorn.Api.Services
             // Branch content is defined per screen type (e.g. every "Thonglor All" plays the same set),
             // not per physical device, so a new screen should immediately play what its peers play
             // instead of going idle and forcing a manual playlist selection.
-            if (assignments == null || !assignments.Any())
+            //
+            // F18 / contract item 6: ONLY while the screen is still in 'inherit' mode. Once an admin
+            // has assigned or deliberately cleared it (schedule_mode = 'explicit'), an empty list
+            // means "play nothing" -- clearing a screen used to make it copy its neighbour instead.
+            var deviceRow = await _deviceRepository.GetDeviceByIdAsync(deviceId);
+            bool mayInherit = !string.Equals(deviceRow?.ScheduleMode, "explicit", StringComparison.OrdinalIgnoreCase);
+            if (mayInherit && (assignments == null || !assignments.Any()))
             {
                 var siblingId = await _deviceRepository.GetSiblingDeviceIdWithAssignmentsAsync(deviceId);
                 if (!string.IsNullOrEmpty(siblingId))
@@ -94,7 +126,43 @@ namespace SignageUnicorn.Api.Services
             }
 
             schedule.ItemCount = schedule.Items.Count;
+
+            // Contract item 6: a version clients can compare cheaply, and the next boundary so they
+            // know when to ask again (the ScheduleTransitionWorker also pushes SYNC_SCHEDULE then).
+            var assignmentList = (assignments ?? Enumerable.Empty<DevicePlaylistDto>()).ToList();
+            var versionSource = string.Join("|", assignmentList
+                .OrderBy(a => a.PlaylistId, StringComparer.Ordinal)
+                .ThenBy(a => a.StartDate)
+                .Select(a => $"{a.PlaylistId}:{a.StartDate:O}:{a.EndDate:O}:{a.IsActive}"));
+            using (var sha = System.Security.Cryptography.SHA256.Create())
+            {
+                var bytes = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(versionSource));
+                schedule.ScheduleVersion = Convert.ToHexString(bytes).Substring(0, 16).ToLowerInvariant();
+            }
+            DateTime? next = null;
+            foreach (var a in assignmentList)
+            {
+                if (a.StartDate.HasValue && a.StartDate.Value > now && (next == null || a.StartDate.Value < next)) next = a.StartDate.Value;
+                if (a.EndDate.HasValue && a.EndDate.Value > now && (next == null || a.EndDate.Value < next)) next = a.EndDate.Value;
+            }
+            schedule.NextTransitionAtUtc = next;
             return schedule;
+        }
+
+        public async Task SetScheduleModeAsync(string deviceId, string mode)
+        {
+            await _deviceRepository.SetScheduleModeAsync(deviceId, mode);
+            await _logRepo.LogAsync(deviceId, "INFO", $"[DeviceService] SCHEDULE_MODE | mode={mode}", "API");
+        }
+
+        // Contract T8: the screen's own assignments are dropped and inherit mode set in ONE
+        // transaction, so the next schedule resolution really follows the sibling.
+        public async Task ResetScheduleToInheritAsync(string deviceId)
+        {
+            await _deviceRepository.ResetScheduleToInheritAsync(deviceId);
+            await _logRepo.LogAsync(deviceId, "INFO", "[DeviceService] SCHEDULE_RESET_TO_INHERIT | own assignments removed", "API");
+            // Screens that inherited from THIS device no longer can (it has no assignments now).
+            await NotifyScheduleInheritorsAsync(deviceId);
         }
 
         public async Task<DeviceDto> RegisterDeviceAsync(DeviceRegisterRequest request)
@@ -223,9 +291,9 @@ namespace SignageUnicorn.Api.Services
             }
         }
 
-        public async Task AcknowledgeCommandAsync(string deviceId, string commandId, string status, long? userId = null)
+        public async Task<RepositoryResult> AcknowledgeCommandAsync(string deviceId, string commandId, string status, long? userId = null, string? message = null)
         {
-            var result = await _deviceRepository.AcknowledgeCommandAsync(deviceId, commandId, status, userId);
+            var result = await _deviceRepository.AcknowledgeCommandAsync(deviceId, commandId, status, userId, message);
             if (result.Success)
             {
                 await _logRepo.LogAsync(deviceId, "INFO", $"[DeviceService] COMMAND_ACKNOWLEDGED | CommandID: {commandId} | Status: {status}", "API", userId);
@@ -234,6 +302,7 @@ namespace SignageUnicorn.Api.Services
             {
                 await _logRepo.LogAsync(deviceId, "ERROR", $"[DeviceService] COMMAND_ACK_FAILED | CommandID: {commandId} | Code: {result.ErrorCode} | Msg: {result.Message}", "API", userId);
             }
+            return result;
         }
 
         public async Task BatchSendCommandAsync(List<string> deviceIds, string command)
@@ -322,8 +391,28 @@ namespace SignageUnicorn.Api.Services
         // so an operator saw "Database Initialized Successfully!" whether or not anything applied.
         public async Task<SchemaApplyResult> FixDatabaseAsync()
         {
-             var report = new SchemaApplyResult();
+             // Round 4 (#2): one apply per process at a time. The console's POST retry (after the
+             // first request timed out while the SQL kept running) gets an immediate "busy" instead
+             // of queueing behind the database lock and shifting migration 007's rows a second time.
+             if (!SchemaApplyGate.TryEnter())
+             {
+                 Console.WriteLine("[DeviceService] SCHEMA_APPLY_BUSY | another schema apply is running in this process");
+                 var busy = new SchemaApplyResult { InProgress = true };
+                 busy.Failed.Add("another schema apply is in progress in this process; nothing was applied");
+                 return busy;
+             }
+             try
+             {
+                 return await FixDatabaseCoreAsync();
+             }
+             finally
+             {
+                 SchemaApplyGate.Exit();
+             }
+        }
 
+        private async Task<SchemaApplyResult> FixDatabaseCoreAsync()
+        {
              string docsPath = Path.GetFullPath(Path.Combine(_env.ContentRootPath, "../../docs/db_template"));
              if (!Directory.Exists(docsPath))
              {
@@ -333,43 +422,24 @@ namespace SignageUnicorn.Api.Services
 
              if (!Directory.Exists(docsPath))
              {
-                 report.Skipped = $"db_template not found at {docsPath} (Root: {_env.ContentRootPath})";
-                 Console.WriteLine($"WARNING: {report.Skipped}. Skipping DB Auto-Fix.");
-                 await _logRepo.LogAsync(null, "WARNING", $"[DeviceService] SCHEMA_APPLY_SKIPPED | {report.Skipped}", "API");
-                 return report;
+                 var skipped = new SchemaApplyResult { Skipped = $"db_template not found at {docsPath} (Root: {_env.ContentRootPath})" };
+                 Console.WriteLine($"WARNING: {skipped.Skipped}. Skipping DB Auto-Fix.");
+                 await _logRepo.LogAsync(null, "WARNING", $"[DeviceService] SCHEMA_APPLY_SKIPPED | {skipped.Skipped}", "API");
+                 return skipped;
              }
 
-             report.SourcePath = docsPath;
              Console.WriteLine($"[DeviceService] Applying Database Schema from: {docsPath}");
-
-             // 1. Tables (Execute first)
-             string tablePath = Path.Combine(docsPath, "table");
-             if (Directory.Exists(tablePath))
+             var report = await new SchemaApplier(_deviceRepository).ApplyAsync(docsPath);
+             if (report.InProgress)
              {
-                 foreach (var file in Directory.GetFiles(tablePath, "*.sql").OrderBy(f => f))
-                 {
-                     var error = await ExecuteSqlFile(file);
-                     if (error == null) report.Applied.Add(Path.GetFileName(file));
-                     else report.Failed.Add($"{Path.GetFileName(file)}: {error}");
-                 }
-             }
-
-             // 2. Procedures
-             string procPath = Path.Combine(docsPath, "procedure");
-             if (Directory.Exists(procPath))
-             {
-                 foreach (var file in Directory.GetFiles(procPath, "*.sql").OrderBy(f => f))
-                 {
-                     var error = await ExecuteSqlFile(file);
-                     if (error == null) report.Applied.Add(Path.GetFileName(file));
-                     else report.Failed.Add($"{Path.GetFileName(file)}: {error}");
-                 }
+                 // Another process holds the apply lock: seeding and the audit line belong to that run.
+                 Console.WriteLine("[DeviceService] SCHEMA_APPLY_BUSY | " + SchemaApplier.InProgressMessage);
+                 return report;
              }
 
              try
              {
                  Console.WriteLine("[DeviceService] Checking/Seeding Admin & Roles...");
-                 // Direct SQL Execution because we might not have a Repository ready or want to bypass it
                  await _deviceRepository.ExecuteSqlAsync("EXEC sp_auth_user_std @p_action = 'INIT_ADMIN'");
              }
              catch (Exception ex)
@@ -378,37 +448,43 @@ namespace SignageUnicorn.Api.Services
                  Console.WriteLine($"[WARN] Admin Seeding skipped/failed: {ex.Message}");
              }
 
-             // Leave a trail. This operation rewrites production stored procedures; who ran it and
+             // Leave a trail. This operation can rewrite production stored procedures; who ran it and
              // what it touched needs to be answerable later without reading PM2 console scrollback.
              await _logRepo.LogAsync(null, report.Failed.Count == 0 ? "INFO" : "ERROR",
-                 $"[DeviceService] SCHEMA_APPLY | source={docsPath} | applied={report.Applied.Count} | failed={report.Failed.Count}"
+                 $"[DeviceService] SCHEMA_APPLY | source={docsPath} | applied={report.Applied.Count} | migrations={report.Migrations.Count} | unchanged={report.Unchanged.Count} | failed={report.Failed.Count}"
                  + (report.Failed.Count > 0 ? " | " + string.Join(" ; ", report.Failed) : ""), "API");
 
              return report;
         }
-        // Maximum accepted screenshot payload. The endpoint is [AllowAnonymous] and reachable from
-        // the public tunnel, so an unbounded body is a disk-fill and memory-pressure primitive.
-        private const int MaxScreenshotBytes = 8 * 1024 * 1024;
 
-        public async Task SaveScreenshotAsync(string deviceId, string base64Image)
+        // Maximum accepted screenshot payload (the endpoint is also capped by RequestSizeLimit).
+        private const int MaxScreenshotBytes = 3 * 1024 * 1024;
+
+        private string ScreenshotsFolder()
+        {
+            // Contract item 8: OUTSIDE wwwroot. Screenshots used to be public static files keyed by a
+            // predictable device id, so anyone could read every screen and overwrite any of them.
+            return Path.GetFullPath(Path.Combine(_env.ContentRootPath, "App_Data", "screenshots"));
+        }
+
+        private static bool IsSafeScreenshotId(string? deviceId)
+        {
+            return !string.IsNullOrEmpty(deviceId) && deviceId.Length <= 64
+                && deviceId.All(ch => char.IsLetterOrDigit(ch) || ch == '-' || ch == '_');
+        }
+
+        // Returns null on success, otherwise the reason the upload was refused.
+        public async Task<string?> SaveScreenshotAsync(string deviceId, string base64Image)
         {
             try
             {
-                if (string.IsNullOrEmpty(base64Image)) return;
+                if (string.IsNullOrEmpty(base64Image)) return "empty image";
 
-                // The device id arrives straight from the route and used to be interpolated into a
-                // file path. ASP.NET routing keeps '/' out of a {id} segment, but NOT '\' -- so on
-                // Windows an id like "..\..\wwwroot\something" escaped the screenshots folder, and
-                // this endpoint is anonymous. Accept only the shapes a real device id has (digits,
-                // or a uuid/WIN- identity), then confirm the resolved path really is inside the
-                // folder before writing. Two checks, because the first is a guess about what ids
-                // look like and the second is a fact about where the file lands.
-                if (deviceId.Length is 0 or > 64 ||
-                    !deviceId.All(ch => char.IsLetterOrDigit(ch) || ch == '-' || ch == '_'))
-                {
-                    Console.WriteLine($"[WARN] Rejected screenshot for malformed device id: {deviceId}");
-                    return;
-                }
+                // The device id arrives straight from the route. ASP.NET routing keeps '/' out of a
+                // {id} segment but NOT a backslash, so an id like "..\..\x" could escape the folder.
+                // Accept only the shapes a real device id has, then confirm the resolved path really is
+                // inside the folder before writing.
+                if (!IsSafeScreenshotId(deviceId)) return "malformed device id";
 
                 // Remove header if present (e.g. data:image/jpeg;base64,)
                 if (base64Image.Contains(","))
@@ -418,89 +494,63 @@ namespace SignageUnicorn.Api.Services
 
                 // 4 base64 chars carry 3 bytes; check before decoding so an oversized payload is
                 // never materialised.
-                if ((long)base64Image.Length / 4 * 3 > MaxScreenshotBytes)
-                {
-                    Console.WriteLine($"[WARN] Rejected oversized screenshot for device {deviceId}");
-                    return;
-                }
+                if ((long)base64Image.Length / 4 * 3 > MaxScreenshotBytes) return "image too large";
 
-                byte[] imageBytes = Convert.FromBase64String(base64Image);
-                if (imageBytes.Length > MaxScreenshotBytes)
-                {
-                    Console.WriteLine($"[WARN] Rejected oversized screenshot for device {deviceId}");
-                    return;
-                }
+                byte[] imageBytes;
+                try { imageBytes = Convert.FromBase64String(base64Image); }
+                catch (FormatException) { return "invalid base64"; }
+                if (imageBytes.Length > MaxScreenshotBytes) return "image too large";
 
-                string screenshotsFolder = Path.GetFullPath(
-                    Path.Combine(_env.WebRootPath ?? Path.Combine(_env.ContentRootPath, "wwwroot"), "screenshots"));
-                if (!Directory.Exists(screenshotsFolder))
-                {
-                    Directory.CreateDirectory(screenshotsFolder);
-                }
+                // Only JPEG or PNG bytes are stored, whatever the client claims.
+                bool jpeg = imageBytes.Length > 3 && imageBytes[0] == 0xFF && imageBytes[1] == 0xD8 && imageBytes[2] == 0xFF;
+                bool png = imageBytes.Length > 8 && imageBytes[0] == 0x89 && imageBytes[1] == 0x50 && imageBytes[2] == 0x4E && imageBytes[3] == 0x47;
+                if (!jpeg && !png) return "not a JPEG or PNG image";
+
+                string screenshotsFolder = ScreenshotsFolder();
+                Directory.CreateDirectory(screenshotsFolder);
 
                 string filePath = Path.GetFullPath(Path.Combine(screenshotsFolder, $"{deviceId}.jpg"));
                 if (!filePath.StartsWith(screenshotsFolder + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-                {
-                    Console.WriteLine($"[WARN] Rejected screenshot path outside the screenshots folder: {filePath}");
-                    return;
-                }
+                    return "path outside the screenshots folder";
 
-                await File.WriteAllBytesAsync(filePath, imageBytes);
-                Console.WriteLine($"[DeviceService] Saved screenshot for device {deviceId} to {filePath}");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[ERROR] Failed to save screenshot for device {deviceId}: {ex.Message}");
-            }
-        }
-        // Returns null on success, or the failure message. Callers record it; nothing here is
-        // swallowed. The one exception kept from the original is "already exists", which a table
-        // script legitimately hits on every run after the first and is not a failure.
-        private async Task<string?> ExecuteSqlFile(string filePath)
-        {
-            try
-            {
-                string content = await File.ReadAllTextAsync(filePath);
-
-                // Split by 'GO' (case insensitive, separate lines)
-                // Using Regex to find GO on its own line
-                var batches = System.Text.RegularExpressions.Regex.Split(content, @"^\s*GO\s*$", System.Text.RegularExpressions.RegexOptions.Multiline | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-
-                foreach (var batch in batches)
-                {
-                    if (string.IsNullOrWhiteSpace(batch)) continue;
-
-                    // Basic cleanup
-                    string sql = batch.Trim();
-                    if (sql.Length > 0)
-                    {
-                       await _deviceRepository.ExecuteSqlAsync(sql);
-                    }
-                }
-                Console.WriteLine($" -> Executed: {Path.GetFileName(filePath)}");
+                // Write to a temp name and rename so a reader never sees a half-written file.
+                string tempPath = filePath + ".tmp";
+                await File.WriteAllBytesAsync(tempPath, imageBytes);
+                File.Move(tempPath, filePath, overwrite: true);
                 return null;
             }
             catch (Exception ex)
             {
-                if (ex.Message.Contains("There is already an object named", StringComparison.OrdinalIgnoreCase) ||
-                    ex.Message.Contains("already exists", StringComparison.OrdinalIgnoreCase))
-                {
-                    return null;
-                }
-                Console.WriteLine($"[ERROR] Failed to execute {Path.GetFileName(filePath)}: {ex.Message}");
-                return ex.Message;
+                Console.WriteLine($"[ERROR] Failed to save screenshot for device {deviceId}: {ex.Message}");
+                return "internal error";
             }
         }
-    }
 
-    // Outcome of re-applying docs/db_template. Exists so the caller can tell an operator what
-    // actually happened instead of reporting success unconditionally.
-    public class SchemaApplyResult
-    {
-        public List<string> Applied { get; set; } = new();
-        public List<string> Failed { get; set; } = new();
-        public string? Skipped { get; set; }
-        public string? SourcePath { get; set; }
-        public bool Success => Skipped == null && Failed.Count == 0;
+        // Finds the stored screenshot for a device whichever identity the screen used when it
+        // uploaded (numeric id for the Electron client, uuid for the web player).
+        public async Task<string?> ResolveScreenshotPathAsync(string deviceId)
+        {
+            if (!IsSafeScreenshotId(deviceId)) return null;
+            var folder = ScreenshotsFolder();
+            var candidates = new List<string> { deviceId };
+            try
+            {
+                var device = await _deviceRepository.GetDeviceByIdAsync(deviceId);
+                if (device != null)
+                {
+                    if (IsSafeScreenshotId(device.DeviceId)) candidates.Add(device.DeviceId);
+                    if (IsSafeScreenshotId(device.DeviceUuid)) candidates.Add(device.DeviceUuid!);
+                }
+            }
+            catch { }
+
+            foreach (var id in candidates.Distinct())
+            {
+                var path = Path.GetFullPath(Path.Combine(folder, $"{id}.jpg"));
+                if (!path.StartsWith(folder + Path.DirectorySeparatorChar, StringComparison.Ordinal)) continue;
+                if (File.Exists(path)) return path;
+            }
+            return null;
+        }
     }
 }

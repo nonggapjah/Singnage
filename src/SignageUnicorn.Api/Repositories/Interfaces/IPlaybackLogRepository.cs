@@ -4,8 +4,10 @@ namespace SignageUnicorn.Api.Repositories.Interfaces
 {
     public interface IPlaybackLogRepository
     {
-        Task LogPlaybackAsync(CreatePlaybackLogRequest log);
-        Task LogPlaybackBatchAsync(IEnumerable<CreatePlaybackLogRequest> logs);
+        // F28: ingestion reports what actually happened per event instead of swallowing the
+        // procedure's error flag, so a client only deletes local records the server kept.
+        Task<PlaybackIngestResult> LogPlaybackAsync(CreatePlaybackLogRequest log);
+        Task<PlaybackBatchResult> LogPlaybackBatchAsync(IEnumerable<CreatePlaybackLogRequest> logs);
         Task<IEnumerable<PlaybackLogDto>> GetLatestLogsAsync(int top);
         Task<IEnumerable<PlaybackLogDto>> GetLogsByDeviceAsync(string deviceId, int top);
         Task<IEnumerable<PlaybackSummaryDto>> GetSummaryAsync(DateTime? startDate = null, DateTime? endDate = null);

@@ -77,9 +77,9 @@ BEGIN
         -- Let's use @p_identifier_value as a temporary carrier for 'Role Name' if not null, OR just rely on a standard Param.
         -- Standard Params: @p_userid, @p_identifier_value...
         -- Let's use @p_identifier_value to carry 'role_name' for this action.
-        
+
         SELECT @new_role_id = role_id FROM sn_auth_role WHERE LOWER(role_name) = LOWER(@p_identifier_value) AND is_deleted = 0;
-        
+
         IF @new_role_id IS NULL
         BEGIN
              SET @err_code = 3;
@@ -88,12 +88,26 @@ BEGIN
              GOTO ResultSection;
         END
 
+        -- Round 4 (#11): the console submits the role on every profile save. An unchanged role must
+        -- not rewrite the mapping and, above all, must not bump token_version -- that revoked every
+        -- session (including the operator's own) for a mere name edit.
+        IF EXISTS (SELECT 1 FROM sn_auth_user_role WHERE user_id = @p_userid AND role_id = @new_role_id AND is_deleted = 0)
+        BEGIN
+            SET @msg = N'Role unchanged.';
+            GOTO ResultSection;
+        END
+
         -- Soft delete old role mapping
         UPDATE sn_auth_user_role SET is_deleted = 1, updated_at = SYSUTCDATETIME(), updated_by = @p_executor_id WHERE user_id = @p_userid AND is_deleted = 0;
 
         -- Insert new mapping
         INSERT INTO sn_auth_user_role (user_id, role_id, created_at, created_by, is_deleted)
         VALUES (@p_userid, @new_role_id, SYSUTCDATETIME(), @p_executor_id, 0);
+
+        -- F12: tokens minted with the old role stop working within the revocation window.
+        UPDATE sn_auth_user
+        SET token_version = token_version + 1, updated_at = SYSUTCDATETIME(), updated_by = @p_executor_id
+        WHERE user_id = @p_userid;
 
         SET @msg = N'Role updated successfully.';
         GOTO ResultSection;
@@ -195,7 +209,7 @@ BEGIN
             );
 
             COMMIT TRANSACTION;
-            
+
             SET @msg = N'Register success.';
         END TRY
         BEGIN CATCH
@@ -248,7 +262,7 @@ BEGIN
 
         -- Check for locking (Simple Policy: > 5 attempts = Lock 15 mins)
         DECLARE @current_failed INT;
-        SELECT @current_failed = failed_login_count, @is_locked = CASE WHEN locked_until > SYSUTCDATETIME() THEN 1 ELSE 0 END 
+        SELECT @current_failed = failed_login_count, @is_locked = CASE WHEN locked_until > SYSUTCDATETIME() THEN 1 ELSE 0 END
         FROM sn_auth_user WHERE user_id = @p_userid;
 
         IF @current_failed >= 5 AND @is_locked = 0
@@ -292,8 +306,8 @@ BEGIN
             password_iterations = 10,
             password_last_changed_at = SYSUTCDATETIME(),
             updated_at = SYSUTCDATETIME()
-        WHERE user_id = @p_userid 
-          AND credential_type = 'password' 
+        WHERE user_id = @p_userid
+          AND credential_type = 'password'
           AND is_deleted = 0;
 
         IF @@ROWCOUNT = 0
@@ -303,6 +317,11 @@ BEGIN
         END
         ELSE
         BEGIN
+             -- F12: every other session of this account is revoked by the version bump.
+             UPDATE sn_auth_user
+             SET token_version = token_version + 1, updated_at = SYSUTCDATETIME(), updated_by = @p_executor_id
+             WHERE user_id = @p_userid;
+
              SET @msg = N'Password change success.';
         END
 
@@ -327,10 +346,10 @@ BEGIN
         BEGIN
              -- Create Default Admin
              DECLARE @admin_id BIGINT;
-             
+
              INSERT INTO sn_auth_user (display_name, status, created_at, is_deleted)
              VALUES ('System Admin', 'active', SYSUTCDATETIME(), 0);
-             
+
              SET @admin_id = SCOPE_IDENTITY();
 
              -- Identifier (admin)
@@ -343,7 +362,7 @@ BEGIN
              -- Role Seeding (Ensure 'admin' and 'viewer' exist)
              IF NOT EXISTS (SELECT 1 FROM sn_auth_role WHERE role_name = 'admin')
                 INSERT INTO sn_auth_role (role_name, is_deleted) VALUES ('admin', 0);
-             
+
              IF NOT EXISTS (SELECT 1 FROM sn_auth_role WHERE role_name = 'viewer')
                 INSERT INTO sn_auth_role (role_name, is_deleted) VALUES ('viewer', 0);
 
@@ -360,6 +379,28 @@ BEGIN
         BEGIN
              SET @msg = N'Users already exist.';
         END
+        GOTO ResultSection;
+    END
+
+    -- =============================================
+    -- DEACTIVATE (F12: real deactivation + session revocation)
+    -- =============================================
+    IF @p_action = 'DEACTIVATE'
+    BEGIN
+        UPDATE sn_auth_user
+        SET status = 'inactive',
+            token_version = token_version + 1,
+            updated_at = SYSUTCDATETIME(),
+            updated_by = @p_executor_id
+        WHERE user_id = @p_userid AND is_deleted = 0;
+
+        IF @@ROWCOUNT = 0
+        BEGIN
+            SET @err_code = 404; SET @err_flag = 1; SET @msg = N'User not found.';
+            GOTO ResultSection;
+        END
+
+        SET @msg = N'User deactivated.';
         GOTO ResultSection;
     END
 
@@ -382,7 +423,7 @@ ResultSection:
     BEGIN
         IF @p_action = 'GET_PROFILE'
         BEGIN
-             SELECT 
+             SELECT
                 u.user_id,
                 u.display_name,
                 u.status,
@@ -393,7 +434,7 @@ ResultSection:
                 EmailVerified = CAST(CASE WHEN EXISTS (SELECT 1 FROM sn_auth_identifier i WHERE i.user_id = u.user_id AND i.identifier_type = 'email' AND i.is_verified = 1 AND i.is_deleted = 0) THEN 1 ELSE 0 END AS BIT),
                 PhoneVerified = CAST(CASE WHEN EXISTS (SELECT 1 FROM sn_auth_identifier i WHERE i.user_id = u.user_id AND i.identifier_type = 'phone' AND i.is_verified = 1 AND i.is_deleted = 0) THEN 1 ELSE 0 END AS BIT),
                 ISNULL((
-                    SELECT TOP 1 ar.role_name 
+                    SELECT TOP 1 ar.role_name
                     FROM sn_auth_user_role ur
                     INNER JOIN sn_auth_role ar ON ur.role_id = ar.role_id
                     WHERE ur.user_id = u.user_id AND ur.is_deleted = 0 AND ar.is_deleted = 0
@@ -428,12 +469,13 @@ ResultSection:
                 u.avatar_url,
                 u.failed_login_count,
                 u.locked_until,
+                u.token_version,
                 c.password_hash,
                 c.password_salt,
                 c.password_algo,
                 c.password_iterations,
                 ISNULL((
-                    SELECT TOP 1 ar.role_name 
+                    SELECT TOP 1 ar.role_name
                     FROM sn_auth_user_role ur
                     INNER JOIN sn_auth_role ar ON ur.role_id = ar.role_id
                     WHERE ur.user_id = u.user_id AND ur.is_deleted = 0 AND ar.is_deleted = 0
@@ -479,7 +521,7 @@ ResultSection:
              -- Standard for LOGIN actions usually requires user_id return to confirm context
              SELECT @p_userid as user_id, @is_locked as is_locked;
         END
-        
+
         IF @p_action = 'REGISTER'
         BEGIN
             SELECT @p_userid as user_id;
@@ -487,7 +529,7 @@ ResultSection:
 
         IF @p_action = 'GET_ALL'
         BEGIN
-            SELECT 
+            SELECT
                 u.user_id,
                 u.display_name,
                 u.status,
@@ -497,7 +539,7 @@ ResultSection:
                 (SELECT TOP 1 identifier_value FROM sn_auth_identifier WHERE user_id = u.user_id AND identifier_type = 'email' AND is_deleted = 0) as email,
                 (SELECT TOP 1 identifier_value FROM sn_auth_identifier WHERE user_id = u.user_id AND identifier_type = 'phone' AND is_deleted = 0) as phone,
                 ISNULL((
-                    SELECT TOP 1 ar.role_name 
+                    SELECT TOP 1 ar.role_name
                     FROM sn_auth_user_role ur
                     INNER JOIN sn_auth_role ar ON ur.role_id = ar.role_id
                     WHERE ur.user_id = u.user_id AND ur.is_deleted = 0 AND ar.is_deleted = 0
