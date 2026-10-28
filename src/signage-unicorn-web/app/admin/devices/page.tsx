@@ -584,7 +584,7 @@ export default function DevicesPage() {
             </div>
 
             {/* Controls */}
-            <div className="glass-panel p-4 rounded-2xl flex flex-col md:flex-row gap-4 items-center justify-between sticky top-0 z-20 bg-background/95">
+            <div className="glass-panel p-4 rounded-2xl flex flex-col md:flex-row gap-4 items-center justify-between sticky top-0 z-30 bg-card-solid">
                 <div className="flex items-center gap-4 w-full md:w-auto flex-wrap">
                     {/* Search */}
                     <div className="relative">
