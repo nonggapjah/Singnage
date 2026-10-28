@@ -312,7 +312,7 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({ onUploadSucces
                                 onChange={(e) => e.target.files && handleFiles(e.target.files)}
                                 accept="image/*,video/*"
                             />
-                            <div className="w-20 h-20 rounded-full bg-accent-cyan/10 text-accent-cyan flex items-center justify-center transition-transform duration-300 group-hover:scale-110 border border-accent-cyan/20 group-hover:bg-accent-cyan group-hover:text-black" aria-hidden="true">
+                            <div className="w-20 h-20 rounded-full bg-accent-cyan/10 text-accent-cyan flex items-center justify-center transition-transform duration-300 group-hover:scale-110 border border-accent-cyan/20 group-hover:bg-accent-cyan group-hover:text-white" aria-hidden="true">
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                                 </svg>
@@ -408,7 +408,7 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({ onUploadSucces
                         className={`rounded-xl px-8 py-3 text-xs font-black uppercase tracking-[0.2em] transition-colors w-full md:w-auto
                             ${(!selectedFile || (uploading && !uploadFinished))
                                 ? 'bg-muted text-muted-foreground cursor-not-allowed'
-                                : 'bg-accent-cyan text-black hover:bg-cyan-300'}
+                                : 'bg-primary text-primary-foreground hover:brightness-110'}
                         `}
                     >
                         {uploadFinished ? (isEmbed ? 'Confirm new file' : 'Save media') : 'Upload & save'}
@@ -440,7 +440,7 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({ onUploadSucces
                 <button
                     type="button"
                     onClick={() => { setShowAsyncNotice(false); onUploadSuccess(); resetForm(); }}
-                    className="w-full py-4 bg-accent-cyan text-black font-black uppercase tracking-widest rounded-xl hover:bg-cyan-300 transition-colors"
+                    className="w-full py-4 bg-primary text-primary-foreground font-black uppercase tracking-widest rounded-xl hover:brightness-110 transition-colors"
                 >
                     OK
                 </button>

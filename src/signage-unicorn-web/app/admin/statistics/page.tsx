@@ -260,7 +260,7 @@ export default function StatisticsPage() {
                         <button
                             type="button"
                             onClick={() => fetchData(false)}
-                            className="px-6 py-2 rounded-lg bg-accent-cyan text-black text-xs font-black uppercase tracking-widest hover:bg-cyan-300 transition-colors"
+                            className="px-6 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-black uppercase tracking-widest hover:brightness-110 transition-colors"
                         >
                             Apply
                         </button>

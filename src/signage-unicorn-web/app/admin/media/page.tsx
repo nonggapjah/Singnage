@@ -617,7 +617,7 @@ export default function MediaLibraryPage() {
                                         key={mode}
                                         onClick={() => setViewMode(mode)}
                                         aria-pressed={viewMode === mode}
-                                        className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase transition-colors ${viewMode === mode ? 'bg-accent-cyan text-black' : 'text-muted-foreground hover:text-foreground hover:bg-muted/30'}`}
+                                        className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase transition-colors ${viewMode === mode ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-muted/30'}`}
                                     >
                                         {mode === 'thumbnail' ? 'Grid' : mode}
                                     </button>
@@ -957,7 +957,7 @@ export default function MediaLibraryPage() {
                                                 <span className="block text-xs text-accent-cyan font-black uppercase tracking-tighter">In playlists</span>
                                                 <span className="flex items-center justify-between">
                                                     <span className="text-sm font-bold text-accent-cyan">View assignments</span>
-                                                    <span className="w-6 h-6 rounded-full bg-accent-cyan text-black text-xs font-black flex items-center justify-center group-hover/usage:scale-110 transition-transform" aria-hidden="true">
+                                                    <span className="w-6 h-6 rounded-full bg-primary text-primary-foreground text-xs font-black flex items-center justify-center group-hover/usage:scale-110 transition-transform" aria-hidden="true">
                                                         →
                                                     </span>
                                                 </span>
@@ -1120,7 +1120,7 @@ export default function MediaLibraryPage() {
                             <button
                                 type="button"
                                 onClick={() => handleUpdateMedia(editingMedia)}
-                                className="flex-[2] py-3 rounded-xl bg-accent-cyan hover:bg-cyan-300 text-black font-black transition-colors uppercase tracking-widest"
+                                className="flex-[2] py-3 rounded-xl bg-primary hover:brightness-110 text-primary-foreground font-black transition-colors uppercase tracking-widest"
                             >
                                 Save changes
                             </button>
@@ -1151,7 +1151,7 @@ export default function MediaLibraryPage() {
                                         }
                                     }}
                                     disabled={safetyJingleId === editingMedia.mediaId}
-                                    className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest transition-colors shrink-0 ${safetyJingleId === editingMedia.mediaId ? 'bg-green-500/20 text-green-700 dark:text-green-400 cursor-default' : 'bg-yellow-500/20 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-500 hover:text-black'}`}
+                                    className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-widest transition-colors shrink-0 ${safetyJingleId === editingMedia.mediaId ? 'bg-green-500/20 text-green-700 dark:text-green-400 cursor-default' : 'bg-yellow-500/20 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-500 hover:text-white'}`}
                                 >
                                     {safetyJingleId === editingMedia.mediaId ? 'Active jingle' : 'Set as jingle'}
                                 </button>
@@ -1216,7 +1216,7 @@ export default function MediaLibraryPage() {
                                         <td className="py-4 px-2 text-right">
                                             <Link
                                                 href={`/admin/playlists/${usage.playlistId}`}
-                                                className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-accent-cyan/10 text-accent-cyan hover:bg-accent-cyan hover:text-black transition-colors"
+                                                className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-accent-cyan/10 text-accent-cyan hover:bg-accent-cyan hover:text-white transition-colors"
                                                 title="Edit playlist"
                                                 aria-label={`Edit playlist ${usage.playlistName}`}
                                             >

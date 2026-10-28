@@ -61,7 +61,7 @@ export const PlaylistTable: React.FC<PlaylistTableProps> = ({ playlists, onDelet
                                         disabled={playlist.active !== 'Y'}
                                         aria-label={`Deploy ${playlist.playlistName} to devices`}
                                         className={`py-1.5 px-3 rounded-lg text-xs font-black uppercase tracking-widest transition-colors mr-3 border ${playlist.active === 'Y'
-                                            ? 'bg-accent-cyan/10 hover:bg-accent-cyan border-accent-cyan/20 hover:text-black text-accent-cyan'
+                                            ? 'bg-accent-cyan/10 hover:bg-accent-cyan border-accent-cyan/20 hover:text-white text-accent-cyan'
                                             : 'bg-muted/10 text-muted-foreground border-border/50 cursor-not-allowed opacity-40'
                                             }`}
                                         title={playlist.active === 'Y' ? 'Deploy to devices' : 'Playlist must be Active to deploy'}

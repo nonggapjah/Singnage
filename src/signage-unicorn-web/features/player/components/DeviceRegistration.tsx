@@ -169,7 +169,7 @@ export const DeviceRegistration: React.FC<DeviceRegistrationProps> = ({ onRegist
                             disabled={loading}
                             className={`w-full py-4 rounded-xl font-black uppercase tracking-[0.2em] transition-all shadow-xl text-sm relative overflow-hidden group/btn mt-2 ${loading
                                 ? 'bg-gray-800 text-gray-500 cursor-not-allowed'
-                                : 'bg-[#00f2ff] text-black border-2 border-cyan-400 hover:bg-cyan-300 hover:shadow-[0_0_30px_rgba(34,211,238,0.6)] hover:-translate-y-0.5 transform'
+                                : 'bg-[#00f2ff] text-black border-2 border-cyan-400 hover:brightness-110 hover:shadow-[0_0_30px_rgba(34,211,238,0.6)] hover:-translate-y-0.5 transform'
                                 }`}
                         >
                             <span className="relative z-10">{loading ? 'INITIALIZING...' : 'INITIALIZE DEVICE'}</span>

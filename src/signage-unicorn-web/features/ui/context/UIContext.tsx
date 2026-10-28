@@ -177,7 +177,7 @@ export function UIProvider({ children }: { children: React.ReactNode }) {
                                 }}
                                 className={`flex-1 py-3 rounded-xl font-black uppercase tracking-widest text-xs transition-colors ${modal.type === 'DANGER'
                                     ? 'bg-red-600 text-white hover:bg-red-500'
-                                    : 'bg-accent-cyan text-black hover:bg-cyan-300'
+                                    : 'bg-primary text-primary-foreground hover:brightness-110'
                                     }`}
                             >
                                 {modal.confirmText || (modal.type === 'DANGER' ? 'Confirm' : 'Continue')}

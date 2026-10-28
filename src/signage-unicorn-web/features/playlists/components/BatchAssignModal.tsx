@@ -144,7 +144,7 @@ export const BatchAssignModal: React.FC<BatchAssignModalProps> = ({ playlistId, 
                                 key={b}
                                 onClick={() => setFilterBranch(b)}
                                 aria-pressed={filterBranch === b}
-                                className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors ${filterBranch === b ? 'bg-accent-cyan text-black' : 'text-muted-foreground hover:text-foreground'}`}
+                                className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors ${filterBranch === b ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
                             >
                                 {b}
                             </button>
@@ -189,7 +189,7 @@ export const BatchAssignModal: React.FC<BatchAssignModalProps> = ({ playlistId, 
                                             </div>
                                         </div>
                                         <div className={`w-5 h-5 rounded-md border flex items-center justify-center transition-colors shrink-0 ${selected
-                                            ? 'bg-accent-cyan border-accent-cyan text-black'
+                                            ? 'bg-primary border-accent-cyan text-primary-foreground'
                                             : 'border-border'
                                             }`} aria-hidden="true">
                                             {selected && '✓'}
@@ -242,7 +242,7 @@ export const BatchAssignModal: React.FC<BatchAssignModalProps> = ({ playlistId, 
                         type="button"
                         disabled={selectedDeviceIds.length === 0 || submitting}
                         onClick={handleAssign}
-                        className="px-10 py-3 rounded-xl bg-accent-cyan text-black font-black uppercase tracking-[0.2em] disabled:opacity-30 transition-colors text-xs hover:bg-cyan-300"
+                        className="px-10 py-3 rounded-xl bg-primary text-primary-foreground font-black uppercase tracking-[0.2em] disabled:opacity-30 transition-colors text-xs hover:brightness-110"
                     >
                         {submitting ? 'Assigning…' : 'Assign schedule'}
                     </button>

@@ -189,7 +189,7 @@ export function SystemConfigModal({ isOpen, onClose }: SystemConfigModalProps) {
                             type="button"
                             onClick={handleExecute}
                             disabled={loading}
-                            className="flex-[2] py-4 rounded-2xl bg-accent-cyan text-black font-black uppercase tracking-[0.2em] hover:bg-cyan-300 disabled:opacity-50 transition-colors text-xs"
+                            className="flex-[2] py-4 rounded-2xl bg-primary text-primary-foreground font-black uppercase tracking-[0.2em] hover:brightness-110 disabled:opacity-50 transition-colors text-xs"
                         >
                             {loading ? 'Applying…' : 'Apply'}
                         </button>

@@ -25,7 +25,7 @@ export default function Home() {
               <p className="text-xs font-black text-muted-foreground uppercase tracking-widest">Signed in as</p>
               <p className="text-lg font-black text-foreground uppercase leading-none mt-0.5">{user?.fullName}</p>
               <div className="mt-2">
-                <span className="text-xs px-2 py-0.5 rounded border border-accent-cyan/40 bg-accent-cyan text-black font-black uppercase tracking-tighter">
+                <span className="text-xs px-2 py-0.5 rounded border border-accent-cyan/40 bg-primary text-primary-foreground font-black uppercase tracking-tighter">
                   {user?.role}
                 </span>
               </div>
@@ -39,7 +39,7 @@ export default function Home() {
         ) : (
           <div className="space-y-8">
             <div className="flex flex-wrap justify-center gap-6">
-              <Link href="/login" className="px-10 py-4 rounded-xl bg-primary text-primary-foreground font-extrabold uppercase tracking-[0.2em] border-2 border-primary hover:bg-cyan-300 transition-colors text-sm">
+              <Link href="/login" className="px-10 py-4 rounded-xl bg-primary text-primary-foreground font-extrabold uppercase tracking-[0.2em] border-2 border-primary hover:brightness-110 transition-colors text-sm">
                 Sign in
               </Link>
               <Link href="/player" className="px-10 py-4 rounded-xl bg-accent-purple/15 border-2 border-accent-purple/50 text-foreground font-extrabold uppercase tracking-[0.2em] hover:bg-accent-purple/30 transition-colors text-sm">

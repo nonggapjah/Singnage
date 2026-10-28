@@ -206,7 +206,7 @@ export const EditUserModal: React.FC<EditUserModalProps> = ({ user, isOpen, onCl
                                         <Mail size={14} aria-hidden="true" /> Email
                                     </div>
                                 ) : (
-                                    <div className="px-4 py-1 rounded bg-accent-cyan text-black text-xs font-black uppercase tracking-wider flex items-center gap-2">
+                                    <div className="px-4 py-1 rounded bg-primary text-primary-foreground text-xs font-black uppercase tracking-wider flex items-center gap-2">
                                         <Phone size={14} aria-hidden="true" /> Phone
                                     </div>
                                 )}
@@ -225,7 +225,7 @@ export const EditUserModal: React.FC<EditUserModalProps> = ({ user, isOpen, onCl
                                     type="button"
                                     onClick={() => setFormData({ ...formData, contactType: 'phone' })}
                                     aria-pressed={formData.contactType === 'phone'}
-                                    className={`px-6 py-1.5 rounded-md text-xs font-black uppercase tracking-wider flex items-center gap-2 transition-colors ${formData.contactType === 'phone' ? 'bg-accent-cyan text-black' : 'text-muted-foreground hover:text-foreground'}`}
+                                    className={`px-6 py-1.5 rounded-md text-xs font-black uppercase tracking-wider flex items-center gap-2 transition-colors ${formData.contactType === 'phone' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'}`}
                                 >
                                     <Phone size={14} aria-hidden="true" /> Phone
                                 </button>
@@ -306,7 +306,7 @@ export const EditUserModal: React.FC<EditUserModalProps> = ({ user, isOpen, onCl
                     type="button"
                     onClick={handleSave}
                     disabled={loading}
-                    className="px-8 py-3 rounded-xl bg-accent-cyan text-black font-black uppercase tracking-wider hover:bg-cyan-300 transition-colors flex items-center gap-2 disabled:opacity-60"
+                    className="px-8 py-3 rounded-xl bg-primary text-primary-foreground font-black uppercase tracking-wider hover:brightness-110 transition-colors flex items-center gap-2 disabled:opacity-60"
                 >
                     {loading ? 'Saving…' : 'Save changes'}
                 </button>

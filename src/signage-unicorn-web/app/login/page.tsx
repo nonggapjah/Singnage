@@ -169,7 +169,7 @@ export default function LoginPage() {
                             disabled={loading}
                             className={`w-full py-4 rounded-xl font-black uppercase tracking-[0.2em] transition-colors shadow-xl text-sm relative overflow-hidden ${loading
                                 ? 'bg-muted text-muted-foreground cursor-not-allowed'
-                                : 'bg-primary text-primary-foreground border-2 border-primary hover:bg-cyan-300'
+                                : 'bg-primary text-primary-foreground border-2 border-primary hover:brightness-110'
                                 }`}
                         >
                             <span className="relative z-10">{loading ? 'Signing in…' : 'Sign in'}</span>

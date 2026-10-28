@@ -634,7 +634,7 @@ export default function DevicesPage() {
                             type="button"
                             onClick={() => setViewMode('GRID')}
                             aria-pressed={viewMode === 'GRID'}
-                            className={`px-3 py-1 rounded text-xs transition-colors ${viewMode === 'GRID' ? 'bg-accent-cyan text-black font-bold' : 'text-muted-foreground hover:text-foreground'}`}
+                            className={`px-3 py-1 rounded text-xs transition-colors ${viewMode === 'GRID' ? 'bg-primary text-primary-foreground font-bold' : 'text-muted-foreground hover:text-foreground'}`}
                         >
                             Grid
                         </button>
@@ -642,7 +642,7 @@ export default function DevicesPage() {
                             type="button"
                             onClick={() => setViewMode('LIST')}
                             aria-pressed={viewMode === 'LIST'}
-                            className={`px-3 py-1 rounded text-xs transition-colors ${viewMode === 'LIST' ? 'bg-accent-cyan text-black font-bold' : 'text-muted-foreground hover:text-foreground'}`}
+                            className={`px-3 py-1 rounded text-xs transition-colors ${viewMode === 'LIST' ? 'bg-primary text-primary-foreground font-bold' : 'text-muted-foreground hover:text-foreground'}`}
                         >
                             List
                         </button>
@@ -650,7 +650,7 @@ export default function DevicesPage() {
                 </div>
 
                 <div className="flex gap-2 flex-wrap">
-                    <button type="button" onClick={toggleSelectAll} className={`px-3 py-2 rounded-lg border text-xs font-bold uppercase transition-colors ${selectedIds.length > 0 ? 'bg-accent-cyan text-black border-accent-cyan' : 'text-muted-foreground border-border hover:bg-muted/40'}`}>
+                    <button type="button" onClick={toggleSelectAll} className={`px-3 py-2 rounded-lg border text-xs font-bold uppercase transition-colors ${selectedIds.length > 0 ? 'bg-primary text-primary-foreground border-accent-cyan' : 'text-muted-foreground border-border hover:bg-muted/40'}`}>
                         {selectedIds.length === filteredDevices.length && filteredDevices.length > 0 ? 'Deselect all' : 'Select all'}
                     </button>
                     <button type="button" onClick={handleRefresh} aria-label="Refresh device list" title="Refresh" className={`text-xl px-3 py-1 rounded-lg border border-border hover:bg-muted/40 transition-colors ${refreshing ? 'animate-spin text-accent-cyan' : 'text-muted-foreground'}`}>↻</button>
@@ -1181,7 +1181,7 @@ export default function DevicesPage() {
                         <button
                             type="button"
                             onClick={() => handleBatchCommand('SYNC_SCHEDULE')}
-                            className="px-5 py-2 rounded-xl bg-accent-cyan text-black font-black uppercase tracking-widest text-xs hover:bg-cyan-300 transition-colors"
+                            className="px-5 py-2 rounded-xl bg-primary text-primary-foreground font-black uppercase tracking-widest text-xs hover:brightness-110 transition-colors"
                         >
                             Sync
                         </button>
@@ -1255,7 +1255,7 @@ export default function DevicesPage() {
                     <button
                         type="button"
                         onClick={() => activeScreenshotDeviceId && refreshScreenshot(activeScreenshotDeviceId)}
-                        className="px-4 py-2 bg-accent-cyan hover:bg-cyan-300 text-black font-black uppercase rounded-lg transition-colors"
+                        className="px-4 py-2 bg-primary hover:brightness-110 text-primary-foreground font-black uppercase rounded-lg transition-colors"
                     >
                         Capture again
                     </button>

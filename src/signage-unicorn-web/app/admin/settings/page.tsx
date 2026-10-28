@@ -212,7 +212,7 @@ function SystemConfigPanel() {
                     type="button"
                     onClick={handleExecute}
                     disabled={loading}
-                    className="w-full py-4 bg-accent-cyan text-black font-black uppercase tracking-widest rounded-xl hover:bg-cyan-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full py-4 bg-primary text-primary-foreground font-black uppercase tracking-widest rounded-xl hover:brightness-110 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     {loading ? 'Applying…' : 'Save & apply changes'}
                 </button>

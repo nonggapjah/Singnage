@@ -11,10 +11,11 @@
    nothing (488 dead usages found in the 27-10-2026 audit).
    ------------------------------------------------------------------ */
 @theme {
-  --font-sans: var(--font-noto-sans-thai), ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  /* (font-sans moved to @theme inline so it resolves the Next font var at use-site) */
 }
 
 @theme inline {
+  --font-sans: var(--font-noto-sans-thai), ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);

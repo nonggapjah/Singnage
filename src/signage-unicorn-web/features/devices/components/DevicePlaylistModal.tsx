@@ -371,7 +371,7 @@ export const DevicePlaylistModal: React.FC<DevicePlaylistModalProps> = ({ isOpen
                     type="button"
                     onClick={handleSave}
                     disabled={saving || loading}
-                    className="flex-[2] py-4 rounded-xl bg-accent-cyan text-black font-black uppercase tracking-[0.2em] hover:bg-cyan-300 disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-xs"
+                    className="flex-[2] py-4 rounded-xl bg-primary text-primary-foreground font-black uppercase tracking-[0.2em] hover:brightness-110 disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-xs"
                 >
                     {saving ? 'Saving schedule…' : 'Save & sync'}
                 </button>

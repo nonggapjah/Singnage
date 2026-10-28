@@ -159,7 +159,7 @@ export const PlayerOverlay: React.FC<PlayerOverlayProps> = ({
                     <div className="p-8 border-b border-white/10 flex justify-between items-center bg-white/5">
                         <div className="flex-1">
                             <h2 className="text-3xl font-black text-white uppercase tracking-widest flex items-center gap-4">
-                                <span className={`w-4 h-4 rounded-full ${view === 'DASHBOARD' ? 'bg-accent-cyan animate-pulse' : view === 'SETTINGS' ? 'bg-accent-pink' : 'bg-purple-500'}`}></span>
+                                <span className={`w-4 h-4 rounded-full ${view === 'DASHBOARD' ? 'bg-accent-cyan animate-pulse' : view === 'SETTINGS' ? 'bg-primary' : 'bg-purple-500'}`}></span>
                                 {view === 'DASHBOARD' ? 'Device Dashboard' : view === 'SETTINGS' ? 'Device Settings' : 'Select Playlist'}
                             </h2>
                             <p className="text-xs text-accent-cyan/60 font-mono mt-2 tracking-wider">
@@ -171,7 +171,7 @@ export const PlayerOverlay: React.FC<PlayerOverlayProps> = ({
                                 <div className="mb-1 text-white text-sm font-bold uppercase">{deviceName || 'UNNAMED DEVICE'}</div>
                                 <div className="mb-1">ID: <span className="text-gray-400">{deviceId || 'UNKNOWN'}</span></div>
                                 <div className="flex gap-3 justify-end">
-                                    <span>BRANCH: <span className="text-accent-pink">{branchCode}</span></span>
+                                    <span>BRANCH: <span className="text-primary">{branchCode}</span></span>
                                     {location && <span>LOC: <span className="text-accent-cyan">{location}</span></span>}
                                 </div>
                             </div>
@@ -340,9 +340,9 @@ export const PlayerOverlay: React.FC<PlayerOverlayProps> = ({
                                             <div className="flex gap-2">
                                                 <button
                                                     onClick={onVolumeDown}
-                                                    className="flex-1 h-14 bg-white/5 hover:bg-white/20 border border-white/10 text-white font-black uppercase tracking-tighter text-xs rounded-xl flex items-center justify-center transition-all focus:ring-1 focus:ring-accent-pink outline-none group"
+                                                    className="flex-1 h-14 bg-white/5 hover:bg-white/20 border border-white/10 text-white font-black uppercase tracking-tighter text-xs rounded-xl flex items-center justify-center transition-all focus:ring-1 focus:ring-primary outline-none group"
                                                 >
-                                                    <span className="text-gray-500 group-hover:text-accent-pink mr-1 font-normal">-</span> VOL
+                                                    <span className="text-gray-500 group-hover:text-primary mr-1 font-normal">-</span> VOL
                                                 </button>
                                                 <button
                                                     onClick={onVolumeUp}
@@ -397,7 +397,7 @@ export const PlayerOverlay: React.FC<PlayerOverlayProps> = ({
                                                 onClick={item.action}
                                                 className="flex flex-col items-center gap-2 group outline-none"
                                             >
-                                                <kbd className="min-w-[45px] h-9 px-2 flex items-center justify-center bg-white/10 border border-white/20 rounded-lg text-white text-[11px] font-black group-hover:bg-accent-cyan group-hover:text-black group-hover:border-accent-cyan/50 group-active:translate-y-px transition-colors cursor-pointer shadow-lg">
+                                                <kbd className="min-w-[45px] h-9 px-2 flex items-center justify-center bg-white/10 border border-white/20 rounded-lg text-white text-[11px] font-black group-hover:bg-accent-cyan group-hover:text-white group-hover:border-accent-cyan/50 group-active:translate-y-px transition-colors cursor-pointer shadow-lg">
                                                     {item.key}
                                                 </kbd>
                                                 <span className="text-[9px] text-gray-500 font-bold uppercase tracking-widest group-hover:text-white transition-colors">
@@ -429,7 +429,7 @@ export const PlayerOverlay: React.FC<PlayerOverlayProps> = ({
                                                     <div className="font-bold text-white group-hover:text-accent-cyan">{pl.playlistName}</div>
                                                     <div className="text-xs text-gray-500 font-mono">{pl.playlistId} • {pl.items?.length || 0} Items</div>
                                                 </div>
-                                                <div className="text-xs font-mono px-3 py-1 rounded bg-black/50 text-gray-400 group-hover:bg-accent-cyan group-hover:text-black transition-colors">
+                                                <div className="text-xs font-mono px-3 py-1 rounded bg-black/50 text-gray-400 group-hover:bg-accent-cyan group-hover:text-white transition-colors">
                                                     SELECT
                                                 </div>
                                             </button>
@@ -458,7 +458,7 @@ export const PlayerOverlay: React.FC<PlayerOverlayProps> = ({
                                                 type="text"
                                                 value={editName}
                                                 onChange={e => setEditName(e.target.value)}
-                                                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:border-accent-pink focus:ring-1 focus:ring-accent-pink/20 transition-all"
+                                                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-all"
                                                 required
                                             />
                                         </div>
@@ -468,7 +468,7 @@ export const PlayerOverlay: React.FC<PlayerOverlayProps> = ({
                                                 type="text"
                                                 value={editBranch}
                                                 onChange={e => setEditBranch(e.target.value)}
-                                                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:border-accent-pink focus:ring-1 focus:ring-accent-pink/20 transition-all"
+                                                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-all"
                                                 required
                                             />
                                         </div>
@@ -478,7 +478,7 @@ export const PlayerOverlay: React.FC<PlayerOverlayProps> = ({
                                                 type="text"
                                                 value={editLocation}
                                                 onChange={e => setEditLocation(e.target.value)}
-                                                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:border-accent-pink focus:ring-1 focus:ring-accent-pink/20 transition-all"
+                                                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-all"
                                                 placeholder="e.g. 1st Floor Lobby"
                                             />
                                         </div>
@@ -487,7 +487,7 @@ export const PlayerOverlay: React.FC<PlayerOverlayProps> = ({
                                     <div className="flex gap-4 pt-4">
                                         <button
                                             type="submit"
-                                            className="flex-1 py-4 bg-accent-pink hover:bg-rose-400 text-black font-black uppercase tracking-[0.2em] rounded-xl transition-all shadow-lg hover:shadow-accent-pink/20"
+                                            className="flex-1 py-4 bg-primary hover:brightness-110 text-primary-foreground font-black uppercase tracking-[0.2em] rounded-xl transition-all shadow-lg hover:shadow-primary/20"
                                         >
                                             Save Settings
                                         </button>

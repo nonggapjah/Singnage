@@ -128,7 +128,7 @@ export const BatchAssignPlaylistModal: React.FC<BatchAssignPlaylistModalProps> =
                                         <span className="font-bold text-sm text-foreground">{p.playlistName}</span>
                                     </div>
                                     <div className={`w-5 h-5 rounded-full border flex items-center justify-center transition-colors ${selected
-                                        ? 'bg-accent-cyan border-accent-cyan text-black'
+                                        ? 'bg-primary border-accent-cyan text-primary-foreground'
                                         : 'border-border'
                                         }`} aria-hidden="true">
                                         {selected && '✓'}
@@ -161,7 +161,7 @@ export const BatchAssignPlaylistModal: React.FC<BatchAssignPlaylistModalProps> =
                     type="button"
                     onClick={handleAssign}
                     disabled={submitting || loading || !selectedPlaylistId}
-                    className="flex-[2] py-4 rounded-xl bg-accent-cyan text-black font-black uppercase tracking-[0.2em] hover:bg-cyan-300 disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-xs"
+                    className="flex-[2] py-4 rounded-xl bg-primary text-primary-foreground font-black uppercase tracking-[0.2em] hover:brightness-110 disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-xs"
                 >
                     {submitting ? 'Assigning…' : `Assign to ${deviceIds.length} devices`}
                 </button>

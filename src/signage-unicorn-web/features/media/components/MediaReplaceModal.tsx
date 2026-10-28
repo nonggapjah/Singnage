@@ -304,7 +304,7 @@ export const MediaReplaceModal: React.FC<MediaReplaceModalProps> = ({ targetMedi
                                         type="button"
                                         disabled={!selectedNewMediaId}
                                         onClick={() => setStep('impact')}
-                                        className="w-full sm:w-auto px-8 py-3 bg-accent-cyan text-black font-black uppercase tracking-wider rounded-xl hover:bg-cyan-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+                                        className="w-full sm:w-auto px-8 py-3 bg-primary text-primary-foreground font-black uppercase tracking-wider rounded-xl hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
                                     >
                                         Next step <ArrowRight size={16} aria-hidden="true" />
                                     </button>
@@ -365,7 +365,7 @@ export const MediaReplaceModal: React.FC<MediaReplaceModalProps> = ({ targetMedi
                             <button
                                 type="button"
                                 onClick={() => setStep('confirm')}
-                                className="flex-1 py-3 bg-accent-cyan text-black font-black uppercase tracking-wider rounded-xl hover:bg-cyan-300 transition-colors flex items-center justify-center gap-2"
+                                className="flex-1 py-3 bg-primary text-primary-foreground font-black uppercase tracking-wider rounded-xl hover:brightness-110 transition-colors flex items-center justify-center gap-2"
                             >
                                 Review <ArrowRight size={16} aria-hidden="true" />
                             </button>
@@ -432,7 +432,7 @@ export const MediaReplaceModal: React.FC<MediaReplaceModalProps> = ({ targetMedi
                                 type="button"
                                 onClick={handleConfirmReplacement}
                                 disabled={isReplacing}
-                                className="flex-[2] py-4 bg-accent-cyan text-black font-black uppercase tracking-widest rounded-xl hover:bg-cyan-300 disabled:opacity-50 transition-colors"
+                                className="flex-[2] py-4 bg-primary text-primary-foreground font-black uppercase tracking-widest rounded-xl hover:brightness-110 disabled:opacity-50 transition-colors"
                             >
                                 {isReplacing ? 'Updating…' : 'Confirm & replace'}
                             </button>

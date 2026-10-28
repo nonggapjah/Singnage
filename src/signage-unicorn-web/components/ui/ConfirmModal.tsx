@@ -41,7 +41,7 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
             case 'danger': return 'bg-red-500 hover:bg-red-600 text-white';
             case 'warning': return 'bg-yellow-500 hover:bg-yellow-600 text-black';
             case 'success': return 'bg-green-500 hover:bg-green-600 text-white';
-            default: return 'bg-accent-cyan hover:bg-cyan-400 text-black'; // Info
+            default: return 'bg-primary hover:bg-cyan-400 text-primary-foreground'; // Info
         }
     };
 
