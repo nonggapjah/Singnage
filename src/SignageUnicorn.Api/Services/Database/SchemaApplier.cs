@@ -234,7 +234,13 @@ namespace SignageUnicorn.Api.Services.Database
         {
             if (string.IsNullOrEmpty(message)) return false;
             return message.Contains("There is already an object named", StringComparison.OrdinalIgnoreCase)
-                || message.Contains("already exists", StringComparison.OrdinalIgnoreCase);
+                || message.Contains("already exists", StringComparison.OrdinalIgnoreCase)
+                // Re-running a table script's `ALTER TABLE ... ADD DEFAULT ... FOR [col]` on a database
+                // that already has the table raises SQL error 1781 ("Column already has a DEFAULT bound
+                // to it"). The default is already there, so this is a no-op, not a failure -- tolerating
+                // it stops a correct, fully-migrated schema from being reported as "apply FAILED".
+                || message.Contains("already has a DEFAULT bound", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("already an index named", StringComparison.OrdinalIgnoreCase);
         }
 
         // Executes a file batch by batch. Returns null on success, otherwise the failure message.

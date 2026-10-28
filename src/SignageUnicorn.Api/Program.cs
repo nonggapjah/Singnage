@@ -452,8 +452,16 @@ app.Run();
 
 // Reclaims the listen port from a stale instance of this app (a PM2-orphaned dotnet) so a fresh
 // start never crash-loops on "address already in use". Best-effort: never blocks or fails startup.
-// F39: it used to kill ANY dotnet process listening on the port. It now kills only a process whose
-// command line names this application; anything else is reported as a port conflict and left alone.
+// F39 / chronic restart-loop fix: on a pm2 restart Windows sometimes leaves the previous dotnet
+// alive holding the port, so the new instance cannot bind and pm2 crash-loops it indefinitely.
+// This runs BEFORE Kestrel binds (Program line 18) and reclaims the port reliably:
+//   - it RETRIES for up to ~15 s instead of a single 800 ms wait, so a slow socket release or a
+//     stubborn orphan is resolved within one startup rather than crashing;
+//   - it decides to kill from the holder being a `dotnet` process -- this host runs only this API on
+//     this port -- NOT from a command line read over a slow, failure-prone powershell call. The old
+//     code treated its own orphan as a foreign process whenever that read came back empty and then
+//     refused to kill it, which is exactly how the loop became permanent.
+// A genuinely foreign (non-dotnet) holder is still never killed; the bind then fails loudly.
 static void EnsurePortAvailable(string[] args)
 {
     try
@@ -475,6 +483,58 @@ static void EnsurePortAvailable(string[] args)
 
         int currentPid = Environment.ProcessId;
 
+        for (int attempt = 1; attempt <= 20; attempt++)
+        {
+            var holders = ListenersOnPort(port, currentPid);
+            if (holders.Count == 0) return;   // port is free -- Kestrel can bind
+
+            bool anyForeign = false;
+            bool killedAny = false;
+            foreach (var pid in holders)
+            {
+                try
+                {
+                    var holder = System.Diagnostics.Process.GetProcessById(pid);
+                    if (holder.ProcessName.Equals("dotnet", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var cmd = GetCommandLine(pid);   // best-effort, for the log only
+                        Console.WriteLine($"[Startup] Port {port} held by stale dotnet {pid}" +
+                                          (string.IsNullOrWhiteSpace(cmd) ? "" : $" ({cmd!.Trim()})") +
+                                          "; terminating to reclaim.");
+                        holder.Kill(true);
+                        holder.WaitForExit(4000);
+                        killedAny = true;
+                    }
+                    else
+                    {
+                        anyForeign = true;
+                        Console.WriteLine($"[Startup] PORT CONFLICT: port {port} is held by {holder.ProcessName} (pid {pid}), " +
+                                          "which is NOT a dotnet process. Not touching it; binding will fail until it is stopped.");
+                    }
+                }
+                catch { /* the holder may have exited between the scan and the kill */ }
+            }
+
+            // Only foreign holders remain and we must not kill them: stop retrying, let bind fail loudly.
+            if (anyForeign && !killedAny) return;
+
+            System.Threading.Thread.Sleep(750); // let the socket release, then re-scan
+        }
+
+        Console.WriteLine($"[Startup] Port {port} was still held after ~15 s of reclaim attempts; binding will likely fail.");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[Startup] Port guard skipped: {ex.Message}");
+    }
+}
+
+// Pids LISTENING on the given TCP port, excluding our own process. Parses `netstat -ano -p tcp`.
+static System.Collections.Generic.List<int> ListenersOnPort(int port, int currentPid)
+{
+    var result = new System.Collections.Generic.List<int>();
+    try
+    {
         var psi = new System.Diagnostics.ProcessStartInfo("netstat", "-ano -p tcp")
         {
             RedirectStandardOutput = true,
@@ -482,51 +542,22 @@ static void EnsurePortAvailable(string[] args)
             CreateNoWindow = true
         };
         using var probe = System.Diagnostics.Process.Start(psi);
-        if (probe == null) return;
+        if (probe == null) return result;
         string output = probe.StandardOutput.ReadToEnd();
         probe.WaitForExit(5000);
-
-        bool killedAny = false;
         foreach (var raw in output.Split('\n'))
         {
             var line = raw.Trim();
             if (line.Length == 0 || !line.Contains("LISTENING")) continue;
-
             var parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
             if (parts.Length < 5) continue;
-
-            var local = parts[1];                          // e.g. 0.0.0.0:8862 or [::]:8862
-            if (!local.EndsWith(":" + port)) continue;     // exact port (won't match :48862 etc.)
+            if (!parts[1].EndsWith(":" + port)) continue;     // exact port (won't match :48862 etc.)
             if (!int.TryParse(parts[^1], out var pid) || pid == 0 || pid == currentPid) continue;
-
-            try
-            {
-                var holder = System.Diagnostics.Process.GetProcessById(pid);
-                var commandLine = GetCommandLine(pid) ?? string.Empty;
-                bool isThisApp = holder.ProcessName.Equals("dotnet", StringComparison.OrdinalIgnoreCase)
-                                 && commandLine.Contains("SignageUnicorn.Api", StringComparison.OrdinalIgnoreCase);
-                if (isThisApp)
-                {
-                    Console.WriteLine($"[Startup] Port {port} held by stale SignageUnicorn.Api process {pid}; terminating to reclaim.");
-                    holder.Kill(true);
-                    holder.WaitForExit(3000);
-                    killedAny = true;
-                }
-                else
-                {
-                    Console.WriteLine($"[Startup] PORT CONFLICT: port {port} is held by process {pid} ({holder.ProcessName}) which is NOT this API " +
-                                      $"(command line: {(commandLine.Length > 0 ? commandLine : "unavailable")}). Not touching it; binding will fail until it is stopped.");
-                }
-            }
-            catch { /* the holder may have exited already */ }
+            if (!result.Contains(pid)) result.Add(pid);
         }
-
-        if (killedAny) System.Threading.Thread.Sleep(800); // let the socket fully release before bind
     }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"[Startup] Port guard skipped: {ex.Message}");
-    }
+    catch { /* fall through with whatever we parsed */ }
+    return result;
 }
 
 // Reads a process's command line through CIM. Returns null when it cannot be determined, which the
