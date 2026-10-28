@@ -699,10 +699,10 @@ export default function DevicesPage() {
                                                 <article
                                                     key={`grid-dev-${device.deviceId}-${index}`}
                                                     aria-label={`${device.deviceName}, ${isOnline ? 'online' : 'offline'}`}
-                                                    className={`bg-card p-6 rounded-2xl border transition-colors duration-300 flex flex-col relative overflow-hidden group ${
+                                                    className={`bg-card card-elevated p-6 rounded-2xl border flex flex-col relative overflow-hidden group ${
                                                         isSelected
                                                             ? 'border-accent-cyan bg-accent-cyan/5'
-                                                            : 'border-border hover:border-accent-cyan/30'
+                                                            : 'border-border hover:border-accent-cyan/40'
                                                     }`}
                                                 >
                                                     {/* Selection Checkbox */}
@@ -718,9 +718,7 @@ export default function DevicesPage() {
 
                                                     {/* Status Top Bar */}
                                                     <div className={`absolute top-0 left-0 w-full h-1 ${
-                                                        isOnline
-                                                            ? 'bg-gradient-to-r from-transparent via-green-500 to-transparent'
-                                                            : 'bg-gradient-to-r from-transparent via-red-500/50 to-transparent'
+                                                        isOnline ? 'bg-green-500' : 'bg-red-500/50'
                                                     }`} aria-hidden="true" />
 
                                                     <div className="flex justify-between items-start mb-4">

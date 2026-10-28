@@ -185,11 +185,9 @@ export default function AdminLayout({
                 ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
                 fixed md:relative h-full glass-panel border-r border-border/50 flex flex-col z-40 overflow-hidden transition-[width,transform] duration-300 ease-in-out
             `}>
-                <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-b from-accent-purple/5 to-transparent pointer-events-none"></div>
-
                 <div className={`p-8 pb-4 flex items-center ${sidebarCollapsed ? 'justify-center px-0' : 'justify-between'}`}>
                     <Link href="/" className="flex items-center gap-3 group rounded-xl" aria-label="Signage Unicorn home">
-                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-accent-purple to-accent-cyan flex items-center justify-center text-xl group-hover:scale-110 transition-transform flex-shrink-0" aria-hidden="true">
+                        <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center text-xl group-hover:scale-105 transition-transform flex-shrink-0 shadow-sm" aria-hidden="true">
                             🦄
                         </div>
                         {!sidebarCollapsed && (
