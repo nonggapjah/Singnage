@@ -1,109 +1,165 @@
 param(
-    [Parameter(Mandatory = $true, HelpMessage = "Version number, e.g., 2.4.0")]
+    [Parameter(Mandatory = $true, HelpMessage = "Version number, e.g., 2.8.0")]
     [string]$Version,
-    
-    [Parameter(HelpMessage = "Path to the installer, defaults to the built 2.3.1 test. Only override if custom.")]
-    [string]$SourceFile = "c:\git\Signage-Unicorn\src\signage-unicorn-client\dist\Signage Unicorn Setup $Version.exe"
+
+    [Parameter(HelpMessage = "Repository root on THIS machine (dev box: C:\Singnage\Singnage, server: C:\git\Signage-Unicorn)")]
+    [string]$RepoRoot = "C:\Singnage\Singnage",
+
+    [Parameter(HelpMessage = "Path to the built installer. Defaults to <RepoRoot>\src\signage-unicorn-client\dist\Signage Unicorn Setup <Version>.exe")]
+    [string]$SourceFile,
+
+    [string]$ServerUrl = "https://signage.aith123.com",
+
+    [string]$ConnectionString = "Server=SIGNAGE\SQLEXPRESS;Database=SignageUnicornDB;Trusted_Connection=True;TrustServerCertificate=True",
+
+    [Parameter(HelpMessage = "Number of pilot devices to queue UPDATE_CLIENT for (1-5). UPDATE_RULES.md: never more than 5.")]
+    [ValidateRange(1, 5)]
+    [int]$CanaryCount = 1
 )
 
-$ServerUrl = "https://signage.aith123.com"
-$TargetDir = "c:\git\Signage-Unicorn\src\SignageUnicorn.Api\wwwroot\setup"
-$WebPublicDir = "c:\git\Signage-Unicorn\src\signage-unicorn-web\public\setup"
+# Any failure stops the script BEFORE it touches the database or queues a command: a half-published
+# release (file missing, hash wrong, URL unreachable) used to be advertised to the fleet anyway.
+$ErrorActionPreference = 'Stop'
+
+# Contract T13: the fleet downloads installers and their SHA-256 from this URL; plain http would let
+# an on-path attacker replace both. Refuse before anything is copied or written.
+if (-not $ServerUrl.StartsWith('https://', [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "ServerUrl must be https (got '$ServerUrl'). Installers and their hashes travel over TLS only."
+}
+
+if ([string]::IsNullOrWhiteSpace($SourceFile)) {
+    $SourceFile = Join-Path $RepoRoot "src\signage-unicorn-client\dist\Signage Unicorn Setup $Version.exe"
+}
+$TargetDir = Join-Path $RepoRoot "src\SignageUnicorn.Api\wwwroot\setup"
+$WebPublicDir = Join-Path $RepoRoot "src\signage-unicorn-web\public\setup"
 $TargetFileName = "Signage_Unicorn_Setup_$Version.exe"
 $TargetPath = Join-Path $TargetDir $TargetFileName
 $WebTargetPath = Join-Path $WebPublicDir $TargetFileName
-$DownloadUrl = "$ServerUrl/setup/$TargetFileName"
+$DownloadUrl = "$($ServerUrl.TrimEnd('/'))/setup/$TargetFileName"
 
 Write-Host "=========================================="
 Write-Host "   Signage Unicorn - Automated Updater    "
 Write-Host "=========================================="
+Write-Host "Version      : $Version"
+Write-Host "Repo root    : $RepoRoot"
+Write-Host "Installer    : $SourceFile"
+Write-Host "Download URL : $DownloadUrl"
+Write-Host "Canary count : $CanaryCount"
 
-# 1. Check if source file exists
-if (!(Test-Path $SourceFile)) {
-    Write-Host "ERROR: Installer not found at $SourceFile" -ForegroundColor Red
-    Write-Host "Did you run 'npm run build' in the client folder first?" -ForegroundColor Yellow
-    exit
+# 1. Source installer
+if (!(Test-Path -LiteralPath $SourceFile)) {
+    throw "Installer not found at $SourceFile. Did you run 'npm run build' in the client folder first?"
 }
+$SourceHash = (Get-FileHash -LiteralPath $SourceFile -Algorithm SHA256).Hash.ToLowerInvariant()
+Write-Host "1. Installer SHA-256: $SourceHash"
 
-# 2. Copy file to API wwwroot
-Write-Host "1. Copying installer to web server dir..."
+# 2. Copy to both publish locations and verify each copy by hash
+Write-Host "2. Copying installer to web server dirs..."
+foreach ($dir in @($TargetDir, $WebPublicDir)) {
+    if (!(Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -ErrorAction Stop | Out-Null }
+}
+Copy-Item -LiteralPath $SourceFile -Destination $TargetPath -Force -ErrorAction Stop
+Copy-Item -LiteralPath $SourceFile -Destination $WebTargetPath -Force -ErrorAction Stop
+foreach ($copy in @($TargetPath, $WebTargetPath)) {
+    $copyHash = (Get-FileHash -LiteralPath $copy -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($copyHash -ne $SourceHash) {
+        throw "Copy verification FAILED for $copy (hash $copyHash != $SourceHash). Nothing was published."
+    }
+}
+Write-Host "   -> OK: both copies verified ($TargetPath, $WebTargetPath)" -ForegroundColor Green
+
+# 3. Make sure the fleet can actually reach the file before advertising it
+Write-Host "3. Checking download URL..."
 try {
-    if (!(Test-Path $TargetDir)) { New-Item -ItemType Directory -Path $TargetDir | Out-Null }
-    if (!(Test-Path $WebPublicDir)) { New-Item -ItemType Directory -Path $WebPublicDir | Out-Null }
-    Copy-Item -Path $SourceFile -Destination $TargetPath -Force
-    Copy-Item -Path $SourceFile -Destination $WebTargetPath -Force
-    Write-Host "   -> OK: Uploaded to $TargetPath and $WebTargetPath" -ForegroundColor Green
+    $head = Invoke-WebRequest -Uri $DownloadUrl -Method Head -UseBasicParsing -TimeoutSec 60
+    if ($head.StatusCode -lt 200 -or $head.StatusCode -ge 300) { throw "HTTP $($head.StatusCode)" }
+    Write-Host "   -> OK: $DownloadUrl responds $($head.StatusCode)" -ForegroundColor Green
 }
 catch {
-    Write-Host "   -> FAILED: $($_.Exception.Message)" -ForegroundColor Red
-    exit
+    throw "Download URL is not reachable ($($_.Exception.Message)). Database NOT updated, no command queued."
 }
 
-# 3. Update Database using proper connection 
-Write-Host "2. Updating System Settings..."
-$connStr = "Server=SIGNAGE\SQLEXPRESS;Database=SignageUnicornDB;Trusted_Connection=True;TrustServerCertificate=True"
-
-function Invoke-SqlExec($query) {
-    $conn = New-Object System.Data.SqlClient.SqlConnection($connStr)
-    $cmd = New-Object System.Data.SqlClient.SqlCommand($query, $conn)
-    $conn.Open()
-    $cmd.ExecuteNonQuery() | Out-Null
-    $conn.Close()
-}
-
-function Invoke-SqlQuery($query) {
-    $conn = New-Object System.Data.SqlClient.SqlConnection($connStr)
-    $cmd = New-Object System.Data.SqlClient.SqlCommand($query, $conn)
-    $conn.Open()
-    $adapter = New-Object System.Data.SqlClient.SqlDataAdapter($cmd)
-    $ds = New-Object System.Data.DataSet
-    $adapter.Fill($ds) | Out-Null
-    $conn.Close()
-    return $ds.Tables[0]
-}
-
+# 4. Publish release metadata atomically (version + url + sha256 in ONE transaction)
+Write-Host "4. Updating System Settings (transaction)..."
+$conn = New-Object System.Data.SqlClient.SqlConnection($ConnectionString)
+$conn.Open()
+$tx = $conn.BeginTransaction()
 try {
-    # Update Version
-    Invoke-SqlExec "UPDATE sn_system_settings SET config_value = '$Version' WHERE config_key = 'LatestClientVersion'"
-    
-    # Update URL
-    Invoke-SqlExec "UPDATE sn_system_settings SET config_value = '$DownloadUrl' WHERE config_key = 'ClientDownloadUrl'"
-    
-    Write-Host "   -> OK: System Settings Updated to v$Version" -ForegroundColor Green
-}
-catch {
-    Write-Host "   -> FAILED: $($_.Exception.Message)" -ForegroundColor Red
-    exit
-}
-
-# 4. Trigger Update Command for a Canary Group (Max 5 Devices)
-Write-Host "3. Triggering UPDATE_CLIENT for CANARY group (Max 5 devices)..."
-try {
-    # CRITICAL RULE: Never update all devices at once. Select 1 active device.
-    $devices = Invoke-SqlQuery "SELECT TOP 1 device_id FROM sn_devices WHERE is_deleted = 0 AND status IN ('PLAYING', 'IDLE') AND (app_version IS NULL OR app_version NOT LIKE '%$Version%') ORDER BY last_check_in DESC"
-    $count = 0
-    foreach ($row in $devices) {
-        $devId = $row.device_id
-        $uuid = [guid]::NewGuid().ToString()
-        $sql = @"
-            INSERT INTO sn_device_commands 
-            (command_uuid, device_id, command_type, status, created_at, created_by, is_deleted)
-            VALUES ('$uuid', $devId, 'UPDATE_CLIENT', 'PENDING', GETUTCDATE(), 1, 0)
+    $upsert = @"
+UPDATE sn_system_settings SET config_value = @value, updated_at = SYSUTCDATETIME() WHERE config_key = @key;
+IF @@ROWCOUNT = 0
+    INSERT INTO sn_system_settings (config_key, config_value, description, updated_at)
+    VALUES (@key, @value, @description, SYSUTCDATETIME());
 "@
-        Invoke-SqlExec $sql
-        $count++
+    $settings = @(
+        @{ key = 'LatestClientVersion'; value = $Version;      description = 'Latest published client version' },
+        @{ key = 'ClientDownloadUrl';   value = $DownloadUrl;  description = 'Installer download URL for the latest client' },
+        @{ key = 'ClientDownloadSha256'; value = $SourceHash;  description = 'SHA-256 (lowercase hex) of the installer at ClientDownloadUrl' }
+    )
+    foreach ($s in $settings) {
+        $cmd = New-Object System.Data.SqlClient.SqlCommand($upsert, $conn, $tx)
+        [void]$cmd.Parameters.AddWithValue('@key', $s.key)
+        [void]$cmd.Parameters.AddWithValue('@value', $s.value)
+        [void]$cmd.Parameters.AddWithValue('@description', $s.description)
+        [void]$cmd.ExecuteNonQuery()
     }
-    Write-Host "   -> OK: Queued remote update command for $count pilot devices." -ForegroundColor Green
-    
-    if ($count -gt 0) {
-        Write-Host "   -> IMPORTANT: You MUST verify these $count devices update successfully before expanding the rollout." -ForegroundColor Yellow
+    $tx.Commit()
+    Write-Host "   -> OK: LatestClientVersion=$Version, ClientDownloadUrl, ClientDownloadSha256 published together" -ForegroundColor Green
+}
+catch {
+    try { $tx.Rollback() } catch { }
+    $conn.Close()
+    throw "Settings update FAILED and was rolled back: $($_.Exception.Message)"
+}
+
+# 5. Queue UPDATE_CLIENT for the canary group (UPDATE_RULES.md: max 5 pilot devices)
+Write-Host "5. Queuing UPDATE_CLIENT for $CanaryCount canary device(s)..."
+$queued = 0
+try {
+    $select = @"
+SELECT TOP (@count) d.device_id
+FROM sn_devices d
+WHERE d.is_deleted = 0
+  AND d.status IN ('PLAYING', 'IDLE', 'ONLINE', 'online')
+  AND (d.app_version IS NULL OR d.app_version NOT LIKE @versionLike)
+  AND NOT EXISTS (
+        SELECT 1 FROM sn_device_commands c
+        WHERE c.device_id = d.device_id AND c.command_type = 'UPDATE_CLIENT' AND c.status IN ('PENDING', 'POLLING') AND c.is_deleted = 0)
+ORDER BY d.last_check_in DESC
+"@
+    $cmd = New-Object System.Data.SqlClient.SqlCommand($select, $conn)
+    [void]$cmd.Parameters.AddWithValue('@count', $CanaryCount)
+    [void]$cmd.Parameters.AddWithValue('@versionLike', "%$Version%")
+    $reader = $cmd.ExecuteReader()
+    $deviceIds = @()
+    while ($reader.Read()) { $deviceIds += [int64]$reader['device_id'] }
+    $reader.Close()
+
+    foreach ($devId in $deviceIds) {
+        $insert = @"
+INSERT INTO sn_device_commands (command_uuid, device_id, command_type, status, created_at, created_by, is_deleted)
+VALUES (@uuid, @deviceId, 'UPDATE_CLIENT', 'PENDING', SYSUTCDATETIME(), 1, 0)
+"@
+        $ins = New-Object System.Data.SqlClient.SqlCommand($insert, $conn)
+        [void]$ins.Parameters.AddWithValue('@uuid', [guid]::NewGuid().ToString())
+        [void]$ins.Parameters.AddWithValue('@deviceId', $devId)
+        [void]$ins.ExecuteNonQuery()
+        $queued++
+        Write-Host "   -> queued device_id $devId"
+    }
+    Write-Host "   -> OK: Queued remote update command for $queued pilot device(s)." -ForegroundColor Green
+    if ($queued -gt 0) {
+        Write-Host "   -> IMPORTANT: verify these $queued device(s) come back online on v$Version and play media before expanding the rollout." -ForegroundColor Yellow
     }
 }
 catch {
-    Write-Host "   -> FAILED: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "   -> FAILED to queue canary command: $($_.Exception.Message)" -ForegroundColor Red
+}
+finally {
+    $conn.Close()
 }
 
 Write-Host "=========================================="
 Write-Host " Canary Update Release Queued Successfully!" -ForegroundColor Cyan
-Write-Host " Monitor the 5 updated devices to ensure they come back online with v$Version." -ForegroundColor Yellow
+Write-Host " Monitor the $queued updated device(s) to ensure they come back online with v$Version." -ForegroundColor Yellow
 Write-Host " Check UPDATE_RULES.md for official update policy." -ForegroundColor White
