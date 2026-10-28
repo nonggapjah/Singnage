@@ -121,60 +121,65 @@ export default function PlaylistsPage() {
             });
     }, [playlists, filterStatus, sortBy]);
 
+    const controlClass = 'bg-muted/20 border border-border rounded-xl px-4 py-2 text-sm text-foreground outline-none focus:border-accent-cyan focus:ring-1 focus:ring-accent-cyan/30 transition-colors';
+
     return (
         <div className="p-8 space-y-8 max-w-7xl mx-auto">
-            <header className="flex justify-between items-end">
+            <header className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4">
                 <div>
-                    <h1 className="text-4xl font-black neon-text mb-2 uppercase tracking-tighter">Playlist Management</h1>
-                    <p className="text-gray-400">Total {playlists.length} active playlists in the system</p>
+                    <h1 className="text-4xl font-black neon-text mb-2 uppercase tracking-tighter">Playlist management</h1>
+                    <p className="text-muted-foreground">{playlists.length} playlists in the system</p>
                 </div>
-                <Link href="/admin/playlists/new" className="btn-primary shadow-[0_0_20px_rgba(0,242,255,0.3)] hover:scale-105 transform transition-all">
-                    + Create New Playlist
+                <Link href="/admin/playlists/new" className="btn-primary">
+                    + Create new playlist
                 </Link>
             </header>
 
             {/* --- Controls --- */}
-            <div className="glass-panel p-4 rounded-2xl border-white/5 flex flex-col md:flex-row gap-4 items-center justify-between sticky top-0 z-20 backdrop-blur-xl">
-                <div className="flex items-center gap-4 w-full md:w-auto">
-                    <div className="relative group">
-                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+            <div className="glass-panel p-4 rounded-2xl flex flex-col md:flex-row gap-4 items-center justify-between sticky top-0 z-20 bg-background/95">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 w-full md:w-auto">
+                    <div className="relative">
+                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none" aria-hidden="true">
                             <span className="opacity-50 text-xs">🔍</span>
                         </div>
                         <input
-                            type="text"
-                            placeholder="Search Sequences..."
+                            type="search"
+                            aria-label="Search playlists"
+                            placeholder="Search playlists…"
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            className="pl-10 pr-4 py-2 bg-black/20 border border-white/10 rounded-xl text-sm w-full md:w-64 focus:border-accent-cyan outline-none transition-all"
+                            className={`pl-10 pr-4 w-full md:w-64 ${controlClass}`}
                         />
                     </div>
 
                     <select
+                        aria-label="Filter by status"
                         value={filterStatus}
-                        onChange={(e) => setFilterStatus(e.target.value as any)}
-                        className="bg-black/20 border border-white/10 rounded-xl px-4 py-2 text-sm text-gray-400 outline-none focus:border-accent-cyan"
+                        onChange={(e) => setFilterStatus(e.target.value as 'ALL' | 'ACTIVE' | 'INACTIVE')}
+                        className={controlClass}
                     >
-                        <option value="ALL">All Status</option>
-                        <option value="ACTIVE">Active Only</option>
-                        <option value="INACTIVE">Inactive Only</option>
+                        <option value="ALL">All statuses</option>
+                        <option value="ACTIVE">Active only</option>
+                        <option value="INACTIVE">Inactive only</option>
                     </select>
 
                     <select
+                        aria-label="Sort playlists"
                         value={sortBy}
-                        onChange={(e) => setBy(e.target.value as any)}
-                        className="bg-black/20 border border-white/10 rounded-xl px-4 py-2 text-sm text-gray-400 outline-none focus:border-accent-cyan"
+                        onChange={(e) => setBy(e.target.value as 'name' | 'date' | 'items' | 'duration')}
+                        className={controlClass}
                     >
-                        <option value="date">Sort by Date</option>
-                        <option value="name">Sort by Name</option>
-                        <option value="items">Sort by Item Count</option>
-                        <option value="duration">Sort by Duration</option>
+                        <option value="date">Sort by date</option>
+                        <option value="name">Sort by name</option>
+                        <option value="items">Sort by item count</option>
+                        <option value="duration">Sort by duration</option>
                     </select>
                 </div>
             </div>
 
             {loading ? (
-                <div className="h-64 flex items-center justify-center">
-                    <div className="text-accent-cyan text-xl font-mono tracking-widest animate-pulse">SYNCHRONIZING DATASPACE...</div>
+                <div className="h-64 flex items-center justify-center" role="status">
+                    <div className="text-accent-cyan text-xl font-mono tracking-widest">Loading playlists…</div>
                 </div>
             ) : (
                 <PlaylistTable

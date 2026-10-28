@@ -55,122 +55,134 @@ export default function RegisterPage() {
             } else {
                 setError(res.message || 'Registration failed');
             }
-        } catch (err) {
+        } catch {
             setError('An unexpected error occurred');
         } finally {
             setLoading(false);
         }
     };
 
-    return (
-        <div className="min-h-screen flex items-center justify-center p-6 relative overflow-hidden bg-[#050507] text-white font-sans transition-colors duration-300">
-            {/* Background Gradients */}
-            <div className="absolute top-[-20%] left-[50%] -translate-x-1/2 w-[800px] h-[800px] bg-[radial-gradient(circle,rgba(157,0,255,0.15)_0%,transparent_70%)] pointer-events-none blur-3xl"></div>
-            <div className="absolute bottom-[-20%] left-[0%] w-[600px] h-[600px] bg-[radial-gradient(circle,rgba(0,242,255,0.08)_0%,transparent_70%)] pointer-events-none blur-3xl"></div>
+    const inputClass = 'w-full bg-muted/20 border border-border rounded-xl px-4 py-3 text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 transition-colors placeholder:text-muted-foreground/70 font-medium text-sm';
+    const labelClass = 'block text-xs font-black text-muted-foreground uppercase tracking-widest ml-1';
 
+    return (
+        <div className="min-h-screen flex items-center justify-center p-6 relative overflow-hidden bg-background text-foreground font-sans transition-colors duration-300">
             {/* Top Toolbar */}
-            <div className="absolute top-8 right-8 flex items-center gap-4 animate-[fadeIn_1s_ease-out]">
-                <button onClick={toggleFontSize} className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center hover:bg-white/10 transition-colors relative group backdrop-blur-md">
-                    <div className="flex items-end gap-0.5">
-                        <span className={`font-bold transition-all ${fontSize === 'small' ? 'text-[#00f2ff] text-sm' : 'text-gray-500 text-xs'}`}>A</span>
-                        <span className={`font-bold transition-all ${fontSize === 'medium' ? 'text-[#00f2ff] text-base' : 'text-gray-500 text-xs'}`}>A</span>
-                        <span className={`font-bold transition-all ${fontSize === 'large' ? 'text-[#00f2ff] text-xl' : 'text-gray-500 text-xs'}`}>A</span>
+            <div className="absolute top-8 right-8 flex items-center gap-4">
+                <button
+                    type="button"
+                    onClick={toggleFontSize}
+                    aria-label={`Change text size (current: ${fontSize})`}
+                    title={`Text size: ${fontSize}`}
+                    className="w-10 h-10 rounded-xl bg-muted/20 border border-border flex items-center justify-center hover:bg-muted/40 transition-colors"
+                >
+                    <div className="flex items-end gap-0.5" aria-hidden="true">
+                        <span className={`font-bold ${fontSize === 'small' ? 'text-primary text-sm' : 'text-muted-foreground text-xs'}`}>A</span>
+                        <span className={`font-bold ${fontSize === 'medium' ? 'text-primary text-base' : 'text-muted-foreground text-xs'}`}>A</span>
+                        <span className={`font-bold ${fontSize === 'large' ? 'text-primary text-xl' : 'text-muted-foreground text-xs'}`}>A</span>
                     </div>
                 </button>
-                <button onClick={toggleTheme} className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-lg hover:bg-white/10 transition-colors shadow-lg backdrop-blur-md">
-                    {theme === 'dark' ? '🌙' : '☀️'}
+                <button
+                    type="button"
+                    onClick={toggleTheme}
+                    aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+                    title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+                    className="w-10 h-10 rounded-xl bg-muted/20 border border-border flex items-center justify-center text-lg hover:bg-muted/40 transition-colors"
+                >
+                    <span aria-hidden="true">{theme === 'dark' ? '🌙' : '☀️'}</span>
                 </button>
             </div>
 
             {/* Main Card */}
-            <div className="w-full max-w-lg animate-[zoomIn_0.7s_ease-out]">
+            <div className="w-full max-w-lg animate-in">
                 <div className="text-center mb-8">
-                    <h1 className="text-4xl font-black uppercase tracking-tighter mb-2 text-transparent bg-clip-text bg-gradient-to-b from-white to-gray-400 drop-shadow-[0_0_15px_rgba(0,242,255,0.5)]">
-                        CREATE ACCOUNT
+                    <h1 className="text-4xl font-black uppercase tracking-tighter mb-2 neon-text">
+                        Create account
                     </h1>
-                    <p className="text-xs font-bold text-gray-500 uppercase tracking-[0.2em]">Join our next-generation enterprise ecosystem</p>
+                    <p className="text-sm font-bold text-muted-foreground">Request access to the Signage Unicorn admin console</p>
                 </div>
 
-                <div className="bg-white/5 backdrop-blur-2xl border border-white/10 p-8 rounded-3xl shadow-2xl relative overflow-hidden group hover:border-[#00f2ff]/30 transition-colors duration-500">
-                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-[#00f2ff] to-transparent animate-pulse opacity-50"></div>
+                <div className="bg-card/80 glass-blur border border-border p-8 rounded-3xl shadow-2xl relative overflow-hidden">
+                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-primary to-transparent opacity-60" aria-hidden="true"></div>
 
                     {/* Form */}
-                    <form onSubmit={handleSubmit} className="space-y-5">
+                    <form onSubmit={handleSubmit} className="space-y-5" noValidate={false}>
 
                         {/* First/Last Name Row */}
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-1">
-                                <label className="text-xs font-black text-gray-500 uppercase tracking-widest ml-1">First Name</label>
-                                <div className="relative group/input">
-                                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-gray-500 transition-colors">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
-                                    </div>
-                                    <input
-                                        type="text"
-                                        value={formData.firstName}
-                                        onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
-                                        placeholder="John"
-                                        className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-4 py-3 text-white outline-none focus:border-[#00f2ff] focus:ring-1 focus:ring-[#00f2ff]/20 focus:bg-white/10 transition-all placeholder:text-gray-600 font-medium text-sm"
-                                        required
-                                    />
-                                </div>
+                                <label htmlFor="reg-first-name" className={labelClass}>First name</label>
+                                <input
+                                    id="reg-first-name"
+                                    name="firstName"
+                                    type="text"
+                                    autoComplete="given-name"
+                                    value={formData.firstName}
+                                    onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
+                                    placeholder="John"
+                                    className={inputClass}
+                                    required
+                                />
                             </div>
                             <div className="space-y-1">
-                                <label className="text-xs font-black text-gray-500 uppercase tracking-widest ml-1">Last Name</label>
-                                <div className="relative group/input">
-                                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-gray-500 transition-colors">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
-                                    </div>
-                                    <input
-                                        type="text"
-                                        value={formData.lastName}
-                                        onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
-                                        placeholder="Doe"
-                                        className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-4 py-3 text-white outline-none focus:border-[#00f2ff] focus:ring-1 focus:ring-[#00f2ff]/20 focus:bg-white/10 transition-all placeholder:text-gray-600 font-medium text-sm"
-                                        required
-                                    />
-                                </div>
+                                <label htmlFor="reg-last-name" className={labelClass}>Last name</label>
+                                <input
+                                    id="reg-last-name"
+                                    name="lastName"
+                                    type="text"
+                                    autoComplete="family-name"
+                                    value={formData.lastName}
+                                    onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
+                                    placeholder="Doe"
+                                    className={inputClass}
+                                    required
+                                />
                             </div>
                         </div>
 
-                        {/* Toggle Switch */}
-                        <div className="flex p-1 bg-black/20 border border-white/10 rounded-xl relative">
+                        {/* Contact method */}
+                        <div className="flex p-1 bg-muted/30 border border-border rounded-xl relative" role="group" aria-label="Registration method">
                             <button
                                 type="button"
                                 onClick={() => setRegMethod('email')}
-                                className={`flex-1 py-2.5 px-4 rounded-lg text-xs font-bold transition-all duration-300 relative z-10 flex items-center justify-center gap-2 ${regMethod === 'email'
-                                    ? 'bg-[#00f2ff] text-black shadow-[0_0_15px_rgba(0,242,255,0.4)] transform scale-[1.02]'
-                                    : 'text-gray-500 hover:text-white'
+                                aria-pressed={regMethod === 'email'}
+                                className={`flex-1 py-2.5 px-4 rounded-lg text-xs font-bold transition-colors duration-200 relative z-10 flex items-center justify-center gap-2 ${regMethod === 'email'
+                                    ? 'bg-primary text-primary-foreground'
+                                    : 'text-muted-foreground hover:text-foreground'
                                     }`}
                             >
-                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"></rect><path d="m22 7-8.991 5.727a2 2 0 0 1-2.009 0L2 7"></path></svg>
-                                Email Account
+                                <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"></rect><path d="m22 7-8.991 5.727a2 2 0 0 1-2.009 0L2 7"></path></svg>
+                                Email account
                             </button>
                             <button
                                 type="button"
                                 onClick={() => setRegMethod('phone')}
-                                className={`flex-1 py-2.5 px-4 rounded-lg text-xs font-bold transition-all duration-300 relative z-10 flex items-center justify-center gap-2 ${regMethod === 'phone'
-                                    ? 'bg-[#00f2ff] text-black shadow-[0_0_15px_rgba(0,242,255,0.4)] transform scale-[1.02]'
-                                    : 'text-gray-500 hover:text-white'
+                                aria-pressed={regMethod === 'phone'}
+                                className={`flex-1 py-2.5 px-4 rounded-lg text-xs font-bold transition-colors duration-200 relative z-10 flex items-center justify-center gap-2 ${regMethod === 'phone'
+                                    ? 'bg-primary text-primary-foreground'
+                                    : 'text-muted-foreground hover:text-foreground'
                                     }`}
                             >
-                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
+                                <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
                                 Phone / SMS
                             </button>
                         </div>
 
                         {/* Dynamic Primary Field */}
-                        <div className="bg-white/5 border border-white/10 rounded-2xl p-4 transition-all animate-in fade-in slide-in-from-top-1">
+                        <div className="bg-muted/20 border border-border rounded-2xl p-4">
                             <div className="space-y-1">
-                                <label className="text-xs font-black text-gray-500 uppercase tracking-widest ml-1">
-                                    Primary {regMethod === 'email' ? 'Email' : 'Phone'}
+                                <label htmlFor="reg-primary-contact" className={labelClass}>
+                                    Primary {regMethod === 'email' ? 'email' : 'phone'}
                                 </label>
                                 <input
+                                    id="reg-primary-contact"
+                                    name="primaryContact"
                                     type={regMethod === 'email' ? 'email' : 'tel'}
+                                    autoComplete={regMethod === 'email' ? 'email' : 'tel'}
                                     value={formData.primaryContact}
                                     onChange={(e) => setFormData({ ...formData, primaryContact: e.target.value })}
                                     placeholder={regMethod === 'email' ? 'name@example.com' : '081 234 5678'}
-                                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:border-[#00f2ff] focus:ring-1 focus:ring-[#00f2ff]/20 focus:bg-white/10 transition-all placeholder:text-gray-600 font-medium"
+                                    className={inputClass}
                                     required
                                 />
                             </div>
@@ -178,69 +190,70 @@ export default function RegisterPage() {
 
                         {/* Optional Secondary Field */}
                         <div className="space-y-1">
-                            <label className="text-xs font-black text-gray-500 uppercase tracking-widest ml-1">
-                                Secondary {regMethod === 'email' ? 'Phone' : 'Email'} (Optional)
+                            <label htmlFor="reg-secondary-contact" className={labelClass}>
+                                Secondary {regMethod === 'email' ? 'phone' : 'email'} (optional)
                             </label>
-                            <div className="relative group/input">
-                                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-gray-500 transition-colors">
-                                    {regMethod === 'email'
-                                        ? <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
-                                        : <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"></rect><path d="m22 7-8.991 5.727a2 2 0 0 1-2.009 0L2 7"></path></svg>
-                                    }
-                                </div>
-                                <input
-                                    type={regMethod === 'email' ? 'tel' : 'email'}
-                                    value={formData.secondaryContact}
-                                    onChange={(e) => setFormData({ ...formData, secondaryContact: e.target.value })}
-                                    placeholder={regMethod === 'email' ? '081 234 5678' : 'name@example.com'}
-                                    className="w-full bg-white/5 border border-white/10 rounded-xl pl-10 pr-4 py-3 text-white outline-none focus:border-[#00f2ff] focus:ring-1 focus:ring-[#00f2ff]/20 focus:bg-white/10 transition-all placeholder:text-gray-600 font-medium text-sm"
-                                />
-                            </div>
+                            <input
+                                id="reg-secondary-contact"
+                                name="secondaryContact"
+                                type={regMethod === 'email' ? 'tel' : 'email'}
+                                autoComplete={regMethod === 'email' ? 'tel' : 'email'}
+                                value={formData.secondaryContact}
+                                onChange={(e) => setFormData({ ...formData, secondaryContact: e.target.value })}
+                                placeholder={regMethod === 'email' ? '081 234 5678' : 'name@example.com'}
+                                className={inputClass}
+                            />
                         </div>
 
                         {/* Password Fields */}
                         <div className="space-y-1">
-                            <label className="text-xs font-black text-gray-500 uppercase tracking-widest ml-1">Password</label>
+                            <label htmlFor="reg-password" className={labelClass}>Password</label>
                             <input
+                                id="reg-password"
+                                name="password"
                                 type="password"
+                                autoComplete="new-password"
                                 value={formData.password}
                                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                                 placeholder="Min. 8 characters"
-                                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:border-[#00f2ff] focus:ring-1 focus:ring-[#00f2ff]/20 focus:bg-white/10 transition-all placeholder:text-gray-600 font-medium text-sm"
+                                className={inputClass}
                                 required
+                                minLength={8}
                             />
                         </div>
 
                         <div className="space-y-1">
-                            <label className="text-xs font-black text-gray-500 uppercase tracking-widest ml-1">Confirm Password</label>
+                            <label htmlFor="reg-confirm-password" className={labelClass}>Confirm password</label>
                             <input
+                                id="reg-confirm-password"
+                                name="confirmPassword"
                                 type="password"
+                                autoComplete="new-password"
                                 value={formData.confirmPassword}
                                 onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
                                 placeholder="Repeat password"
-                                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:border-[#00f2ff] focus:ring-1 focus:ring-[#00f2ff]/20 focus:bg-white/10 transition-all placeholder:text-gray-600 font-medium text-sm"
+                                className={inputClass}
                                 required
                             />
                         </div>
 
                         {/* Terms */}
                         <div className="flex items-start gap-3 mt-2">
-                            <div className="relative flex items-center">
-                                <input
-                                    type="checkbox"
-                                    checked={agreed}
-                                    onChange={(e) => setAgreed(e.target.checked)}
-                                    className="peer h-5 w-5 cursor-pointer appearance-none rounded-md border border-white/20 bg-white/5 transition-all checked:bg-[#00f2ff] checked:border-[#00f2ff]"
-                                />
-                                <svg className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-black opacity-0 peer-checked:opacity-100 transition-opacity" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                            </div>
-                            <label className="text-xs text-gray-400 font-medium cursor-pointer select-none" onClick={() => setAgreed(!agreed)}>
-                                I agree to the <span className="text-[#00f2ff] hover:underline">Terms</span> and <span className="text-[#00f2ff] hover:underline">Privacy Policy</span>
+                            <input
+                                id="reg-agree"
+                                name="agree"
+                                type="checkbox"
+                                checked={agreed}
+                                onChange={(e) => setAgreed(e.target.checked)}
+                                className="mt-0.5 h-5 w-5 cursor-pointer rounded-md border border-border bg-muted/20 accent-[var(--primary)]"
+                            />
+                            <label htmlFor="reg-agree" className="text-xs text-muted-foreground font-medium cursor-pointer select-none">
+                                I agree to the <span className="text-primary font-bold">Terms</span> and <span className="text-primary font-bold">Privacy Policy</span>
                             </label>
                         </div>
 
                         {error && (
-                            <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-xs py-3 px-4 rounded-xl text-center font-bold animate-pulse">
+                            <div role="alert" className="bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 text-xs py-3 px-4 rounded-xl text-center font-bold">
                                 ⚠ {error}
                             </div>
                         )}
@@ -248,19 +261,19 @@ export default function RegisterPage() {
                         <button
                             type="submit"
                             disabled={loading}
-                            className={`w-full py-4 rounded-xl font-black uppercase tracking-[0.2em] transition-all shadow-xl text-sm relative overflow-hidden group/btn mt-2 ${loading
-                                ? 'bg-gray-800 text-gray-500 cursor-not-allowed'
-                                : 'bg-[#00f2ff] text-black border-2 border-cyan-400 hover:bg-cyan-300 hover:shadow-[0_0_30px_rgba(34,211,238,0.6)] hover:-translate-y-0.5 transform'
+                            className={`w-full py-4 rounded-xl font-black uppercase tracking-[0.2em] transition-colors shadow-xl text-sm relative overflow-hidden mt-2 ${loading
+                                ? 'bg-muted text-muted-foreground cursor-not-allowed'
+                                : 'bg-primary text-primary-foreground border-2 border-primary hover:bg-cyan-300'
                                 }`}
                         >
-                            <span className="relative z-10">{loading ? 'PROCESSING...' : `Register by ${regMethod === 'email' ? 'EMAIL' : 'SMS'} Access`}</span>
+                            <span className="relative z-10">{loading ? 'Processing…' : `Register by ${regMethod === 'email' ? 'email' : 'SMS'}`}</span>
                         </button>
                     </form>
 
-                    <div className="mt-8 pt-6 border-t border-white/5 text-center">
-                        <span className="text-gray-500 text-xs font-medium mr-2">Already have an account?</span>
-                        <Link href="/login" className="text-xs font-black text-[#00f2ff] uppercase tracking-widest hover:text-white transition-colors">
-                            Sign In to Portal
+                    <div className="mt-8 pt-6 border-t border-border text-center">
+                        <span className="text-muted-foreground text-xs font-medium mr-2">Already have an account?</span>
+                        <Link href="/login" className="text-xs font-black text-primary uppercase tracking-widest hover:underline transition-colors">
+                            Sign in
                         </Link>
                     </div>
                 </div>

@@ -8,9 +8,6 @@ const nextConfig: NextConfig = {
     },
     proxyClientMaxBodySize: '2gb',
   },
-  env: {
-    NEXT_PUBLIC_DEBUG: '1', // Set to '1' for Development
-  },
   async headers() {
     return [
       {
@@ -24,18 +21,24 @@ const nextConfig: NextConfig = {
     ];
   },
   async rewrites() {
+    // The API the proxy forwards to. In production the API runs next to this app on 127.0.0.1:8862.
+    // For local development against a remote API set API_UPSTREAM in .env.local (gitignored), e.g.
+    // API_UPSTREAM=http://<api-host>:8862 -- server-side only, never exposed to the browser.
+    const upstream = (process.env.API_UPSTREAM || 'http://127.0.0.1:8862').replace(/\/$/, '');
     return [
       {
         source: '/api/:path*',
-        destination: 'http://127.0.0.1:8862/api/:path*' // Proxy to Backend
+        destination: `${upstream}/api/:path*` // Proxy to Backend
       },
       {
         source: '/media/:path*',
-        destination: 'http://127.0.0.1:8862/media/:path*' // Proxy to Backend Static Files
+        destination: `${upstream}/media/:path*` // Proxy to Backend Static Files
       },
       {
+        // Needed only while a 2.7.x API is deployed (static screenshot files). The 2.8 API serves
+        // screenshots via GET /api/v1/devices/{id}/screenshot and answers 404 here, which is harmless.
         source: '/screenshots/:path*',
-        destination: 'http://127.0.0.1:8862/screenshots/:path*' // Proxy to Backend Screenshots
+        destination: `${upstream}/screenshots/:path*`
       }
     ]
   }

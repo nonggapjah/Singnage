@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { deviceApi } from '@/features/devices/api/device-api';
 import { generateId } from '@/lib/utils';
+import { setDeviceToken } from '@/lib/device-token';
 // import { useUI } from '@/features/ui/context/UIContext'; // Removed unused import
 
 interface DeviceRegistrationProps {
@@ -40,11 +41,17 @@ export const DeviceRegistration: React.FC<DeviceRegistrationProps> = ({ onRegist
                 deviceName: name,
                 branchCode: branch,
                 location: location || undefined,
-                ipAddress: '127.0.0.1' // Frontend placeholder, backend should resolve real IP if needed
+                ipAddress: '127.0.0.1', // Frontend placeholder, backend should resolve real IP if needed
+                // Contract T1: only a client that will store and send the token asks for one, so
+                // an older player re-registering never gets a token it would silently drop.
+                tokenCapable: true,
             });
 
             if (response && response.success && response.data) {
-                const { deviceId, deviceUuid } = response.data;
+                const { deviceId, deviceUuid, deviceToken } = response.data;
+                // Per-device secret issued by the API (absent on an older server): sent as
+                // X-Device-Token on every heartbeat / ack / log upload from now on.
+                if (deviceToken) setDeviceToken(deviceToken);
                 // We prioritize UUID (string) for persistence to match system expected display
                 const persistentId = deviceUuid || deviceId;
 
@@ -64,9 +71,10 @@ export const DeviceRegistration: React.FC<DeviceRegistrationProps> = ({ onRegist
                 const debugInfo = JSON.stringify(response);
                 throw new Error((response?.message || 'Invalid response: ') + debugInfo);
             }
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error('Registration error:', err);
-            setError(`Registration failed: ${err.message || 'Server Unreachable'}`);
+            const message = err instanceof Error ? err.message : '';
+            setError(`Registration failed: ${message || 'Server Unreachable'}`);
         } finally {
             setLoading(false);
         }
@@ -80,7 +88,7 @@ export const DeviceRegistration: React.FC<DeviceRegistrationProps> = ({ onRegist
 
             <div className="w-full max-w-md relative animate-[zoomIn_0.7s_ease-out]">
                 <div className="text-center mb-8">
-                    <h1 className="text-4xl font-black uppercase tracking-tighter mb-2 text-transparent bg-clip-text bg-gradient-to-b from-white to-gray-400 drop-shadow-[0_0_15px_rgba(0,242,255,0.5)]">
+                    <h1 className="text-4xl font-black uppercase tracking-tighter mb-2 text-white">
                         DEVICE SETUP
                     </h1>
                     <p className="text-xs font-bold text-gray-500 uppercase tracking-[0.2em]">One-Time Registration Protocol</p>

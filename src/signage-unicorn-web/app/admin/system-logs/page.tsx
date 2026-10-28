@@ -1,8 +1,11 @@
 'use client';
 
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { apiFetch } from '@/lib/api-fetch';
 import { useUI } from '@/features/ui/context/UIContext';
+import { useVisibleInterval } from '@/features/ui/hooks/useVisibleInterval';
+import { localInputToApiFilter } from '@/features/ui/utils/datetime';
+import { getCapabilities } from '@/lib/api-capabilities';
 
 interface SystemLog {
     logId: string;
@@ -64,30 +67,15 @@ export default function SystemLogsPage() {
     };
 
     const [filterType, setFilterType] = useState<string>('CRITICAL');
-    const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-    const dropdownRef = useRef<HTMLDivElement>(null);
     const [page, setPage] = useState(1);
     const pageSize = 50;
 
-    // Close dropdown when clicking outside
-    useEffect(() => {
-        function handleClickOutside(event: MouseEvent) {
-            if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-                setIsDropdownOpen(false);
-            }
-        }
-        document.addEventListener("mousedown", handleClickOutside);
-        return () => {
-            document.removeEventListener("mousedown", handleClickOutside);
-        };
-    }, []);
-
     const logLevels = [
-        { value: 'ALL', label: 'ALL LEVELS' },
-        { value: 'INFO', label: 'INFO' },
-        { value: 'WARNING', label: 'WARNING' },
-        { value: 'ERROR', label: 'ERROR' },
-        { value: 'DEBUG', label: 'DEBUG' },
+        { value: 'ALL', label: 'All levels' },
+        { value: 'INFO', label: 'Info' },
+        { value: 'WARNING', label: 'Warning' },
+        { value: 'ERROR', label: 'Error' },
+        { value: 'DEBUG', label: 'Debug' },
     ];
 
     // Data State
@@ -98,9 +86,11 @@ export default function SystemLogsPage() {
     const fetchLogs = useCallback(async () => {
         setLoading(true);
         try {
+            // Local wall-clock inputs -> UTC "Z" on a 2.8+ API, bare local string on 2.7.x (#18).
+            const { utcFilters } = await getCapabilities();
             const query = new URLSearchParams({
-                startDate: `${startDate}T${startTime}:00`,
-                endDate: `${endDate}T${endTime}:59`,
+                startDate: localInputToApiFilter(`${startDate}T${startTime}:00`, utcFilters),
+                endDate: localInputToApiFilter(`${endDate}T${endTime}:59`, utcFilters),
                 page: page.toString(),
                 pageSize: pageSize.toString()
             });
@@ -130,19 +120,14 @@ export default function SystemLogsPage() {
         fetchLogs();
     }, [fetchLogs]);
 
-    useEffect(() => {
-        let interval: NodeJS.Timeout;
-        if (autoRefresh) {
-            interval = setInterval(fetchLogs, 5000);
-        }
-        return () => clearInterval(interval);
-    }, [autoRefresh, fetchLogs]);
+    // Live mode polls every 5s while the tab is visible.
+    useVisibleInterval(fetchLogs, autoRefresh ? 5000 : null);
 
     const getTypeColor = (type: string) => {
         switch (type) {
-            case 'ERROR': return 'text-red-500 bg-red-500/10 border-red-500/20';
-            case 'WARNING': return 'text-yellow-400 bg-yellow-400/10 border-yellow-400/20';
-            case 'DEBUG': return 'text-gray-400 bg-gray-500/10 border-gray-500/20';
+            case 'ERROR': return 'text-red-600 dark:text-red-400 bg-red-500/10 border-red-500/20';
+            case 'WARNING': return 'text-yellow-700 dark:text-yellow-400 bg-yellow-400/10 border-yellow-400/20';
+            case 'DEBUG': return 'text-muted-foreground bg-muted/20 border-border';
             default: return 'text-accent-cyan bg-accent-cyan/10 border-accent-cyan/20';
         }
     };
@@ -151,127 +136,141 @@ export default function SystemLogsPage() {
 
     const handleCleanup = () => {
         showConfirm(
-            'PURGE OLD LOGS',
-            'Are you sure you want to remove all system logs older than 30 days? This action cannot be undone.',
+            'Delete old logs',
+            'Remove all system logs older than the configured retention period? This cannot be undone.',
             async () => {
                 try {
                     const res = await apiFetch('/logs', { method: 'DELETE' });
                     if (res.success) {
-                        showNotify('CLEANUP SUCCESS', 'System logs older than 30 days have been purged.', 'SUCCESS');
+                        showNotify('Cleanup complete', 'Old system logs have been deleted.', 'SUCCESS');
                         fetchLogs();
                     } else {
-                        showNotify('CLEANUP FAILED', res.message || 'Purge failed', 'ERROR');
+                        showNotify('Cleanup failed', res.message || 'Delete failed', 'ERROR');
                     }
-                } catch (e) {
-                    showNotify('CRITICAL ERROR', 'Failed to communicate with purge engine.', 'ERROR');
+                } catch {
+                    showNotify('Error', 'Could not reach the API.', 'ERROR');
                 }
             },
             'DANGER'
         );
     };
 
+    const fieldClass = 'bg-background border border-border rounded-lg px-3 py-1.5 text-xs text-foreground font-mono focus:outline-none focus:border-accent-cyan focus:ring-1 focus:ring-accent-cyan/30 transition-colors dark:[color-scheme:dark]';
+    const labelClass = 'text-xs font-black text-muted-foreground uppercase tracking-widest ml-1';
+
     return (
         <div className="p-8 space-y-8 min-h-screen">
             {/* Header */}
             <div className="flex flex-col md:flex-row justify-between items-end gap-6">
                 <div>
-                    <h1 className="text-4xl font-black uppercase tracking-tighter neon-text mb-2">System Logs</h1>
-                    <p className="text-xs font-bold text-muted-foreground uppercase tracking-[0.3em]">
-                        Real-time Activity & Diagnostics
+                    <h1 className="text-4xl font-black uppercase tracking-tighter neon-text mb-2">System logs</h1>
+                    <p className="text-sm font-bold text-muted-foreground">
+                        Events reported by the API and the screens
                     </p>
                 </div>
 
                 {/* Filters */}
                 <div className="flex flex-col gap-4">
-                    <div className="flex gap-2 justify-end mb-1">
-                        {['today', 'yesterday', 'week'].map((r) => (
+                    <div className="flex gap-2 justify-end mb-1" role="group" aria-label="Quick date ranges">
+                        {(['today', 'yesterday', 'week'] as const).map((r) => (
                             <button
+                                type="button"
                                 key={r}
-                                onClick={() => setQuickRange(r as any)}
-                                className="px-3 py-1 text-[10px] font-black uppercase tracking-widest bg-muted/10 border border-border hover:border-accent-cyan rounded-full text-muted-foreground hover:text-accent-cyan transition-all"
+                                onClick={() => setQuickRange(r)}
+                                className="px-3 py-1 text-xs font-black uppercase tracking-widest bg-muted/10 border border-border hover:border-accent-cyan rounded-full text-muted-foreground hover:text-accent-cyan transition-colors"
                             >
-                                {r}
+                                {r === 'week' ? 'Last 7 days' : r}
                             </button>
                         ))}
                     </div>
 
-                    <div className="glass-panel p-2 rounded-xl border border-border flex flex-wrap gap-2 items-center">
+                    <div className="glass-panel p-2 rounded-xl flex flex-wrap gap-2 items-end">
                         <div className="flex flex-col gap-1">
-                            <label className="text-[10px] font-black text-muted-foreground uppercase tracking-widest ml-1">Start (24H)</label>
+                            <label htmlFor="logs-start-date" className={labelClass}>Start (24h)</label>
                             <div className="flex gap-1">
                                 <input
+                                    id="logs-start-date"
                                     type="date"
                                     value={startDate}
                                     onChange={(e) => setStartDate(e.target.value)}
-                                    className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs text-foreground font-mono focus:outline-none focus:border-accent-cyan transition-colors dark:[color-scheme:dark]"
+                                    className={fieldClass}
                                 />
                                 <input
+                                    id="logs-start-time"
+                                    aria-label="Start time"
                                     type="time"
                                     value={startTime}
                                     onChange={(e) => setStartTime(e.target.value)}
-                                    className="bg-background border border-border rounded-lg px-2 py-1.5 text-xs text-foreground font-mono focus:outline-none focus:border-accent-cyan transition-colors dark:[color-scheme:dark] w-20"
+                                    className={`${fieldClass} w-24`}
                                 />
                             </div>
                         </div>
                         <div className="flex flex-col gap-1">
-                            <label className="text-[10px] font-black text-muted-foreground uppercase tracking-widest ml-1">End (24H)</label>
+                            <label htmlFor="logs-end-date" className={labelClass}>End (24h)</label>
                             <div className="flex gap-1">
                                 <input
+                                    id="logs-end-date"
                                     type="date"
                                     value={endDate}
                                     onChange={(e) => setEndDate(e.target.value)}
-                                    className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs text-foreground font-mono focus:outline-none focus:border-accent-cyan transition-colors dark:[color-scheme:dark]"
+                                    className={fieldClass}
                                 />
                                 <input
+                                    id="logs-end-time"
+                                    aria-label="End time"
                                     type="time"
                                     value={endTime}
                                     onChange={(e) => setEndTime(e.target.value)}
-                                    className="bg-background border border-border rounded-lg px-2 py-1.5 text-xs text-foreground font-mono focus:outline-none focus:border-accent-cyan transition-colors dark:[color-scheme:dark] w-20"
+                                    className={`${fieldClass} w-24`}
                                 />
                             </div>
                         </div>
 
                         <div className="flex flex-col gap-1 relative">
-                            <label className="text-[10px] font-black text-muted-foreground uppercase tracking-widest ml-1">Level</label>
+                            <label htmlFor="logs-level" className={labelClass}>Level</label>
                             <select
+                                id="logs-level"
                                 value={filterType}
-                                onChange={(e) => setFilterType(e.target.value)}
-                                className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs text-foreground font-bold uppercase focus:outline-none focus:border-accent-cyan transition-colors h-[34px] min-w-[140px] appearance-none"
-                                style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' fill=\'none\' viewBox=\'0 0 24 24\' stroke=\'white\'%3E%3Cpath stroke-linecap=\'round\' stroke-linejoin=\'round\' stroke-width=\'2\' d=\'M19 9l-7 7-7-7\'%3E%3C/path%3E%3C/svg%3E")', backgroundRepeat: 'no-repeat', backgroundPosition: 'right 10px center', backgroundSize: '12px' }}
+                                onChange={(e) => { setFilterType(e.target.value); setPage(1); }}
+                                className="bg-background border border-border rounded-lg px-3 py-1.5 text-xs text-foreground font-bold uppercase focus:outline-none focus:border-accent-cyan transition-colors h-[34px] min-w-[160px]"
                             >
+                                <option value="CRITICAL">Warnings + errors</option>
+                                <option value="ERROR_ONLY">Errors only</option>
                                 {logLevels.map((level) => (
-                                    <option key={level.value} value={level.value} className="bg-card text-foreground">
+                                    <option key={level.value} value={level.value}>
                                         {level.label}
                                     </option>
                                 ))}
-                                <option value="CRITICAL" className="bg-card text-red-400 font-bold">⚠️ CRITICAL ONLY (WRN+ERR)</option>
-                                <option value="ERROR_ONLY" className="bg-card text-red-500 font-black">🛑 ERRORS ONLY</option>
                             </select>
                         </div>
 
-                        <div className="w-px h-8 bg-border mx-2"></div>
+                        <div className="w-px h-8 bg-border mx-2 hidden sm:block" aria-hidden="true"></div>
 
                         <button
+                            type="button"
                             onClick={() => setAutoRefresh(!autoRefresh)}
-                            className={`px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest transition-all border ${autoRefresh
-                                ? 'bg-accent-cyan/10 border-accent-cyan text-accent-cyan shadow-[0_0_10px_rgba(34,211,238,0.2)]'
+                            aria-pressed={autoRefresh}
+                            className={`px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest transition-colors border ${autoRefresh
+                                ? 'bg-accent-cyan/10 border-accent-cyan text-accent-cyan'
                                 : 'bg-muted/20 border-border text-muted-foreground hover:text-foreground'
                                 }`}
                         >
-                            {autoRefresh ? 'Live On' : 'Live Off'}
+                            {autoRefresh ? 'Live: on' : 'Live: off'}
                         </button>
 
                         <button
+                            type="button"
                             onClick={handleCleanup}
-                            className="px-4 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-500 text-xs font-black uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all shadow-[0_0_10px_rgba(239,68,68,0.1)]"
-                            title="Purge logs older than 30 days"
+                            className="px-4 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 text-xs font-black uppercase tracking-widest hover:bg-red-500 hover:text-white transition-colors"
+                            title="Delete logs older than the retention period"
                         >
                             Cleanup
                         </button>
 
                         <button
+                            type="button"
                             onClick={() => fetchLogs()}
-                            className="px-6 py-2 rounded-lg bg-accent-cyan text-black text-xs font-black uppercase tracking-widest hover:bg-cyan-300 transition-all shadow-[0_0_15px_rgba(34,211,238,0.3)]"
+                            className="px-6 py-2 rounded-lg bg-accent-cyan text-black text-xs font-black uppercase tracking-widest hover:bg-cyan-300 transition-colors"
                         >
                             Refresh
                         </button>
@@ -280,23 +279,23 @@ export default function SystemLogsPage() {
             </div>
 
             {/* Content */}
-            <div className="glass-panel p-1 rounded-2xl overflow-hidden border border-border/50 min-h-[600px] flex flex-col">
+            <div className="glass-panel p-1 rounded-2xl overflow-hidden min-h-[600px] flex flex-col" aria-busy={loading}>
                 <div className="overflow-x-auto">
                     <table className="w-full text-left border-collapse">
                         <thead>
                             <tr className="border-b border-border/50 bg-muted/10">
-                                <th className="p-4 w-48 text-xs font-black text-muted-foreground uppercase tracking-widest">Timestamp</th>
-                                <th className="p-4 w-24 text-xs font-black text-muted-foreground uppercase tracking-widest">Level</th>
-                                <th className="p-4 w-32 text-xs font-black text-muted-foreground uppercase tracking-widest">Source</th>
-                                <th className="p-4 w-48 text-xs font-black text-muted-foreground uppercase tracking-widest">Device ID</th>
-                                <th className="p-4 text-xs font-black text-muted-foreground uppercase tracking-widest">Message</th>
+                                <th scope="col" className="p-4 w-48 text-xs font-black text-muted-foreground uppercase tracking-widest">Timestamp</th>
+                                <th scope="col" className="p-4 w-24 text-xs font-black text-muted-foreground uppercase tracking-widest">Level</th>
+                                <th scope="col" className="p-4 w-32 text-xs font-black text-muted-foreground uppercase tracking-widest">Source</th>
+                                <th scope="col" className="p-4 w-48 text-xs font-black text-muted-foreground uppercase tracking-widest">Device ID</th>
+                                <th scope="col" className="p-4 text-xs font-black text-muted-foreground uppercase tracking-widest">Message</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-border/30">
                             {loading && logs.length === 0 ? (
                                 <tr>
                                     <td colSpan={5} className="p-20 text-center">
-                                        <div className="animate-pulse text-accent-cyan tracking-widest text-xs uppercase font-bold">Retrieving System Events...</div>
+                                        <div className="text-accent-cyan tracking-widest text-xs uppercase font-bold" role="status">Loading…</div>
                                     </td>
                                 </tr>
                             ) : logs.map((log, index) => (
@@ -309,17 +308,17 @@ export default function SystemLogsPage() {
                                             {log.logType}
                                         </span>
                                     </td>
-                                    <td className="p-4 text-xs font-bold text-muted-foreground/70 uppercase tracking-widest">
+                                    <td className="p-4 text-xs font-bold text-muted-foreground uppercase tracking-widest">
                                         {log.source || 'API'}
                                     </td>
                                     <td className="p-4 text-xs font-mono text-muted-foreground">
                                         {log.deviceId ? (
-                                            <span className="text-accent-purple bg-accent-purple/5 px-2 py-0.5 rounded">{log.deviceId.substring(0, 8)}...</span>
+                                            <span className="text-accent-purple bg-accent-purple/5 px-2 py-0.5 rounded" title={log.deviceId}>{log.deviceId.substring(0, 8)}…</span>
                                         ) : (
-                                            <span className="opacity-30">-</span>
+                                            <span className="opacity-40">-</span>
                                         )}
                                     </td>
-                                    <td className="p-4 text-xs text-foreground/80 break-all font-medium leading-relaxed">
+                                    <td className="p-4 text-xs text-foreground/90 break-all font-medium leading-relaxed">
                                         {log.message}
                                     </td>
                                 </tr>
@@ -327,7 +326,7 @@ export default function SystemLogsPage() {
                             {!loading && logs.length === 0 && (
                                 <tr>
                                     <td colSpan={5} className="p-20 text-center text-muted-foreground text-xs uppercase tracking-widest">
-                                        No logs found matching criteria
+                                        No logs match the current filters
                                     </td>
                                 </tr>
                             )}
@@ -336,27 +335,29 @@ export default function SystemLogsPage() {
                 </div>
 
                 {/* Pagination */}
-                <div className="mt-auto p-4 border-t border-border/50 flex justify-between items-center bg-muted/5">
+                <nav className="mt-auto p-4 border-t border-border/50 flex justify-between items-center bg-muted/5" aria-label="Pagination">
                     <div className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                        Showing Page {page}
+                        Page {page}
                     </div>
                     <div className="flex gap-2">
                         <button
+                            type="button"
                             onClick={() => setPage(p => Math.max(1, p - 1))}
                             disabled={page === 1}
-                            className="px-4 py-2 rounded-lg bg-muted/20 border border-border text-xs font-black uppercase tracking-widest hover:bg-muted/40 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                            className="px-4 py-2 rounded-lg bg-muted/20 border border-border text-xs font-black uppercase tracking-widest hover:bg-muted/40 disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-foreground"
                         >
                             Previous
                         </button>
                         <button
+                            type="button"
                             onClick={() => setPage(p => p + 1)}
                             disabled={logs.length < pageSize}
-                            className="px-4 py-2 rounded-lg bg-muted/20 border border-border text-xs font-black uppercase tracking-widest hover:bg-muted/40 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                            className="px-4 py-2 rounded-lg bg-muted/20 border border-border text-xs font-black uppercase tracking-widest hover:bg-muted/40 disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-foreground"
                         >
                             Next
                         </button>
                     </div>
-                </div>
+                </nav>
             </div>
         </div>
     );

@@ -10,7 +10,7 @@ const notoThai = Noto_Sans_Thai({
 
 export const metadata: Metadata = {
   title: "Signage Unicorn | Admin Console",
-  description: "Enterprise Signage Network Management",
+  description: "Digital signage network management",
   manifest: "/manifest.json",
 };
 
@@ -27,9 +27,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="th">
+    // The interface copy is English; Thai content inside pages should carry lang="th" on its element.
+    <html lang="en">
       <body className={`${notoThai.variable} font-sans antialiased bg-background text-foreground min-h-screen text-base leading-relaxed`}>
-        <div className="fixed inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(0,242,255,0.05)_0%,transparent_50%)] pointer-events-none" />
         <Providers>
           <ServiceWorkerRegistration />
           <main className="relative z-10">

@@ -1,5 +1,27 @@
-import { apiFetch, ApiResponse } from '@/lib/api-fetch';
-import { Playlist } from '../types/playlist';
+import { apiFetch, ApiResponse, type ApiFetchInit } from '@/lib/api-fetch';
+import { Playlist, PlaylistItem } from '../types/playlist';
+
+/**
+ * The API returns playlist items flat (fileName/blobUrl/originalDuration on the item). The player
+ * and editor expect a nested `media` object. Shared by getById and the device schedule endpoint.
+ */
+export function mapPlaylistItems(apiItems: any[]): PlaylistItem[] {
+    return (apiItems || []).map((item: any) => ({
+        ...item,
+        media: {
+            mediaId: item.mediaId,
+            fileName: item.fileName,
+            displayName: item.displayName || item.fileName,
+            blobUrl: item.blobUrl,
+            durationSec: item.originalDuration || 0,
+            ratio: item.ratio,
+            fileSizeKb: item.fileSizeKB || 0,
+            fileHash: item.fileHash || item.file_hash || undefined,
+            uploadedAt: '',
+            active: 'Y'
+        }
+    }));
+}
 
 export const playlistApi = {
     getAll: async (onlyActive: boolean = false, searchTerm?: string): Promise<ApiResponse<Playlist[]>> => {
@@ -14,30 +36,15 @@ export const playlistApi = {
         return apiFetch('/playlists/active');
     },
 
-    getById: async (id: string): Promise<ApiResponse<Playlist>> => {
-        const res = await apiFetch<Playlist>(`/playlists/${id}`);
+    /** `init` lets the web player pass `{ scope: 'device', deviceToken }` so the call uses the device base URL (round-4 #9). */
+    getById: async (id: string, init?: ApiFetchInit): Promise<ApiResponse<Playlist>> => {
+        const res = await apiFetch<Playlist>(`/playlists/${id}`, init);
         if (res.success && res.data) {
-            const apiItems = res.data.items || [];
-            const mappedItems = apiItems.map((item: any) => ({
-                ...item,
-                media: {
-                    mediaId: item.mediaId,
-                    fileName: item.fileName,
-                    displayName: item.displayName || item.fileName,
-                    blobUrl: item.blobUrl,
-                    durationSec: item.originalDuration || 0,
-                    ratio: item.ratio,
-                    fileSizeKb: item.fileSizeKB || 0,
-                    uploadedAt: '',
-                    active: 'Y'
-                }
-            }));
-
             return {
                 ...res,
                 data: {
                     ...res.data,
-                    items: mappedItems
+                    items: mapPlaylistItems(res.data.items || [])
                 }
             };
         }

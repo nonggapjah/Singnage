@@ -15,20 +15,20 @@ const PlaylistsContent = () => {
     };
 
     return (
-        <div className="min-h-screen p-8 lg:p-12">
-            <header className="flex items-center justify-between mb-12">
+        <div className="min-h-screen p-8 lg:p-12 bg-background text-foreground">
+            <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-12">
                 <div>
-                    <h1 className="text-4xl font-bold tracking-tight mb-2">Playlist <span className="text-cyan-400">Management</span></h1>
-                    <p className="text-white/50">Create and organize media delivery for your signage network.</p>
+                    <h1 className="text-4xl font-bold tracking-tight mb-2">Playlist <span className="text-accent-cyan">management</span></h1>
+                    <p className="text-muted-foreground">Create and organize media delivery for your signage network.</p>
                 </div>
-                <button className="btn-primary flex items-center gap-2">
-                    <span>+</span> Create New Playlist
+                <button type="button" className="btn-primary flex items-center gap-2" onClick={() => setEditorOpen(true)}>
+                    <span aria-hidden="true">+</span> Create new playlist
                 </button>
             </header>
 
             {loading ? (
-                <div className="flex items-center justify-center py-20">
-                    <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-cyan-400"></div>
+                <div className="flex items-center justify-center py-20" role="status" aria-label="Loading playlists">
+                    <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-accent-cyan"></div>
                 </div>
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
@@ -51,7 +51,8 @@ const PlaylistsContent = () => {
 
             {editorOpen && (
                 <div
-                    className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40"
+                    className="fixed inset-0 bg-black/40 z-40"
+                    aria-hidden="true"
                     onClick={() => setEditorOpen(false)}
                 />
             )}

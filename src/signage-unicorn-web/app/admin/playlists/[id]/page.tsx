@@ -16,12 +16,6 @@ export default function PlaylistDetailPage() {
     const [playlist, setPlaylist] = useState<Playlist | undefined>(undefined);
     const [loading, setLoading] = useState(!isNew);
 
-    useEffect(() => {
-        if (!isNew) {
-            loadPlaylist();
-        }
-    }, [id]);
-
     const loadPlaylist = async () => {
         setLoading(true);
         const res = await playlistApi.getById(id);
@@ -30,6 +24,13 @@ export default function PlaylistDetailPage() {
         }
         setLoading(false);
     };
+
+    useEffect(() => {
+        if (!isNew) {
+            loadPlaylist();
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [id]);
 
     const handleSave = async (data: Partial<Playlist>) => {
         let res;
@@ -49,17 +50,15 @@ export default function PlaylistDetailPage() {
 
     return (
         <div className="p-8 space-y-8 max-w-5xl mx-auto">
-            <nav className="text-sm text-gray-500 flex items-center gap-2">
+            <nav className="text-sm text-muted-foreground flex items-center gap-2" aria-label="Breadcrumb">
                 <Link href="/admin/playlists" className="hover:text-accent-cyan transition-colors">Playlists</Link>
-                <span>/</span>
-                <span className="text-gray-300 font-medium">{isNew ? 'Create New' : 'Edit Playlist'}</span>
+                <span aria-hidden="true">/</span>
+                <span className="text-foreground font-medium" aria-current="page">{isNew ? 'Create new' : 'Edit playlist'}</span>
             </nav>
 
-
-
             {loading ? (
-                <div className="h-64 flex items-center justify-center">
-                    <div className="text-accent-purple text-xl font-mono tracking-widest animate-pulse">DECRYPTING PLAYLIST DATA...</div>
+                <div className="h-64 flex items-center justify-center" role="status">
+                    <div className="text-accent-purple text-xl font-mono tracking-widest">Loading playlist…</div>
                 </div>
             ) : (
                 <PlaylistEditor initialData={playlist} onSave={handleSave} />

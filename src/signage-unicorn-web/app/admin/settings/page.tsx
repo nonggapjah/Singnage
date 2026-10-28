@@ -85,8 +85,8 @@ function SystemConfigPanel() {
             } else {
                 alert("Error: " + res.message);
             }
-        } catch (e: any) {
-            alert("Execution Failed: " + (e.message || "Unknown error"));
+        } catch (e) {
+            alert("Execution Failed: " + (e instanceof Error ? e.message : "Unknown error"));
         } finally {
             setLoading(false);
         }
@@ -99,86 +99,94 @@ function SystemConfigPanel() {
             const res = await apiFetch('/server/sync-media', { method: 'POST' });
             if (res.success) alert("Media Paths Synchronized!");
             else alert("Failed: " + res.message);
-        } catch (e: any) {
-            alert("Error: " + e.message);
+        } catch (e) {
+            alert("Error: " + (e instanceof Error ? e.message : "Unknown error"));
         } finally {
             setLoading(false);
         }
     };
 
+    const inputClass = 'bg-muted/20 border border-border rounded-xl px-4 py-3 outline-none focus:border-accent-cyan focus:ring-1 focus:ring-accent-cyan/30 text-base text-foreground placeholder:text-muted-foreground/70 transition-colors';
+
     return (
-        <div className="space-y-4 font-mono text-sm border border-accent-cyan/20 p-6 rounded-2xl bg-accent-cyan/5 relative min-h-[400px]">
+        <section className="space-y-4 font-mono text-sm border border-accent-cyan/20 p-6 rounded-2xl bg-accent-cyan/5 relative min-h-[400px]" aria-labelledby="network-config-title" aria-busy={refreshing && !config}>
             {(refreshing && !config) && (
-                <div className="absolute inset-0 z-10 bg-black/50 backdrop-blur-sm flex items-center justify-center rounded-2xl">
-                    <div className="text-accent-cyan animate-pulse font-bold tracking-widest">CONNECTING TO SYSTEM...</div>
+                <div className="absolute inset-0 z-10 bg-background/80 flex items-center justify-center rounded-2xl" role="status">
+                    <div className="text-accent-cyan font-bold tracking-widest">Loading…</div>
                 </div>
             )}
 
             {!config && !refreshing && (
-                <div className="absolute inset-0 z-10 bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center rounded-2xl space-y-4">
-                    <div className="text-red-500 font-bold uppercase tracking-widest">Connection Failed</div>
-                    <button onClick={loadConfig} className="px-6 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-white font-bold">RETRY CONNECTION</button>
+                <div className="absolute inset-0 z-10 bg-background/90 flex flex-col items-center justify-center rounded-2xl space-y-4" role="alert">
+                    <div className="text-red-500 font-bold uppercase tracking-widest">Connection failed</div>
+                    <button type="button" onClick={loadConfig} className="px-6 py-2 bg-muted/30 hover:bg-muted/50 rounded-lg text-foreground font-bold">Retry</button>
                 </div>
             )}
 
-            <div className="flex justify-between items-start">
+            <div className="flex justify-between items-start gap-4">
                 <div>
-                    <h3 className="font-bold text-accent-cyan text-lg mb-1">Network Configuration</h3>
-                    <p className="text-gray-400 text-xs">Update system IP to allow LAN access</p>
+                    <h3 id="network-config-title" className="font-bold text-accent-cyan text-lg mb-1">Network configuration</h3>
+                    <p className="text-muted-foreground text-xs">Update the server IP to allow LAN access</p>
                 </div>
                 <div className="text-right">
-                    <span className="text-xs uppercase text-gray-500 block">Detected Local IP</span>
-                    <span className="text-green-400 font-bold text-lg">{config?.detectedIp || '---'}</span>
+                    <span className="text-xs uppercase text-muted-foreground block">Detected local IP</span>
+                    <span className="text-green-600 dark:text-green-400 font-bold text-lg">{config?.detectedIp || '---'}</span>
                 </div>
             </div>
 
-            <div className="bg-black/40 p-4 rounded-xl space-y-2 border border-white/5">
-                <p className="text-xs uppercase text-gray-500">Current API Base URL</p>
-                <div className="flex items-center gap-2">
-                    <code className="text-white/80">{config?.currentBaseUrl || 'Thinking...'}</code>
+            <div className="bg-muted/20 p-4 rounded-xl space-y-2 border border-border/50">
+                <p className="text-xs uppercase text-muted-foreground">Current API base URL</p>
+                <div className="flex items-center gap-2 flex-wrap">
+                    <code className="text-foreground/90 break-all">{config?.currentBaseUrl || '…'}</code>
                     {config?.currentBaseUrl?.includes("localhost") && (
-                        <span className="text-xs bg-yellow-500/20 text-yellow-500 px-2 py-0.5 rounded">LOCALHOST (Restricted)</span>
+                        <span className="text-xs bg-yellow-500/20 text-yellow-700 dark:text-yellow-400 px-2 py-0.5 rounded">localhost (restricted)</span>
                     )}
                 </div>
             </div>
 
             {/* Sync Button */}
-            <div className="bg-black/40 p-4 rounded-xl flex justify-between items-center border border-white/5">
+            <div className="bg-muted/20 p-4 rounded-xl flex justify-between items-center gap-4 border border-border/50">
                 <div>
-                    <p className="text-xs uppercase text-gray-500 font-bold">Media Database Sync</p>
-                    <p className="text-xs text-gray-400">Fix broken media links if IP changed manually</p>
+                    <p className="text-xs uppercase text-muted-foreground font-bold">Media database sync</p>
+                    <p className="text-xs text-muted-foreground">Fix broken media links if the IP changed manually</p>
                 </div>
                 <button
+                    type="button"
                     onClick={handleSyncMedia}
                     disabled={loading}
-                    className="bg-white/10 hover:bg-white/20 px-4 py-2 rounded-lg text-xs font-bold border border-white/10 transition-all hover:text-accent-cyan hover:border-accent-cyan/50"
+                    className="bg-muted/30 hover:bg-muted/50 px-4 py-2 rounded-lg text-xs font-bold border border-border transition-colors hover:text-accent-cyan hover:border-accent-cyan/50 text-foreground disabled:opacity-50 shrink-0"
                 >
-                    SYNC DB PATHS
+                    Sync DB paths
                 </button>
             </div>
 
-            <div className="pt-4 border-t border-white/10 space-y-4">
+            <div className="pt-4 border-t border-border space-y-4">
                 <div className="space-y-2">
-                    <label className="text-xs uppercase text-gray-500 font-bold block">New Host IP Address</label>
+                    <label htmlFor="settings-ip" className="text-xs uppercase text-muted-foreground font-bold block">New host IP address</label>
                     <div className="flex gap-2">
                         <input
+                            id="settings-ip"
                             type="text"
+                            inputMode="decimal"
                             value={newIp}
                             onChange={(e) => setNewIp(e.target.value)}
-                            className="flex-[3] bg-black/60 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-accent-cyan text-base"
+                            className={`flex-[3] min-w-0 ${inputClass}`}
                             placeholder="e.g. 192.168.1.10"
                         />
                         <input
+                            id="settings-api-port"
                             type="number"
+                            aria-label="API port"
                             value={newPort}
                             onChange={(e) => setNewPort(parseInt(e.target.value))}
-                            className="flex-1 bg-black/60 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-accent-cyan text-base text-center"
+                            className={`flex-1 min-w-0 text-center ${inputClass}`}
                             placeholder="Port"
                         />
                         <button
+                            type="button"
                             onClick={() => setNewIp(config?.detectedIp || '')}
-                            className="px-4 py-2 bg-white/5 hover:bg-white/10 rounded-xl text-xs uppercase font-bold text-gray-400 border border-white/5"
-                            title="Use Detected IP"
+                            className="px-4 py-2 bg-muted/20 hover:bg-muted/40 rounded-xl text-xs uppercase font-bold text-muted-foreground border border-border transition-colors"
+                            title="Use detected IP"
                         >
                             Auto
                         </button>
@@ -186,28 +194,30 @@ function SystemConfigPanel() {
                 </div>
 
                 <div className="space-y-2">
-                    <label className="text-xs uppercase text-gray-500 font-bold block">Frontend Port (Dashboard)</label>
+                    <label htmlFor="settings-web-port" className="text-xs uppercase text-muted-foreground font-bold block">Dashboard (web) port</label>
                     <input
+                        id="settings-web-port"
                         type="number"
                         value={newFrontendPort}
                         onChange={(e) => setNewFrontendPort(parseInt(e.target.value))}
-                        className="w-full bg-black/60 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-accent-cyan text-base"
-                        placeholder="Default 3000"
+                        className={`w-full ${inputClass}`}
+                        placeholder="8865"
                     />
-                    <p className="text-xs text-gray-500">
-                        Entering <b>{newIp || '...'}</b> will set API to <b>http://{newIp || '...'}:{newPort}</b> and Frontend to <b>:{newFrontendPort}</b>
+                    <p className="text-xs text-muted-foreground">
+                        Entering <b>{newIp || '...'}</b> will set the API to <b>http://{newIp || '...'}:{newPort}</b> and the dashboard to <b>:{newFrontendPort}</b>
                     </p>
                 </div>
 
                 <button
+                    type="button"
                     onClick={handleExecute}
                     disabled={loading}
-                    className="w-full py-4 bg-accent-cyan text-black font-black uppercase tracking-widest rounded-xl hover:shadow-[0_0_20px_rgba(0,242,255,0.4)] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full py-4 bg-accent-cyan text-black font-black uppercase tracking-widest rounded-xl hover:bg-cyan-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                    {loading ? 'EXECUTING UPDATES...' : 'SAVE & EXECUTE CHANGES'}
+                    {loading ? 'Applying…' : 'Save & apply changes'}
                 </button>
             </div>
-        </div>
+        </section>
     );
 }
 
@@ -216,17 +226,17 @@ export default function SettingsPage() {
         <div className="p-8 space-y-8 max-w-5xl mx-auto">
             <header>
                 <h1 className="text-4xl font-black neon-text uppercase tracking-tighter mb-2">Settings</h1>
-                <p className="text-gray-400">Manage system-wide configurations and infrastructure</p>
+                <p className="text-muted-foreground">Manage system-wide configuration and infrastructure</p>
             </header>
 
             <div className="space-y-6">
-                <h2 className="text-xl font-bold border-b border-white/10 pb-4">System Infrastructure</h2>
+                <h2 className="text-xl font-bold border-b border-border pb-4">System infrastructure</h2>
 
                 <SystemConfigPanel />
 
-                <div className="p-4 bg-black/40 rounded-xl border border-white/5 font-mono text-sm max-w-2xl">
-                    <p className="text-gray-500 text-xs uppercase mb-1">Storage Provider</p>
-                    <p className="text-accent-purple font-bold">Unicorn Local Storage (wwwroot/media)</p>
+                <div className="p-4 bg-muted/20 rounded-xl border border-border/50 font-mono text-sm max-w-2xl">
+                    <p className="text-muted-foreground text-xs uppercase mb-1">Storage provider</p>
+                    <p className="text-accent-purple font-bold">Local storage (wwwroot/media)</p>
                 </div>
             </div>
         </div>

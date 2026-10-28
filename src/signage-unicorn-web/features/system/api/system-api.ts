@@ -1,8 +1,9 @@
-import { apiFetch } from '@/lib/api-fetch';
+import { apiFetch, type ApiFetchInit } from '@/lib/api-fetch';
 
 export const systemApi = {
-    getSetting: async (key: string) => {
-        return apiFetch(`/system/settings/${key}`);
+    /** `init` lets the web player pass `{ scope: 'device', deviceToken }` (round-4 #9). */
+    getSetting: async (key: string, init?: ApiFetchInit) => {
+        return apiFetch(`/system/settings/${key}`, init);
     },
     setSetting: async (key: string, value: string) => {
         return apiFetch('/system/settings', {

@@ -1,12 +1,48 @@
 @import "tailwindcss";
 @source "../features";
 
+/* ------------------------------------------------------------------
+   Design tokens
+   ------------------------------------------------------------------
+   The raw values live on :root / [data-theme] below. The `@theme inline`
+   block is what turns them into Tailwind utilities (bg-card, text-foreground,
+   border-border, text-muted-foreground, ...). Tailwind v4 does not read
+   tailwind.config.ts, so without this block those classes compiled to
+   nothing (488 dead usages found in the 27-10-2026 audit).
+   ------------------------------------------------------------------ */
 @theme {
   --font-sans: var(--font-noto-sans-thai), ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
   --color-accent-cyan: #00f2ff;
   --color-accent-purple: #9d00ff;
 }
 
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+}
+
+/* `dark:` follows the in-app theme toggle (data-theme), not the OS setting. */
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+
+/* Dark is the default theme. [data-theme='dark'] therefore needs no
+   separate block: it simply inherits :root. */
 :root {
   --background: #050507;
   --foreground: #ffffff;
@@ -34,6 +70,8 @@
   --glass-bg: rgba(255, 255, 255, 0.03);
   --glass-border: rgba(255, 255, 255, 0.08);
   --glass-blur: blur(16px);
+
+  color-scheme: dark;
 }
 
 [data-theme='light'] {
@@ -44,7 +82,8 @@
   --popover: #ffffff;
   --popover-foreground: #171717;
   --primary: #00f2ff;
-  --primary-foreground: #ffffff;
+  /* Black on cyan: ~13:1. The previous white-on-cyan was ~1.3:1. */
+  --primary-foreground: #000000;
   --secondary: #f4f4f5;
   --secondary-foreground: #18181b;
   --muted: #f4f4f5;
@@ -57,36 +96,10 @@
   --input: #e4e4e7;
   --ring: #00f2ff;
   --card-solid: #ffffff;
-  --glass-bg: rgba(0, 0, 0, 0.05);
-  --glass-border: rgba(0, 0, 0, 0.15);
-}
+  --glass-bg: rgba(0, 0, 0, 0.04);
+  --glass-border: rgba(0, 0, 0, 0.12);
 
-[data-theme='dark'] {
-  --background: #050507;
-  --foreground: #ffffff;
-  --card: #18181b;
-  --card-foreground: #ffffff;
-  --popover: #18181b;
-  --popover-foreground: #ffffff;
-  --primary: #00f2ff;
-  --primary-foreground: #000000;
-  --secondary: #27272a;
-  --secondary-foreground: #ffffff;
-  --muted: #27272a;
-  --muted-foreground: #a1a1aa;
-  --accent: #27272a;
-  --accent-foreground: #ffffff;
-  --destructive: #7f1d1d;
-  --destructive-foreground: #ffffff;
-  --border: #27272a;
-  --input: #27272a;
-  --ring: #00f2ff;
-  --card-solid: #18181b;
-
-  --glass-bg: rgba(255, 255, 255, 0.03);
-  --glass-border: rgba(255, 255, 255, 0.08);
-
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 body {
@@ -94,10 +107,19 @@ body {
   color: var(--foreground);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* Static gradient wash. `background-attachment: fixed` was removed: it
+     forces a full repaint of the gradient on every scroll frame. */
   background-image:
-    radial-gradient(circle at 50% -20%, rgba(157, 0, 255, 0.15) 0%, transparent 50%),
-    radial-gradient(circle at 0% 100%, rgba(0, 242, 255, 0.08) 0%, transparent 40%);
-  background-attachment: fixed;
+    radial-gradient(circle at 50% -20%, rgba(157, 0, 255, 0.12) 0%, transparent 50%),
+    radial-gradient(circle at 0% 100%, rgba(0, 242, 255, 0.06) 0%, transparent 40%);
+  background-repeat: no-repeat;
+}
+
+/* Keyboard focus is always visible. Components may remove the default
+   outline (`outline-none`) only when they add a focus-visible ring. */
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 
 .bg-card-solid {
@@ -106,26 +128,31 @@ body {
   backdrop-filter: none !important;
 }
 
+/* Translucent surfaces. Blur is NOT applied here: backdrop-filter on every
+   card made scrolling the device and media lists stutter. Use `.glass-blur`
+   (header, modals, login card only) where the effect earns its cost. */
 .glass-panel {
   background: var(--glass-bg);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
   border: 1px solid var(--glass-border);
   box-shadow: 0 4px 24px -1px rgba(0, 0, 0, 0.2);
 }
 
+.glass-blur {
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+}
+
 .glass-card {
-  background: rgba(255, 255, 255, 0.02);
-  backdrop-filter: blur(8px);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  transition: background-color 0.3s ease, border-color 0.3s ease, transform 0.3s ease, box-shadow 0.3s ease;
 }
 
 .glass-card:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: color-mix(in srgb, var(--foreground) 6%, transparent);
   border-color: rgba(0, 242, 255, 0.4);
-  transform: translateY(-4px) scale(1.01);
-  box-shadow: 0 20px 40px -10px rgba(0, 242, 255, 0.1);
+  transform: translateY(-2px);
+  box-shadow: 0 12px 30px -12px rgba(0, 242, 255, 0.15);
 }
 
 .btn-primary {
@@ -135,7 +162,7 @@ body {
   border-radius: 0.75rem;
   font-weight: 700;
   letter-spacing: 0.025em;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 0.3s ease, box-shadow 0.3s ease, filter 0.3s ease;
   border: none;
   cursor: pointer;
   display: inline-flex;
@@ -149,12 +176,12 @@ body {
   filter: brightness(1.1);
 }
 
+/* Headline accent: solid foreground colour with a faint glow. The old
+   gradient-clipped text had no real contrast guarantee and was invisible
+   in the light theme. */
 .neon-text {
-  text-shadow: 0 0 15px rgba(0, 242, 255, 0.5);
-  background: linear-gradient(to bottom, #fff, #999);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
+  color: var(--foreground);
+  text-shadow: 0 0 18px rgba(0, 242, 255, 0.25);
 }
 
 .custom-scrollbar::-webkit-scrollbar {
@@ -166,7 +193,7 @@ body {
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.05);
+  background: color-mix(in srgb, var(--foreground) 12%, transparent);
   border-radius: 10px;
 }
 
@@ -174,46 +201,16 @@ body {
   background: var(--accent-cyan);
 }
 
-@keyframes glow {
-
-  0%,
-  100% {
-    opacity: 0.4;
-    transform: scale(1);
-  }
-
-  50% {
-    opacity: 0.9;
-    transform: scale(1.1);
-  }
-}
-
-.glow-point {
-  animation: glow 4s infinite ease-in-out;
-}
-
-@keyframes dash {
-  from {
-    stroke-dasharray: 1000;
-    stroke-dashoffset: 1000;
-  }
-
-  to {
-    stroke-dasharray: 1000;
-    stroke-dashoffset: 0;
-  }
-}
-
-/* Animations */
+/* Entrance animations */
 .animate-in {
   opacity: 0;
-  animation: slideUpFade 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: slideUpFade 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 @keyframes slideUpFade {
   from {
     opacity: 0;
-    transform: translateY(30px);
+    transform: translateY(16px);
   }
 
   to {
@@ -243,7 +240,7 @@ body {
 }
 
 .page-transition {
-  animation: fadeIn 0.5s ease-out;
+  animation: fadeIn 0.4s ease-out;
 }
 
 @keyframes fadeIn {
@@ -256,7 +253,52 @@ body {
   }
 }
 
-/* Dash Grid Utilities */
+/* Motion sensitivity: keep the state change (things still appear), drop
+   the movement. Infinite decorative loops are stopped entirely. */
+
+/* Live clip progress on device cards: grows from the server-reported position (--p0) to 100%
+   over the clip's remaining seconds (animation-duration set inline). Pure CSS so a fleet of
+   300 cards does not need a JS re-render every second. */
+.progress-live {
+  width: var(--p0, 0%);
+  animation-name: progress-live-grow;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+@keyframes progress-live-grow {
+  from { width: var(--p0, 0%); }
+  to { width: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress-live {
+    animation: none;
+  }
+
+  .animate-in,
+  .page-transition {
+    animation-duration: 0.01s;
+    animation-delay: 0s !important;
+  }
+
+  .glass-card,
+  .glass-card:hover,
+  .btn-primary,
+  .btn-primary:hover {
+    transform: none;
+    transition-duration: 0.01s;
+  }
+
+  .animate-pulse,
+  .animate-ping,
+  .animate-spin,
+  .animate-bounce {
+    animation: none;
+  }
+}
+
+/* Dashboard grid */
 .dashboard-grid {
   display: grid;
   grid-template-columns: repeat(12, 1fr);
@@ -269,8 +311,7 @@ body {
   }
 }
 
-
-/* Font Size Scaling */
+/* Font size scaling (user preference, persisted by UIContext) */
 :root[data-font-size="small"] {
   font-size: 12px;
 }
@@ -283,17 +324,9 @@ body {
   font-size: 16px;
 }
 
-
-/* Global Native Form Controls Theme */
-:root {
-  color-scheme: dark;
-}
-
-[data-theme='light'] {
-  color-scheme: light;
-}
-
-/* Ensure Dropdowns match the theme globally and are SOLID */
+/* Native <select> popups follow the theme and stay opaque. Kept with
+   !important on purpose: the glass utilities on parent elements would
+   otherwise bleed into the popup on some Chromium builds. */
 select,
 select option {
   background-color: var(--card) !important;
@@ -307,7 +340,7 @@ select option {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
   border: 1px solid var(--border) !important;
-  box-shadow: 0 10px 25px rgba(0,0,0,0.5) !important;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5) !important;
 }
 
 /* ── datetime-local: force 24-hour display & hide native placeholder overlay ── */
@@ -333,4 +366,4 @@ input[type="datetime-local"]::-webkit-datetime-edit-ampm-field {
 /* Hide AM/PM field entirely to enforce 24h */
 input[type="datetime-local"]::-webkit-datetime-edit-ampm-field {
   display: none !important;
-}
+}

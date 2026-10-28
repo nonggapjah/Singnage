@@ -1,4 +1,4 @@
-import { apiFetch, ApiResponse } from '@/lib/api-fetch';
+import { apiFetch, ApiResponse, type ApiFetchInit } from '@/lib/api-fetch';
 import { MediaFile, MediaUploadRequest, MediaUsage } from '../types/media';
 
 export const mediaApi = {
@@ -11,15 +11,13 @@ export const mediaApi = {
         if (filters.status && filters.status !== 'all') params.append('status', filters.status);
         if (filters.mediaType && filters.mediaType !== 'all') params.append('mediaType', filters.mediaType);
 
-        // Add timestamp to prevent caching
-        params.append('_t', Date.now().toString());
-
         const queryString = params.toString();
         return apiFetch(`/media${queryString ? `?${queryString}` : ''}`);
     },
 
-    getById: async (id: string): Promise<ApiResponse<MediaFile>> => {
-        return apiFetch(`/media/${id}?_t=${Date.now()}`); // Add timestamp
+    /** `init` lets the web player pass `{ scope: 'device', deviceToken }` (round-4 #9). */
+    getById: async (id: string, init?: ApiFetchInit): Promise<ApiResponse<MediaFile>> => {
+        return apiFetch(`/media/${id}`, init);
     },
 
     upload: async (data: MediaUploadRequest | FormData): Promise<ApiResponse<MediaFile>> => {

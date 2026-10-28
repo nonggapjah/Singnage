@@ -9,6 +9,13 @@ interface PlayerOverlayProps {
     isOpen: boolean;
     onClose: () => void;
     isOnline?: boolean;
+    /**
+     * Result of the last device-token check: NONE = no token issued yet, OK, REJECTED by the server
+     * (401), or CLAIM_DENIED (the claim endpoint refused: evidence mismatch / token already issued).
+     */
+    deviceTokenStatus?: 'NONE' | 'OK' | 'REJECTED' | 'CLAIM_DENIED';
+    /** Operator-facing detail for REJECTED / CLAIM_DENIED. */
+    deviceTokenMessage?: string;
     deviceId: string | null;
     deviceName: string;
     branchCode?: string;
@@ -40,7 +47,7 @@ interface PlayerOverlayProps {
 }
 
 export const PlayerOverlay: React.FC<PlayerOverlayProps> = ({
-    isOpen, onClose, isOnline = true, deviceId, deviceName, branchCode = 'N/A', location = '', ipAddress = '127.0.0.1',
+    isOpen, onClose, isOnline = true, deviceTokenStatus = 'NONE', deviceTokenMessage = '', deviceId, deviceName, branchCode = 'N/A', location = '', ipAddress = '127.0.0.1',
     lastHeartbeat,
     onUpdateConfig,
     currentPlaylistId, currentPlaylistName, currentMediaName,
@@ -194,6 +201,19 @@ export const PlayerOverlay: React.FC<PlayerOverlayProps> = ({
                                             ● {isOnline ? 'ONLINE' : 'OFFLINE'}
                                         </div>
                                         <div className="text-xs text-gray-600 font-mono mt-1">{ipAddress}</div>
+                                        {deviceTokenStatus === 'REJECTED' && (
+                                            <div className="text-xs text-rose-400 font-mono mt-1" role="alert">
+                                                DEVICE TOKEN REJECTED: reset it on the server (Devices &gt; Reset token). {deviceTokenMessage}
+                                            </div>
+                                        )}
+                                        {deviceTokenStatus === 'CLAIM_DENIED' && (
+                                            <div className="text-xs text-amber-400 font-mono mt-1" role="alert">
+                                                TOKEN CLAIM DENIED: {deviceTokenMessage || 'the server refused to issue a token for this screen'}
+                                            </div>
+                                        )}
+                                        {deviceTokenStatus === 'OK' && (
+                                            <div className="text-xs text-gray-600 font-mono mt-1">Device token: OK</div>
+                                        )}
                                         {lastHeartbeat && (
                                             <div className="text-[9px] text-gray-700 font-mono mt-1 border-t border-white/5 pt-1 uppercase">
                                                 Last Sync: {lastHeartbeat.toLocaleTimeString()}
@@ -377,7 +397,7 @@ export const PlayerOverlay: React.FC<PlayerOverlayProps> = ({
                                                 onClick={item.action}
                                                 className="flex flex-col items-center gap-2 group outline-none"
                                             >
-                                                <kbd className="min-w-[45px] h-9 px-2 flex items-center justify-center bg-white/10 border-b-4 border-white/20 rounded-lg text-white text-[11px] font-black group-hover:bg-accent-cyan group-hover:text-black group-hover:border-accent-cyan/50 group-active:translate-y-1 group-active:border-b-0 transition-all cursor-pointer shadow-lg">
+                                                <kbd className="min-w-[45px] h-9 px-2 flex items-center justify-center bg-white/10 border border-white/20 rounded-lg text-white text-[11px] font-black group-hover:bg-accent-cyan group-hover:text-black group-hover:border-accent-cyan/50 group-active:translate-y-px transition-colors cursor-pointer shadow-lg">
                                                     {item.key}
                                                 </kbd>
                                                 <span className="text-[9px] text-gray-500 font-bold uppercase tracking-widest group-hover:text-white transition-colors">

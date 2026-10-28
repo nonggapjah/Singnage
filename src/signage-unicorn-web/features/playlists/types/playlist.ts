@@ -27,4 +27,8 @@ export interface Playlist {
     items?: PlaylistItem[];
     itemCount?: number;
     totalDuration?: number;
+    /** Device schedule only (GET /devices/{id}/schedule): opaque version of the resolved schedule. */
+    scheduleVersion?: string;
+    /** Device schedule only: when the next assignment starts/ends (UTC ISO), or null. */
+    nextTransitionAtUtc?: string | null;
 }

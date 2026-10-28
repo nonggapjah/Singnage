@@ -19,19 +19,25 @@ import React from 'react';
  *   onChange        - called with the new 24h local datetime string ('' when cleared)
  *   isLarge         - taller / roomier variant used inside the schedule table
  *   placeholderDate - hint label shown while the field is empty
+ *   id / ariaLabel  - accessible name: pair `id` with a <label htmlFor>, or pass
+ *                     `ariaLabel` when there is no visible label (table cells)
  */
 interface DateTimePicker24hProps {
     value: string;
     onChange: (val: string) => void;
     isLarge?: boolean;
     placeholderDate?: string;
+    id?: string;
+    ariaLabel?: string;
 }
 
 export const DateTimePicker24h: React.FC<DateTimePicker24hProps> = ({
     value,
     onChange,
     isLarge = false,
-    placeholderDate = '- SELECT DATE & TIME -',
+    placeholderDate = '- Select date & time -',
+    id,
+    ariaLabel,
 }) => {
     const heightClass = isLarge ? 'h-[46px] text-sm' : 'h-[38px] text-xs';
     const isEmpty = !value;
@@ -44,26 +50,28 @@ export const DateTimePicker24h: React.FC<DateTimePicker24hProps> = ({
                 input text transparent while empty, so only our label shows. */}
             {isEmpty && (
                 <span
-                    className={`pointer-events-none absolute inset-0 flex items-center px-3 font-mono uppercase tracking-wider text-muted-foreground/50 whitespace-nowrap overflow-hidden ${
-                        isLarge ? 'text-xs' : 'text-[10px]'
-                    }`}
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-0 flex items-center px-3 font-mono uppercase tracking-wider text-muted-foreground/70 whitespace-nowrap overflow-hidden text-xs"
                 >
                     {placeholderDate}
                 </span>
             )}
             <input
+                id={id}
+                aria-label={ariaLabel}
                 type="datetime-local"
                 value={value}
                 step={60}
                 onChange={(e) => onChange(e.target.value)}
-                className={`w-full bg-black/40 border border-white/10 rounded-xl px-3 font-mono text-white outline-none focus:border-accent-cyan focus:shadow-[0_0_15px_rgba(34,211,238,0.15)] focus:bg-black/60 cursor-pointer transition-all [color-scheme:dark] ${heightClass} ${isEmpty ? 'text-transparent dt-empty' : ''}`}
+                className={`w-full bg-muted/20 border border-border rounded-xl px-3 font-mono text-foreground outline-none focus:border-accent-cyan focus:ring-1 focus:ring-accent-cyan/30 cursor-pointer transition-colors [color-scheme:dark] ${heightClass} ${isEmpty ? 'text-transparent dt-empty' : ''}`}
             />
             {!isEmpty && (
                 <button
                     type="button"
                     onClick={() => onChange('')}
                     title="Clear date"
-                    className="absolute right-9 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-red-400 transition-colors text-sm outline-none z-10"
+                    aria-label="Clear date"
+                    className="absolute right-9 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-red-500 transition-colors text-sm z-10 rounded"
                 >
                     ✕
                 </button>

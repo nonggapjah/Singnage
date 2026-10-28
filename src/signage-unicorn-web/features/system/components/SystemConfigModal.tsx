@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { apiFetch } from '@/lib/api-fetch';
+import { Modal } from '@/components/ui/Modal';
 
 interface SystemConfigModalProps {
     isOpen: boolean;
@@ -87,103 +88,114 @@ export function SystemConfigModal({ isOpen, onClose }: SystemConfigModalProps) {
             } else {
                 alert("Error: " + res.message);
             }
-        } catch (e: any) {
-            alert("Execution Failed: " + (e.message || "Unknown error"));
+        } catch (e) {
+            alert("Execution Failed: " + (e instanceof Error ? e.message : "Unknown error"));
         } finally {
             setLoading(false);
         }
     };
 
-    if (!isOpen) return null;
+    const inputClass = 'bg-muted/20 border border-border rounded-2xl px-5 py-4 outline-none focus:border-accent-cyan focus:ring-1 focus:ring-accent-cyan/30 transition-colors font-mono text-lg text-foreground placeholder:text-muted-foreground/70';
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in duration-200">
-            <div className="w-full max-w-lg bg-card-solid p-10 rounded-[2.5rem] border border-border shadow-[0_0_50px_rgba(0,0,0,0.5)] relative overflow-hidden">
-                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-accent-cyan via-accent-purple to-accent-cyan" />
+        <Modal
+            isOpen={isOpen}
+            onClose={onClose}
+            size="lg"
+            closeDisabled={loading}
+            showClose
+            labelledBy="system-config-title"
+            zIndexClass="z-[1000]"
+            className="bg-card-solid p-8 sm:p-10 rounded-[2.5rem] overflow-hidden"
+        >
+            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-accent-cyan via-accent-purple to-accent-cyan" aria-hidden="true" />
 
-                <div className="flex justify-between items-start mb-8">
-                    <div>
-                        <h3 className="text-3xl font-black text-foreground uppercase tracking-tighter">System Config</h3>
-                        <p className="text-xs text-muted-foreground uppercase tracking-widest font-bold mt-1">Network Transmission Settings</p>
-                    </div>
-                    <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">✕</button>
+            <div className="mb-8 pr-10">
+                <h3 id="system-config-title" className="text-3xl font-black text-foreground uppercase tracking-tighter">Server address</h3>
+                <p className="text-xs text-muted-foreground uppercase tracking-widest font-bold mt-1">API and dashboard network settings</p>
+            </div>
+
+            {!config && refreshing ? (
+                <div className="py-20 text-center text-accent-cyan font-black uppercase tracking-widest" role="status">Loading…</div>
+            ) : !config ? (
+                <div className="py-20 text-center">
+                    <button type="button" onClick={loadConfig} className="text-accent-cyan underline uppercase font-bold text-xs">Retry</button>
                 </div>
-
-                {!config && refreshing ? (
-                    <div className="py-20 text-center animate-pulse text-accent-cyan font-black uppercase tracking-widest">Initialising Config...</div>
-                ) : !config ? (
-                    <div className="py-20 text-center">
-                        <button onClick={loadConfig} className="text-accent-cyan underline uppercase font-bold text-xs">Retry Loading Protocol</button>
+            ) : (
+                <div className="space-y-6">
+                    <div className="flex justify-between items-center bg-muted/30 p-4 rounded-2xl border border-border gap-4">
+                        <div>
+                            <span className="text-xs uppercase text-muted-foreground font-black block">Detected local IP</span>
+                            <span className="text-green-600 dark:text-green-400 font-mono font-bold text-xl">{config.detectedIp}</span>
+                        </div>
+                        <div className="text-right min-w-0">
+                            <span className="text-xs uppercase text-muted-foreground font-black block">Active host</span>
+                            <code className="text-accent-cyan font-mono text-xs break-all">{config.currentBaseUrl}</code>
+                        </div>
                     </div>
-                ) : (
-                    <div className="space-y-6">
-                        <div className="flex justify-between items-center bg-muted/30 p-4 rounded-2xl border border-border">
-                            <div>
-                                <span className="text-[10px] uppercase text-muted-foreground font-black block">Detected Local IP</span>
-                                <span className="text-green-400 font-mono font-bold text-xl">{config.detectedIp}</span>
-                            </div>
-                            <div className="text-right">
-                                <span className="text-[10px] uppercase text-muted-foreground font-black block">Active Host</span>
-                                <code className="text-accent-cyan font-mono text-xs">{config.currentBaseUrl}</code>
-                            </div>
-                        </div>
 
-                        <div className="space-y-3">
-                            <label className="text-[10px] font-black text-muted-foreground uppercase tracking-widest ml-1">New IP Override</label>
-                            <div className="flex gap-3">
-                                <input
-                                    type="text"
-                                    value={newIp}
-                                    onChange={(e) => setNewIp(e.target.value)}
-                                    className="flex-[3] bg-muted/20 border border-border rounded-2xl px-5 py-4 outline-none focus:border-accent-cyan transition-all font-mono text-lg text-foreground dark:[color-scheme:dark]"
-                                    placeholder="192.168.1.XX"
-                                />
-                                <input
-                                    type="number"
-                                    value={newPort}
-                                    onChange={(e) => setNewPort(parseInt(e.target.value))}
-                                    className="flex-1 bg-muted/20 border border-border rounded-2xl px-5 py-4 outline-none focus:border-accent-cyan transition-all font-mono text-lg text-center text-foreground dark:[color-scheme:dark]"
-                                    placeholder="Port"
-                                />
-                                <button
-                                    onClick={() => setNewIp(config.detectedIp)}
-                                    className="px-6 rounded-2xl bg-muted/30 hover:bg-muted/50 border border-border text-[10px] font-black uppercase tracking-widest transition-all text-foreground"
-                                >
-                                    Auto
-                                </button>
-                            </div>
-                            <div className="bg-accent-purple/5 p-3 rounded-xl border border-accent-purple/10">
-                                <p className="text-[9px] text-accent-purple font-medium leading-relaxed">
-                                    CHANGING IP WILL RE-MAP ALL MEDIA TRANSACTIONS AND AUTHENTICATION ENDPOINTS.
-                                    ENSURE THE DEVICE HAS A STATIC IP BEFORE COMMITTING.
-                                </p>
-                            </div>
-                        </div>
-
-                        <div className="space-y-3">
-                            <label className="text-[10px] font-black text-muted-foreground uppercase tracking-widest ml-1">Frontend Port (Dashboard)</label>
+                    <div className="space-y-3">
+                        <label htmlFor="cfg-ip" className="block text-xs font-black text-muted-foreground uppercase tracking-widest ml-1">New IP address</label>
+                        <div className="flex gap-3">
                             <input
-                                type="number"
-                                value={newFrontendPort}
-                                onChange={(e) => setNewFrontendPort(parseInt(e.target.value))}
-                                className="w-full bg-muted/20 border border-border rounded-2xl px-5 py-4 outline-none focus:border-accent-cyan transition-all font-mono text-lg text-center text-foreground dark:[color-scheme:dark]"
-                                placeholder="Port 3000"
+                                id="cfg-ip"
+                                type="text"
+                                inputMode="decimal"
+                                value={newIp}
+                                onChange={(e) => setNewIp(e.target.value)}
+                                className={`flex-[3] min-w-0 ${inputClass}`}
+                                placeholder="192.168.1.XX"
                             />
-                        </div>
-
-                        <div className="flex gap-4 pt-4">
-                            <button onClick={onClose} className="flex-1 py-4 rounded-2xl bg-muted/30 text-muted-foreground font-bold hover:bg-muted/50 hover:text-foreground transition-all uppercase tracking-widest text-xs">Cancel</button>
+                            <input
+                                id="cfg-api-port"
+                                type="number"
+                                aria-label="API port"
+                                value={newPort}
+                                onChange={(e) => setNewPort(parseInt(e.target.value))}
+                                className={`flex-1 min-w-0 text-center ${inputClass}`}
+                                placeholder="Port"
+                            />
                             <button
-                                onClick={handleExecute}
-                                disabled={loading}
-                                className="flex-[2] py-4 rounded-2xl bg-accent-cyan text-black font-black uppercase tracking-[0.2em] hover:shadow-[0_0_30px_rgba(0,242,255,0.4)] disabled:opacity-50 transition-all text-xs"
+                                type="button"
+                                onClick={() => setNewIp(config.detectedIp)}
+                                className="px-6 rounded-2xl bg-muted/30 hover:bg-muted/50 border border-border text-xs font-black uppercase tracking-widest transition-colors text-foreground"
                             >
-                                {loading ? 'EXECUTING...' : 'INITIATE UPDATE'}
+                                Auto
                             </button>
                         </div>
+                        <div className="bg-accent-purple/5 p-3 rounded-xl border border-accent-purple/10">
+                            <p className="text-xs text-foreground/80 font-medium leading-relaxed">
+                                Changing the IP re-maps every media URL and authentication endpoint.
+                                Make sure the server has a static IP before applying.
+                            </p>
+                        </div>
                     </div>
-                )}
-            </div>
-        </div>
+
+                    <div className="space-y-3">
+                        <label htmlFor="cfg-web-port" className="block text-xs font-black text-muted-foreground uppercase tracking-widest ml-1">Dashboard (web) port</label>
+                        <input
+                            id="cfg-web-port"
+                            type="number"
+                            value={newFrontendPort}
+                            onChange={(e) => setNewFrontendPort(parseInt(e.target.value))}
+                            className={`w-full text-center ${inputClass}`}
+                            placeholder="8865"
+                        />
+                    </div>
+
+                    <div className="flex gap-4 pt-4">
+                        <button type="button" onClick={onClose} disabled={loading} className="flex-1 py-4 rounded-2xl bg-muted/30 text-muted-foreground font-bold hover:bg-muted/50 hover:text-foreground transition-colors uppercase tracking-widest text-xs disabled:opacity-50">Cancel</button>
+                        <button
+                            type="button"
+                            onClick={handleExecute}
+                            disabled={loading}
+                            className="flex-[2] py-4 rounded-2xl bg-accent-cyan text-black font-black uppercase tracking-[0.2em] hover:bg-cyan-300 disabled:opacity-50 transition-colors text-xs"
+                        >
+                            {loading ? 'Applying…' : 'Apply'}
+                        </button>
+                    </div>
+                </div>
+            )}
+        </Modal>
     );
 }

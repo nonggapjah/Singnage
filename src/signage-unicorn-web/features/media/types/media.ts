@@ -12,6 +12,8 @@ export interface MediaFile {
     uploadedBy: string;
     uploadedAt?: string;
     endDate?: string;
+    /** MD5 of the stored bytes, set by the API on upload/transcode. Part of the player's change detection. */
+    fileHash?: string;
     active: 'Y' | 'N';
 }
 
