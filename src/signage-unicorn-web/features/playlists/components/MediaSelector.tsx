@@ -123,7 +123,7 @@ export const MediaSelector: React.FC<MediaSelectorProps> = ({ onSelect, onClose 
                                     <div className="aspect-video w-full bg-background relative overflow-hidden border-b border-border/50">
                                         {media.blobUrl && (
                                             isVid ? (
-                                                <video src={media.blobUrl} preload="none" muted playsInline className="w-full h-full object-cover opacity-70 group-hover:opacity-90 transition-opacity" />
+                                                <video src={`${media.blobUrl}#t=0.1`} preload="metadata" muted playsInline className="w-full h-full object-cover opacity-70 group-hover:opacity-90 transition-opacity" />
                                             ) : (
                                                 <img src={media.blobUrl} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover opacity-70 group-hover:opacity-90 transition-opacity" />
                                             )

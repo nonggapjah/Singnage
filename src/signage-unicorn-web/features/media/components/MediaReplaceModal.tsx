@@ -255,11 +255,11 @@ export const MediaReplaceModal: React.FC<MediaReplaceModalProps> = ({ targetMedi
                                                     {m.blobUrl ? (
                                                         isVideo(m.fileName) ? (
                                                             <video
-                                                                src={m.blobUrl}
+                                                                src={`${m.blobUrl}#t=0.1`}
                                                                 className="w-full h-full object-cover"
                                                                 muted
                                                                 playsInline
-                                                                preload="none"
+                                                                preload="metadata"
                                                                 onMouseOver={e => {
                                                                     const playPromise = (e.target as HTMLVideoElement).play();
                                                                     if (playPromise !== undefined) {

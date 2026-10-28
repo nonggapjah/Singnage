@@ -454,7 +454,10 @@ export default function MediaLibraryPage() {
     const Thumb = ({ m, className = '' }: { m: MediaFile; className?: string }) => (
         m.blobUrl ? (
             isVideoFile(m.fileName) ? (
-                <video src={m.blobUrl} preload="none" muted playsInline className={className} />
+                // preload="metadata" + the #t=0.1 media fragment make the browser fetch just enough to
+                // paint the frame at 0.1 s as a poster, so the card shows a real still instead of a black
+                // box. preload="none" (the previous value) fetched nothing, so nothing was ever painted.
+                <video src={`${m.blobUrl}#t=0.1`} preload="metadata" muted playsInline className={className} />
             ) : (
                 <img src={m.blobUrl} alt="" loading="lazy" decoding="async" className={className} />
             )
