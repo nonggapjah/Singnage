@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api:
+    name: API build + tests (.NET 8)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore + build API
+        run: dotnet build src/SignageUnicorn.Api/SignageUnicorn.Api.csproj -c Release --nologo
+      - name: Unit tests
+        if: hashFiles('src/SignageUnicorn.Api.Tests/*.csproj') != ''
+        run: dotnet test src/SignageUnicorn.Api.Tests --nologo --logger "trx;LogFileName=api-tests.trx"
+      - name: Build updater helpers
+        run: |
+          dotnet build src/UpdaterHelper/UpdaterHelper.csproj -c Release --nologo
+          dotnet build src/UpdaterLauncher/UpdaterLauncher.csproj -c Release --nologo
+          dotnet build src/MassConvertMedia/MassConvertMedia.csproj -c Release --nologo
+      - name: PowerShell parse check
+        shell: pwsh
+        run: |
+          $failed = $false
+          Get-ChildItem -Path src -Recurse -Filter *.ps1 | ForEach-Object {
+            $errs = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errs) | Out-Null
+            if ($errs -and $errs.Count -gt 0) { Write-Host "::error file=$($_.FullName)::$($errs[0].Message)"; $failed = $true }
+          }
+          if ($failed) { exit 1 }
+
+  web:
+    name: Web admin (Next.js)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/signage-unicorn-web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: src/signage-unicorn-web/package-lock.json
+      - run: npm ci
+      - name: Type check
+        run: npx tsc --noEmit -p tsconfig.json
+      - name: Unit tests
+        run: npm run test --if-present
+      - name: Lint (pre-existing errors are reported, not blocking yet)
+        continue-on-error: true
+        run: npx eslint app components features lib --quiet
+      - name: Production build
+        run: npx next build
+
+  client:
+    name: Electron kiosk client
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: src/signage-unicorn-client
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: src/signage-unicorn-client/package-lock.json
+      - run: npm ci
+      - name: Syntax check
+        run: |
+          node --check main.js
+          node --check preload.js
+          node --check src/renderer.js
+      - name: Unit tests
+        run: npm test --if-present
+      - name: Smoke test (hidden window against a mock server; not yet blocking)
+        continue-on-error: true
+        run: npm run smoke --if-present
+        env:
+          SIGNAGE_SMOKE: '1'
