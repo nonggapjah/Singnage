@@ -53,6 +53,14 @@ times are stored and how the admin console signs in. Everything is staged so tha
 - A screen stuck on `NO TOKEN` with `CLAIM_EVIDENCE_MISMATCH` / `DEVICE_IDENTITY_CONFLICT`
   in the API log has a duplicate device row: retire the duplicate, then **Reset device token**
   on the card; the screen reclaims on its next heartbeat (`RECLAIM_TOKEN`).
+- A kiosk setup screen answering **`Registration rejected: TOKEN_RACE`** (API log
+  `TOKEN_RACE ... during ISSUED` naming an `is_deleted = 1` row) meant the register procedure
+  returned a retired twin row with the same uuid and the token write hit that dead row.
+  Fixed in API 2.8.4 (procedure + `IssueOrRotateAsync`). On an older API, give the retired twins
+  another uuid and register again:
+  `UPDATE sn_devices SET device_uuid = 'RETIRED-' + CAST(device_id AS NVARCHAR(20)) WHERE is_deleted = 1 AND device_uuid = '<uuid>'`.
+  2.8.4 also stops `MaintenanceWorker` retiring same-name screens that are merely switched off
+  overnight (the twin must have appeared after, and within 24 h of, the row's last check-in).
 
 ## New files and keys on a kiosk
 

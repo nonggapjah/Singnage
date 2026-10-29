@@ -56,6 +56,40 @@ namespace SignageUnicorn.Api.Tests
             Assert.Equal(DeviceAuthService.Hash("concurrent"), repo.Rows[0].TokenHash);
         }
 
+        // Round 6: sp_device_std's register result used to name a soft-deleted twin (same uuid, older
+        // id) of the live row. The token must go to the live row and the client must be told that id,
+        // instead of the write failing on the dead row and register answering TOKEN_RACE.
+        [Fact]
+        public async Task Register_result_naming_a_retired_twin_issues_to_the_live_row_and_corrects_the_id()
+        {
+            var repo = new FakeDeviceRepository().Add(546, "WIN-PJ_SIGNAGE2"); // row 470 is retired = absent
+            var svc = Make(repo);
+            var device = new DeviceDto { DeviceId = "470", DeviceUuid = "WIN-PJ_SIGNAGE2" };
+
+            var token = await svc.IssueOrRotateAsync(device, null, tokenCapable: true, "ip");
+
+            Assert.NotNull(token);
+            Assert.Equal("546", device.DeviceId);
+            Assert.Equal(546, Assert.Single(repo.TokenWrites).DeviceId);
+            Assert.Equal(DeviceAuthService.Hash(token!), repo.Rows[0].TokenHash);
+        }
+
+        [Fact]
+        public async Task Register_result_naming_a_live_row_that_differs_from_the_uuid_row_keeps_that_row()
+        {
+            // Two LIVE rows share a uuid (legacy duplicate). The caller's row is live, so the token is
+            // written there and its id is left alone.
+            var repo = new FakeDeviceRepository().Add(600, "dup-uuid").Add(601, "dup-uuid");
+            var svc = Make(repo);
+            var device = new DeviceDto { DeviceId = "601", DeviceUuid = "dup-uuid" };
+
+            var token = await svc.IssueOrRotateAsync(device, null, tokenCapable: true, "ip");
+
+            Assert.NotNull(token);
+            Assert.Equal("601", device.DeviceId);
+            Assert.Equal(601, Assert.Single(repo.TokenWrites).DeviceId);
+        }
+
         [Fact]
         public async Task Uncontended_claim_and_rotation_still_succeed_and_clear_the_reset_marker()
         {

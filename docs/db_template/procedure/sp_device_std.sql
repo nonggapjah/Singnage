@@ -108,7 +108,9 @@ BEGIN
                 device_name = ISNULL(@p_device_name, device_name), -- Allow rename on login too
                 branch_code = ISNULL(@p_branch_code, branch_code),
                 location = ISNULL(@p_location, location)
-            WHERE device_uuid = @p_device_uuid;
+            -- Only the live row: a soft-deleted twin that shares this uuid must stay retired (it used
+            -- to get its last_check_in refreshed here too, which made it look alive in reports).
+            WHERE device_uuid = @p_device_uuid AND is_deleted = 0;
 
             SET @msg = N'Device logged in.';
         END
@@ -396,7 +398,10 @@ ResultSection:
     BEGIN
         IF @p_action = 'REGISTER_OR_LOGIN'
         BEGIN
-            SELECT
+            -- The LIVE row for this uuid, newest first. Without the is_deleted filter a retired twin
+            -- (same uuid, older id) came back first, the API tried to write the new device token to
+            -- that dead row, the conditional update hit 0 rows and register answered 409 TOKEN_RACE.
+            SELECT TOP 1
                 CAST(d.device_id AS NVARCHAR(36)) AS DeviceId,
                 d.device_uuid AS DeviceUuid,
                 d.device_uuid AS DeviceKey,
@@ -420,7 +425,8 @@ ResultSection:
                 CAST(CASE WHEN d.device_token_hash IS NULL AND d.device_token_reset_at IS NOT NULL THEN 1 ELSE 0 END AS BIT) AS TokenResetPending,
                 'Y' AS Active
             FROM sn_devices d WITH (NOLOCK)
-            WHERE d.device_uuid = @p_device_uuid;
+            WHERE d.device_uuid = @p_device_uuid AND d.is_deleted = 0
+            ORDER BY d.device_id DESC;
         END
 
         IF @p_action = 'HEARTBEAT'

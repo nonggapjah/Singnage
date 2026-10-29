@@ -398,6 +398,36 @@ namespace SignageUnicorn.Api.Services
                 if (_mode == DeviceAuthMode.Required) throw new DeviceAuthRejectedException();
                 return null;
             }
+
+            // Round 6: the register result can name a different row than the one this screen is. The
+            // procedure used to return a soft-deleted twin (same uuid, older id); the lookup above is
+            // uuid-first over live rows only. When they disagree, check whether the row the caller
+            // named is still live: if it is, write against it; if it is not, the live uuid row IS the
+            // screen, so the token goes there and the client is handed that id. Before this, the
+            // conditional update hit the dead row, affected 0 rows and register answered TOKEN_RACE.
+            if (info != null && info.DeviceId != numericId)
+            {
+                DeviceAuthInfo? byId = null;
+                try { byId = await _devices.GetDeviceAuthInfoAsync(numericId.ToString(), null); }
+                catch (Exception ex) { Console.WriteLine($"[DeviceAuth] ISSUE_LOOKUP_FAILED | device={device.DeviceId} | {ex.Message}"); }
+
+                if (byId != null)
+                {
+                    info = byId;
+                }
+                else
+                {
+                    await Audit("REGISTER_ROW_CORRECTED", device.DeviceId, device.DeviceUuid, remoteIp,
+                        $"row {numericId} is not live; token goes to live row {info.DeviceId}");
+                    numericId = info.DeviceId;
+                    device.DeviceId = info.DeviceId.ToString();
+                    if (!string.IsNullOrWhiteSpace(info.DeviceUuid))
+                    {
+                        device.DeviceUuid = info.DeviceUuid;
+                        device.DeviceKey = info.DeviceUuid;
+                    }
+                }
+            }
             var hasToken = !string.IsNullOrEmpty(info?.TokenHash);
 
             if (!tokenCapable)
@@ -500,7 +530,8 @@ namespace SignageUnicorn.Api.Services
                        + (detail == null ? string.Empty : $" | {detail}");
             Console.WriteLine(line);
             if (outcome.StartsWith("REJECT", StringComparison.Ordinal) || outcome.Contains("WITHOUT_TOKEN") || outcome.StartsWith("CLAIM_", StringComparison.Ordinal)
-                || outcome.StartsWith("LEGACY_", StringComparison.Ordinal) || outcome == "ADOPTION_BLOCKED" || outcome == "TOKEN_RACE")
+                || outcome.StartsWith("LEGACY_", StringComparison.Ordinal) || outcome == "ADOPTION_BLOCKED" || outcome == "TOKEN_RACE"
+                || outcome == "REGISTER_ROW_CORRECTED")
             {
                 try { await _log.LogAsync(deviceId, "WARNING", line, "API"); } catch { }
             }

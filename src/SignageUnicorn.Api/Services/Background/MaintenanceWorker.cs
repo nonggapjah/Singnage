@@ -94,7 +94,16 @@ namespace SignageUnicorn.Api.Services.Background
                               AND n.device_uuid NOT LIKE 'WIN-%'
                               AND n.branch_code = sn_devices.branch_code
                               AND n.device_name = sn_devices.device_name
-                              AND n.last_check_in > DATEADD(MINUTE, -5, SYSUTCDATETIME()));";
+                              AND n.last_check_in > DATEADD(MINUTE, -5, SYSUTCDATETIME())
+                              -- The twin must have APPEARED after this row went silent, and within a day
+                              -- of it (an upgrade re-registers within hours). A WIN- row that kept
+                              -- checking in after its supposed successor was created is a different
+                              -- physical screen: several screens at one branch share a name (four
+                              -- 'Ploenchit All' at 1006) and are switched off overnight, so the old rule
+                              -- retired them every night and the morning heartbeat re-created them as
+                              -- new rows, which also dropped their playlist assignments.
+                              AND n.created_at > ISNULL(sn_devices.last_check_in, sn_devices.created_at)
+                              AND n.created_at < DATEADD(HOUR, 24, ISNULL(sn_devices.last_check_in, sn_devices.created_at)));";
                 await deviceRepo.ExecuteSqlAsync(sql);
                 _logger.LogInformation("[Maintenance] Superseded ghost devices retired (if any).");
             }
