@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
     blobBasename,
     mediaCacheKey,
+    pageMediaUrl, withPageMediaUrls,
     cacheRequestUrl,
     applyPlaybackBatchResult,
     nextBackoffMs,
@@ -170,5 +171,33 @@ describe('load ordering and obsolete pending swaps (round-4 #7, #8)', () => {
     it('a promotion after cancellation does nothing (no obsolete swap can fire)', () => {
         const o = cancelPendingLoad(beginPendingLoad(beginActiveLoad(emptyOwnership(), 1), 2));
         expect(promotePending(o)).toBe(o);
+    });
+});
+
+describe('pageMediaUrl (web player media must be same-origin)', () => {
+    it('maps the API BaseUrl form of a media URL to the page-relative /media path', () => {
+        expect(pageMediaUrl('http://192.1.200.185:8862/media/5fe41232.mp4')).toBe('/media/5fe41232.mp4');
+        expect(pageMediaUrl('https://signage.example.com/media/a.png?v=2')).toBe('/media/a.png?v=2');
+        expect(pageMediaUrl('/media/x.mp4')).toBe('/media/x.mp4');
+    });
+
+    it('leaves data, blob and non-media URLs alone', () => {
+        expect(pageMediaUrl('data:image/png;base64,AAAA')).toBe('data:image/png;base64,AAAA');
+        expect(pageMediaUrl('blob:https://x/123')).toBe('blob:https://x/123');
+        expect(pageMediaUrl('http://cdn.example.com/other/file.mp4')).toBe('http://cdn.example.com/other/file.mp4');
+        expect(pageMediaUrl('')).toBe('');
+        expect(pageMediaUrl(undefined)).toBe('');
+    });
+
+    it('withPageMediaUrls rewrites every item and keeps the cache identity (file name + hash)', () => {
+        const items = [
+            { mediaId: '120', media: { blobUrl: 'http://192.1.200.185:8862/media/5fe.mp4', fileHash: 'h1' } },
+            { mediaId: '121', media: undefined },
+        ];
+        const out = withPageMediaUrls(items);
+        expect(out[0].media!.blobUrl).toBe('/media/5fe.mp4');
+        expect(mediaCacheKey({ mediaId: '120', blobUrl: out[0].media!.blobUrl, fileHash: 'h1' }))
+            .toBe(mediaCacheKey({ mediaId: '120', blobUrl: items[0].media!.blobUrl, fileHash: 'h1' }));
+        expect(out[1]).toBe(items[1]);
     });
 });

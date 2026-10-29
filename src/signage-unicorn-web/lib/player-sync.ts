@@ -44,6 +44,33 @@ export function cacheRequestUrl(blobUrl: string, fileHash?: string, base?: strin
     return absolute + (absolute.includes('?') ? '&' : '?') + 'h=' + encodeURIComponent(fileHash);
 }
 
+/**
+ * The page-relative form of a media URL. The API publishes media under its own BaseUrl -- the LAN
+ * http address the kiosks download from -- which on the web player is cross-origin and, on an https
+ * page, mixed content the browser blocks (the video element then stays black and the clip never
+ * caches). Next rewrites /media/* to the API, so the same file is always reachable same-origin over
+ * the page's own scheme. Data URLs, blob URLs and paths outside /media/ are returned unchanged.
+ */
+export function pageMediaUrl(blobUrl: string | null | undefined): string {
+    if (!blobUrl) return '';
+    if (/^(data|blob):/i.test(blobUrl)) return blobUrl;
+    try {
+        const u = new URL(blobUrl, 'http://local');
+        if (u.pathname.startsWith('/media/')) return u.pathname + u.search;
+        return blobUrl;
+    } catch {
+        return blobUrl;
+    }
+}
+
+/** Playlist items with every media URL in its page-relative form (see pageMediaUrl). The cache
+ *  identity (stored file name + hash) is unchanged, so this never looks like a content change. */
+export function withPageMediaUrls<T extends { media?: { blobUrl?: string } | null }>(items: T[]): T[] {
+    return items.map(i => (i.media && i.media.blobUrl)
+        ? ({ ...i, media: { ...i.media, blobUrl: pageMediaUrl(i.media.blobUrl) } } as T)
+        : i);
+}
+
 export interface BatchResponseLike {
     success: boolean;
     code: number;
