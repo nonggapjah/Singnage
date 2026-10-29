@@ -35,7 +35,12 @@ namespace SignageUnicorn.Api.Tests.Fakes
 
         public Task<MediaFile?> GetByIdAsync(string id) => Task.FromResult(Find(id));
 
-        public Task<RepositoryResult<MediaFile>> CreateAsync(MediaFile media, long? userId = null) => throw new NotImplementedException();
+        public Task<RepositoryResult<MediaFile>> CreateAsync(MediaFile media, long? userId = null)
+        {
+            if (string.IsNullOrEmpty(media.MediaId)) media.MediaId = Guid.NewGuid().ToString();
+            Rows.Add(media);
+            return Task.FromResult(RepositoryResult<MediaFile>.Ok(media, "created"));
+        }
 
         public Task<RepositoryResult<MediaFile>> UpdateAsync(MediaFile media, long? userId = null)
         {

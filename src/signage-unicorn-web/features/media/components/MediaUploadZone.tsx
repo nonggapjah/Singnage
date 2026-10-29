@@ -7,6 +7,25 @@ import { getMediaMetadata } from '../utils/media-helpers';
 import { mediaApi } from '../api/media-api';
 import { Modal } from '@/components/ui/Modal';
 
+// Files larger than this go up in chunks to get past the Cloudflare 100 MB per-request edge cap;
+// smaller files keep the single-POST path. CHUNK_SIZE must stay below 100 MB (it matches the API).
+const CHUNKED_THRESHOLD = 90 * 1024 * 1024;
+const CHUNK_SIZE = 20 * 1024 * 1024;
+const CHUNK_RETRIES = 3;
+
+// Whole-file SHA-256 so the server can reject a corrupted assembly. Skipped for very large files
+// (reading the whole buffer to hash is memory-heavy) or where Web Crypto is unavailable; the server
+// then falls back to the exact-size check. Never throws — integrity is best-effort on the client.
+async function sha256Hex(file: File): Promise<string | undefined> {
+    try {
+        if (typeof crypto === 'undefined' || !crypto.subtle || file.size > 600 * 1024 * 1024) return undefined;
+        const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+        return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+    } catch {
+        return undefined;
+    }
+}
+
 interface MediaUploadZoneProps {
     onUploadSuccess: (mediaId?: string) => void;
     onCancel: () => void;
@@ -27,6 +46,9 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({ onUploadSucces
     const [metadata, setMetadata] = useState<{ duration: number, ratio: string } | null>(null);
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
     const [showAsyncNotice, setShowAsyncNotice] = useState(false);
+    const [saving, setSaving] = useState(false);
+    // Percent complete during a chunked upload (null for the single-POST path or before it starts).
+    const [uploadPct, setUploadPct] = useState<number | null>(null);
 
     const inputRef = useRef<HTMLInputElement>(null);
     const uid = useId();
@@ -59,59 +81,120 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({ onUploadSucces
         }, 1500); // Faster simulation
     };
 
-    const handleSave = async (isAsync: boolean = false) => {
-        if (!selectedFile) return;
-        setUploading(true);
+    // Large-file path: slice the file into <100 MB parts and upload them one by one, then ask the
+    // server to assemble, validate and publish. Each part retries a few times; the whole session is
+    // aborted on an unrecoverable error. Returns the new media id.
+    const chunkedUpload = async (
+        file: File,
+        meta: { displayName: string; supplierCode: string; durationSec: number; ratio: string; fileSizeKb: number; remark1: string; remark2: string },
+        endDateIso: string
+    ): Promise<string | undefined> => {
+        const totalChunks = Math.max(1, Math.ceil(file.size / CHUNK_SIZE));
+        const sha256 = await sha256Hex(file);
+
+        const initRes = await mediaApi.chunkInit({ fileName: file.name, totalSize: file.size, totalChunks, sha256 });
+        if (!initRes.success || !initRes.data) throw new Error(initRes.message || 'Failed to start the upload');
+        const uploadId = initRes.data.uploadId;
 
         try {
-            const formData = new FormData();
-            formData.append('File', selectedFile);
-            formData.append('FileName', selectedFile.name);
-            formData.append('DisplayName', customName || selectedFile.name);
-            formData.append('DurationSec', (metadata?.duration || 0).toString());
-            formData.append('Ratio', metadata?.ratio || '16:9');
-            formData.append('FileSizeKb', Math.floor(selectedFile.size / 1024).toString());
-            formData.append('Supplier_Code', supplierCode);
-            formData.append('Remark1', remark1);
-            formData.append('Remark2', remark2);
+            for (let i = 0; i < totalChunks; i++) {
+                const start = i * CHUNK_SIZE;
+                const blob = file.slice(start, Math.min(start + CHUNK_SIZE, file.size));
+                let ok = false;
+                let lastErr = '';
+                for (let attempt = 0; attempt < CHUNK_RETRIES && !ok; attempt++) {
+                    if (attempt > 0) await new Promise(r => setTimeout(r, 1000 * attempt));
+                    const r = await mediaApi.chunkUpload(uploadId, i, blob);
+                    if (r.success) ok = true; else lastErr = r.message || 'chunk upload failed';
+                }
+                if (!ok) throw new Error(`Chunk ${i + 1}/${totalChunks} failed: ${lastErr}`);
+                setUploadPct(Math.round(((i + 1) / totalChunks) * 100));
+            }
+
+            const completeRes = await mediaApi.chunkComplete(uploadId, {
+                displayName: meta.displayName,
+                supplier_Code: meta.supplierCode,
+                fileName: file.name,
+                durationSec: meta.durationSec,
+                ratio: meta.ratio,
+                fileSizeKb: meta.fileSizeKb,
+                remark1: meta.remark1,
+                remark2: meta.remark2,
+                endDate: endDateIso || undefined,
+            });
+            if (!completeRes.success) throw new Error(completeRes.message || 'Failed to finalize the upload');
+            return completeRes.data?.mediaId;
+        } catch (err) {
+            try { await mediaApi.chunkAbort(uploadId); } catch { /* best effort */ }
+            throw err;
+        }
+    };
+
+    const handleSave = async (isAsync: boolean = false) => {
+        if (!selectedFile) return;
+        if (!customName.trim()) {
+            alert('Display Name is required / กรุณาระบุชื่อสื่อ');
+            return;
+        }
+        if (!supplierCode.trim()) {
+            alert('Supplier Code is required / กรุณาระบุรหัสผู้จัดทำ');
+            return;
+        }
+
+        setSaving(true);
+        setUploading(true);
+        setUploadPct(null);
+
+        try {
             // An expiry date means "until the end of that day" in local time; the API stores UTC.
-            if (endDate) formData.append('EndDate', expiryDateForApi(endDate, (await getCapabilities()).utcFilters) ?? '');
+            const endDateIso = endDate ? (expiryDateForApi(endDate, (await getCapabilities()).utcFilters) ?? '') : '';
+            const displayName = customName || selectedFile.name;
+            const durationSec = metadata?.duration || 0;
+            const ratio = metadata?.ratio || '16:9';
+            const fileSizeKb = Math.floor(selectedFile.size / 1024);
 
-            if (!customName.trim()) {
-                alert('Display Name is required / กรุณาระบุชื่อสื่อ');
-                setUploading(false);
-                return;
-            }
-            if (!supplierCode.trim()) {
-                alert('Supplier Code is required / กรุณาระบุรหัสผู้จัดทำ');
-                setUploading(false);
-                return;
-            }
+            let newMediaId: string | undefined;
 
-            let res;
-            if (targetMediaId) {
-                // Direct Content Replacement
-                res = await mediaApi.replaceContent(targetMediaId, formData);
+            if (!targetMediaId && selectedFile.size > CHUNKED_THRESHOLD) {
+                // Too large for one request through Cloudflare: upload in chunks.
+                newMediaId = await chunkedUpload(
+                    selectedFile,
+                    { displayName, supplierCode, durationSec, ratio, fileSizeKb, remark1, remark2 },
+                    endDateIso
+                );
             } else {
-                // New Upload
-                res = await mediaApi.upload(formData);
-            }
+                const formData = new FormData();
+                formData.append('File', selectedFile);
+                formData.append('FileName', selectedFile.name);
+                formData.append('DisplayName', displayName);
+                formData.append('DurationSec', durationSec.toString());
+                formData.append('Ratio', ratio);
+                formData.append('FileSizeKb', fileSizeKb.toString());
+                formData.append('Supplier_Code', supplierCode);
+                formData.append('Remark1', remark1);
+                formData.append('Remark2', remark2);
+                if (endDateIso) formData.append('EndDate', endDateIso);
 
-            if (!res.success) {
-                throw new Error(res.message || 'Upload failed');
+                const res = targetMediaId
+                    ? await mediaApi.replaceContent(targetMediaId, formData)
+                    : await mediaApi.upload(formData);
+                if (!res.success) throw new Error(res.message || 'Upload failed');
+                newMediaId = res.data?.mediaId;
             }
 
             if (isAsync && !uploadFinished) {
                 setShowAsyncNotice(true);
             }
 
-            onUploadSuccess(res.data?.mediaId);
+            onUploadSuccess(newMediaId);
             resetForm();
         } catch (error) {
             console.error("Save failed", error);
             alert(`Upload Failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
         } finally {
+            setSaving(false);
             setUploading(false);
+            setUploadPct(null);
         }
     };
 
@@ -396,7 +479,8 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({ onUploadSucces
                         <button
                             type="button"
                             onClick={() => handleSave(true)}
-                            className="rounded-xl px-6 py-3 text-xs font-bold uppercase tracking-widest text-muted-foreground hover:text-foreground border border-border hover:bg-muted/30 transition-colors"
+                            disabled={saving}
+                            className="rounded-xl px-6 py-3 text-xs font-bold uppercase tracking-widest text-muted-foreground hover:text-foreground border border-border hover:bg-muted/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             Save in background
                         </button>
@@ -404,14 +488,16 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({ onUploadSucces
                     <button
                         type="button"
                         onClick={() => handleSave(false)}
-                        disabled={!selectedFile || (uploading && !uploadFinished)}
+                        disabled={!selectedFile || saving || (uploading && !uploadFinished)}
                         className={`rounded-xl px-8 py-3 text-xs font-black uppercase tracking-[0.2em] transition-colors w-full md:w-auto
-                            ${(!selectedFile || (uploading && !uploadFinished))
+                            ${(!selectedFile || saving || (uploading && !uploadFinished))
                                 ? 'bg-muted text-muted-foreground cursor-not-allowed'
                                 : 'bg-primary text-primary-foreground hover:brightness-110'}
                         `}
                     >
-                        {uploadFinished ? (isEmbed ? 'Confirm new file' : 'Save media') : 'Upload & save'}
+                        {saving
+                            ? (uploadPct !== null ? `Uploading ${uploadPct}%` : 'Saving…')
+                            : uploadFinished ? (isEmbed ? 'Confirm new file' : 'Save media') : 'Upload & save'}
                     </button>
                 </div>
             </div>

@@ -70,4 +70,42 @@ export const mediaApi = {
             method: 'POST',
         });
     },
+
+    // ---- Chunked / resumable upload (for files past the Cloudflare 100 MB per-request cap) ----
+    // Flow: chunkInit -> chunkUpload (per part) -> chunkComplete. Each request stays under 100 MB.
+    chunkInit: async (data: { fileName: string; totalSize: number; totalChunks: number; sha256?: string }): Promise<ApiResponse<{ uploadId: string; chunkSize: number }>> => {
+        return await apiFetch('/media/upload/init', {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+    },
+
+    chunkUpload: async (uploadId: string, index: number, blob: Blob): Promise<ApiResponse<null>> => {
+        // Raw body: the server reads the request stream directly. apiFetch labels it JSON, which the
+        // server ignores. isUpload=true gives the 10 min timeout.
+        return await apiFetch(`/media/upload/${uploadId}/chunk/${index}`, {
+            method: 'PUT',
+            body: blob,
+        }, true);
+    },
+
+    chunkStatus: async (uploadId: string): Promise<ApiResponse<{ uploadId: string; receivedChunks: number[]; totalChunks: number }>> => {
+        return await apiFetch(`/media/upload/${uploadId}/status`);
+    },
+
+    chunkComplete: async (uploadId: string, data: {
+        displayName: string; supplier_Code: string; fileName?: string; durationSec?: number;
+        ratio?: string; fileSizeKb?: number; remark1?: string; remark2?: string; endDate?: string;
+    }): Promise<ApiResponse<MediaFile>> => {
+        return await apiFetch(`/media/upload/${uploadId}/complete`, {
+            method: 'POST',
+            body: JSON.stringify(data),
+        }, true);
+    },
+
+    chunkAbort: async (uploadId: string): Promise<ApiResponse<unknown>> => {
+        return await apiFetch(`/media/upload/${uploadId}`, {
+            method: 'DELETE',
+        });
+    },
 };

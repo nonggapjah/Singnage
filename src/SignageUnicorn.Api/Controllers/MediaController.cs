@@ -200,6 +200,101 @@ namespace SignageUnicorn.Api.Controllers
             }
         }
 
+        // ===================== Chunked / resumable upload =====================
+        // For files that exceed the Cloudflare 100 MB per-request edge cap. The client slices the
+        // file into <100 MB parts: init -> PUT each chunk -> complete. The server assembles and runs
+        // the SAME validation + transcode as a single-shot upload. See MediaService.Chunk* methods.
+
+        [HttpPost("upload/init")]
+        [Authorize(Roles = UserRoles.Admin + "," + UserRoles.Editor)]
+        public IActionResult ChunkInit([FromBody] ChunkedUploadInitRequest request)
+        {
+            try
+            {
+                return Ok(ApiResponse<ChunkedUploadInitResponse>.SuccessResponse(_service.ChunkInit(request, GetUserId()), "Upload session created"));
+            }
+            catch (MediaValidationException ex)
+            {
+                return BadRequest(ApiResponse<object>.ErrorResponse(400, ex.Message));
+            }
+        }
+
+        [HttpPut("upload/{uploadId}/chunk/{index:int}")]
+        [Authorize(Roles = UserRoles.Admin + "," + UserRoles.Editor)]
+        [RequestSizeLimit(62914560)] // 60 MB: one 20 MB chunk plus generous slack
+        public async Task<IActionResult> ChunkUpload(string uploadId, int index)
+        {
+            try
+            {
+                await _service.ChunkSaveAsync(uploadId, index, Request.Body, GetUserId());
+                return Ok(ApiResponse<object>.SuccessResponse(null, "Chunk received"));
+            }
+            catch (MediaValidationException ex)
+            {
+                return BadRequest(ApiResponse<object>.ErrorResponse(400, ex.Message));
+            }
+            catch (Exception ex)
+            {
+                var userId = GetUserId();
+                await _systemLog.LogAsync(null, "ERROR", $"[MediaController] CHUNK_UPLOAD_FAILED | upload={uploadId} index={index} | {ex.Message}", "API", userId);
+                return StatusCode(500, ApiResponse<object>.ErrorResponse(500, $"Chunk upload failed: {ex.Message}"));
+            }
+        }
+
+        [HttpGet("upload/{uploadId}/status")]
+        [Authorize(Roles = UserRoles.Admin + "," + UserRoles.Editor)]
+        public IActionResult ChunkStatus(string uploadId)
+        {
+            try
+            {
+                return Ok(ApiResponse<ChunkedUploadStatusResponse>.SuccessResponse(_service.ChunkStatus(uploadId, GetUserId())));
+            }
+            catch (MediaValidationException ex)
+            {
+                return NotFound(ApiResponse<object>.ErrorResponse(404, ex.Message));
+            }
+        }
+
+        [HttpPost("upload/{uploadId}/complete")]
+        [Authorize(Roles = UserRoles.Admin + "," + UserRoles.Editor)]
+        public async Task<IActionResult> ChunkComplete(string uploadId, [FromBody] ChunkedUploadCompleteRequest request)
+        {
+            try
+            {
+                var result = await _service.ChunkCompleteAsync(uploadId, request, GetUserId());
+                if (result != null)
+                {
+                    return Ok(ApiResponse<MediaFile>.SuccessResponse(result, "Media uploaded successfully"));
+                }
+                return BadRequest(ApiResponse<MediaFile>.ErrorResponse(400, "Failed to save the assembled media."));
+            }
+            catch (MediaValidationException ex)
+            {
+                return BadRequest(ApiResponse<object>.ErrorResponse(400, ex.Message));
+            }
+            catch (Exception ex)
+            {
+                var userId = GetUserId();
+                await _systemLog.LogAsync(null, "ERROR", $"[MediaController] CHUNK_COMPLETE_FAILED | upload={uploadId} | {ex.Message} | {ex.StackTrace}", "API", userId);
+                return StatusCode(500, ApiResponse<object>.ErrorResponse(500, $"An internal server error occurred while finalizing the upload: {ex.Message}"));
+            }
+        }
+
+        [HttpDelete("upload/{uploadId}")]
+        [Authorize(Roles = UserRoles.Admin + "," + UserRoles.Editor)]
+        public async Task<IActionResult> ChunkAbort(string uploadId)
+        {
+            try
+            {
+                await _service.ChunkAbortAsync(uploadId, GetUserId());
+                return Ok(ApiResponse<object>.SuccessResponse(null, "Upload session discarded"));
+            }
+            catch (MediaValidationException ex)
+            {
+                return BadRequest(ApiResponse<object>.ErrorResponse(400, ex.Message));
+            }
+        }
+
         [HttpPost("cleanup")]
         [Authorize(Roles = UserRoles.Admin)]
         public async Task<IActionResult> RunCleanup()

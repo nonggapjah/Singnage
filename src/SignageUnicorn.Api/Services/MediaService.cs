@@ -5,6 +5,8 @@ using Microsoft.AspNetCore.Http;
 using System.IO;
 using System.Linq;
 using System.Collections.Generic;
+using System.Text.Json;
+using System.Security.Cryptography;
 using Microsoft.Extensions.Configuration;
 
 namespace SignageUnicorn.Api.Services
@@ -113,41 +115,7 @@ namespace SignageUnicorn.Api.Services
                 if (request.FileSizeKb == null || request.FileSizeKb == 0) request.FileSizeKb = stored.SizeKb;
             }
 
-            var media = new MediaFile
-            {
-                FileName = request.FileName,
-                DisplayName = request.DisplayName ?? request.FileName,
-                BlobUrl = finalUrl,
-                DurationSec = request.DurationSec,
-                Ratio = request.Ratio,
-                FileSizeKb = request.FileSizeKb,
-                Supplier_Code = request.Supplier_Code,
-                Remark1 = request.Remark1,
-                Remark2 = request.Remark2,
-                UploadedBy = "admin", // Legacy, now tracked by userId in DB
-                Active = "Y",
-                FileHash = fileHash,
-                EndDate = request.EndDate
-            };
-
-            var result = await _repository.CreateAsync(media, userId);
-            if (result.Success && result.Value != null)
-            {
-                var createdMedia = TransformToAbsoluteUrl(result.Value);
-                await _systemLog.LogAsync(null, "INFO", $"[MediaService] UPLOAD_SUCCESS | FileName: {createdMedia.FileName} | MediaID: {createdMedia.MediaId}", "API", userId);
-
-                // F22: transcode in the background and publish the result under a NEW file name
-                // with blob_url + hash + size updated in one step (see PublishTranscodedAsync).
-                if (needsTranscoding && !string.IsNullOrEmpty(localFilePath))
-                {
-                    var mediaId = result.Value.MediaId;
-                    var sourcePath = localFilePath;
-                    _ = Task.Run(() => PublishTranscodedAsync(mediaId, sourcePath, userId, "ASYNC_TRANSCODE"));
-                }
-
-                return createdMedia;
-            }
-            return null;
+            return await BuildAndSaveMediaAsync(request, finalUrl, fileHash, needsTranscoding, localFilePath, userId);
         }
 
         public async Task<bool> UpdateMediaAsync(string id, MediaFile updateData, long? userId = null)
@@ -609,8 +577,7 @@ namespace SignageUnicorn.Api.Services
             var stagingFolder = Path.Combine(uploadsFolder, "_staging");
             Directory.CreateDirectory(stagingFolder);
 
-            var uniqueFileName = $"{Guid.NewGuid()}{ext}";
-            var stagingPath = Path.Combine(stagingFolder, uniqueFileName);
+            var stagingPath = Path.Combine(stagingFolder, $"{Guid.NewGuid()}{ext}");
             try
             {
                 using (var fs = new FileStream(stagingPath, FileMode.Create))
@@ -618,27 +585,9 @@ namespace SignageUnicorn.Api.Services
                     await file.CopyToAsync(fs);
                 }
 
-                var head = new byte[16];
-                int read;
-                using (var fs = File.OpenRead(stagingPath))
-                {
-                    read = fs.Read(head, 0, head.Length);
-                }
-                var problem = MediaFileValidator.CheckMagic(ext, head.AsSpan(0, read));
-                if (problem != null) throw new MediaValidationException($"Upload rejected: {problem}.");
-
-                var finalPath = Path.Combine(uploadsFolder, uniqueFileName);
-                File.Move(stagingPath, finalPath);
-
-                var info = new FileInfo(finalPath);
-                return new StoredUpload
-                {
-                    UniqueFileName = uniqueFileName,
-                    FilePath = finalPath,
-                    Hash = ComputeMd5(finalPath),
-                    SizeKb = (int)(info.Length / 1024),
-                    NeedsTranscoding = MediaFileValidator.IsVideoExtension(ext)
-                };
+                // Shared with the chunked-upload path: magic-byte check, move into the published
+                // media folder, hash + size. Throws MediaValidationException on a content mismatch.
+                return FinalizeStagedFile(stagingPath, ext);
             }
             catch
             {
@@ -647,11 +596,423 @@ namespace SignageUnicorn.Api.Services
             }
         }
 
+        // Validate a fully-written staged file by its magic bytes, move it into the published media
+        // folder under a fresh GUID name, and return its hash/size. Used by BOTH the single-shot
+        // IFormFile upload and the chunked-upload assembly, so they share identical validation.
+        private StoredUpload FinalizeStagedFile(string stagingPath, string ext)
+        {
+            var head = new byte[16];
+            int read;
+            using (var fs = File.OpenRead(stagingPath))
+            {
+                read = fs.Read(head, 0, head.Length);
+            }
+            var problem = MediaFileValidator.CheckMagic(ext, head.AsSpan(0, read));
+            if (problem != null) throw new MediaValidationException($"Upload rejected: {problem}.");
+
+            var uploadsFolder = UploadsFolder();
+            var uniqueFileName = $"{Guid.NewGuid()}{ext}";
+            var finalPath = Path.Combine(uploadsFolder, uniqueFileName);
+            File.Move(stagingPath, finalPath);
+
+            var info = new FileInfo(finalPath);
+            return new StoredUpload
+            {
+                UniqueFileName = uniqueFileName,
+                FilePath = finalPath,
+                Hash = ComputeMd5(finalPath),
+                SizeKb = (int)(info.Length / 1024),
+                NeedsTranscoding = MediaFileValidator.IsVideoExtension(ext)
+            };
+        }
+
+        // Create the sn_media_files row for an already-stored file (or an external BlobUrl when
+        // fileHash/localFilePath are null) and, for video, kick off the background transcode. Shared
+        // by the single-shot upload and the chunked-upload completion so both persist identically.
+        private async Task<MediaFile?> BuildAndSaveMediaAsync(MediaUploadRequest request, string finalUrl, string? fileHash, bool needsTranscoding, string? localFilePath, long? userId)
+        {
+            var media = new MediaFile
+            {
+                FileName = request.FileName,
+                DisplayName = request.DisplayName ?? request.FileName,
+                BlobUrl = finalUrl,
+                DurationSec = request.DurationSec,
+                Ratio = request.Ratio,
+                FileSizeKb = request.FileSizeKb,
+                Supplier_Code = request.Supplier_Code,
+                Remark1 = request.Remark1,
+                Remark2 = request.Remark2,
+                UploadedBy = "admin", // Legacy, now tracked by userId in DB
+                Active = "Y",
+                FileHash = fileHash,
+                EndDate = request.EndDate
+            };
+
+            var result = await _repository.CreateAsync(media, userId);
+            if (result.Success && result.Value != null)
+            {
+                var createdMedia = TransformToAbsoluteUrl(result.Value);
+                await _systemLog.LogAsync(null, "INFO", $"[MediaService] UPLOAD_SUCCESS | FileName: {createdMedia.FileName} | MediaID: {createdMedia.MediaId}", "API", userId);
+
+                // F22: transcode in the background and publish the result under a NEW file name
+                // with blob_url + hash + size updated in one step (see PublishTranscodedAsync).
+                if (needsTranscoding && !string.IsNullOrEmpty(localFilePath))
+                {
+                    var mediaId = result.Value.MediaId;
+                    var sourcePath = localFilePath;
+                    _ = Task.Run(() => PublishTranscodedAsync(mediaId, sourcePath, userId, "ASYNC_TRANSCODE"));
+                }
+
+                return createdMedia;
+            }
+
+            // The file is already in the public /media folder but no row references it. Remove it so a
+            // database failure does not strand a published-but-unreferenced file (previously it lingered
+            // until the 24 h maintenance sweep). Applies to both the single-shot and chunked paths.
+            if (!string.IsNullOrEmpty(localFilePath))
+            {
+                try { if (File.Exists(localFilePath)) File.Delete(localFilePath); } catch { }
+                await _systemLog.LogAsync(null, "WARNING", $"[MediaService] UPLOAD_ROW_FAILED_FILE_REMOVED | {finalUrl}", "API", userId);
+            }
+            return null;
+        }
+
         private static string ComputeMd5(string path)
         {
             using var md5 = System.Security.Cryptography.MD5.Create();
             using var stream = File.OpenRead(path);
             return BitConverter.ToString(md5.ComputeHash(stream)).Replace("-", "").ToLowerInvariant();
+        }
+
+        private static string ComputeSha256(string path)
+        {
+            using var sha = SHA256.Create();
+            using var stream = File.OpenRead(path);
+            return Convert.ToHexString(sha.ComputeHash(stream)).ToLowerInvariant();
+        }
+
+        // ============================ Chunked / resumable upload ============================
+        // Each chunk request is kept under the Cloudflare 100 MB per-request edge cap, so a file of
+        // any size reaches the API as a sequence of parts and is then assembled, validated and
+        // published through the SAME pipeline as a single-shot upload. Session files live under
+        // wwwroot/media/_staging/chunk_<guid>/, which Program.cs already blocks from static serving.
+
+        // The largest a single chunk may be. The client keeps each part at or below this; the server
+        // tolerates a little slack but rejects anything far larger. 20 MB stays well under 100 MB.
+        public const int ChunkSize = 20 * 1024 * 1024;
+        private const long MaxUploadBytes = 2L * 1024 * 1024 * 1024; // 2 GB, matching the controller limit
+        private static readonly TimeSpan StaleSessionAge = TimeSpan.FromHours(24);
+
+        private sealed class ChunkManifest
+        {
+            public string FileName { get; set; } = string.Empty;
+            public string Ext { get; set; } = string.Empty;
+            public long TotalSize { get; set; }
+            public int TotalChunks { get; set; }
+            public string? Sha256 { get; set; }
+            public DateTime CreatedAtUtc { get; set; }
+            // The user who opened the session. Every later operation must be the same user, so one
+            // admin/editor cannot inspect, overwrite, complete or abort another's upload by its id.
+            public long? OwnerUserId { get; set; }
+        }
+
+        // One lock per upload id serializes that session's chunk writes, completion and abort so the
+        // cumulative-size accounting is atomic and two requests can never assemble/publish it twice.
+        // The API is a single process, so a static registry is sufficient.
+        //
+        // The registry is REFERENCE-COUNTED: every caller that will wait on a session's lock first
+        // rents the gate (ref++) under _gatesLock, and returns it (ref--) in its finally. The entry is
+        // removed and its semaphore disposed ONLY when the last holder leaves (ref == 0). This is what
+        // guarantees that, as long as ANY request is working on a session, every other request for the
+        // same id shares the SAME semaphore -- so a non-terminal failure (missing chunk, ownership
+        // mismatch) can never strand a live session on a second semaphore and reopen the size race.
+        // Because every operation rents the gate before touching the session, the registry also cannot
+        // grow without bound: a PUT to an uninitialised id rents, fails validation, and returns, which
+        // drops the entry again.
+        private sealed class SessionGate
+        {
+            public readonly SemaphoreSlim Sem = new(1, 1);
+            public int Refs;
+        }
+        private static readonly Dictionary<string, SessionGate> _gates = new();
+        private static readonly object _gatesLock = new();
+
+        private static SessionGate RentGate(string id)
+        {
+            lock (_gatesLock)
+            {
+                if (!_gates.TryGetValue(id, out var g)) { g = new SessionGate(); _gates[id] = g; }
+                g.Refs++;
+                return g;
+            }
+        }
+        private static void ReturnGate(string id, SessionGate g)
+        {
+            lock (_gatesLock)
+            {
+                if (--g.Refs == 0 && _gates.TryGetValue(id, out var cur) && ReferenceEquals(cur, g))
+                {
+                    _gates.Remove(id);
+                    g.Sem.Dispose(); // safe: ref==0 means no one else holds or waits on this gate
+                }
+            }
+        }
+
+        // Run an operation with exclusive access to one upload session. The gate reference is returned
+        // in an OUTER finally so a throwing WaitAsync (e.g. a future cancellable wait) cannot leak the
+        // rented reference; Release runs only in the inner finally, i.e. only after a wait succeeded.
+        private static async Task<T> UnderSessionLock<T>(string key, Func<Task<T>> action)
+        {
+            var gate = RentGate(key);
+            try
+            {
+                await gate.Sem.WaitAsync();
+                try { return await action(); }
+                finally { gate.Sem.Release(); }
+            }
+            finally { ReturnGate(key, gate); }
+        }
+        private static async Task UnderSessionLock(string key, Func<Task> action)
+        {
+            var gate = RentGate(key);
+            try
+            {
+                await gate.Sem.WaitAsync();
+                try { await action(); }
+                finally { gate.Sem.Release(); }
+            }
+            finally { ReturnGate(key, gate); }
+        }
+
+        // The id must be a GUID we issued, so Guid.Parse both validates it and strips any
+        // path-traversal attempt before it is ever used as a folder name or a lock key.
+        private static string NormalizeUploadId(string uploadId)
+        {
+            if (!Guid.TryParse(uploadId, out var g))
+                throw new MediaValidationException("Invalid upload id.");
+            return g.ToString("N");
+        }
+
+        private string ChunkSessionFolder(string uploadId)
+            => Path.Combine(UploadsFolder(), "_staging", "chunk_" + NormalizeUploadId(uploadId));
+
+        // Owner gate: a session with an owner may only be touched by that owner.
+        private static void AssertOwner(ChunkManifest manifest, long? userId)
+        {
+            if (manifest.OwnerUserId.HasValue && manifest.OwnerUserId != userId)
+                throw new MediaValidationException("This upload session belongs to another user.");
+        }
+
+        private static ChunkManifest ReadManifest(string folder)
+        {
+            var path = Path.Combine(folder, "manifest.json");
+            if (!File.Exists(path)) throw new MediaValidationException("Upload session not found or expired.");
+            var m = JsonSerializer.Deserialize<ChunkManifest>(File.ReadAllText(path));
+            if (m == null) throw new MediaValidationException("Upload session is corrupted.");
+            return m;
+        }
+
+        // Best-effort removal of abandoned sessions (a client that closed the tab mid-upload). Called
+        // opportunistically from ChunkInit so no extra background wiring is needed.
+        private void CleanupStaleChunkSessions()
+        {
+            try
+            {
+                var staging = Path.Combine(UploadsFolder(), "_staging");
+                if (!Directory.Exists(staging)) return;
+                foreach (var dir in Directory.GetDirectories(staging, "chunk_*"))
+                {
+                    try
+                    {
+                        if (DateTime.UtcNow - Directory.GetLastWriteTimeUtc(dir) > StaleSessionAge)
+                            Directory.Delete(dir, true);
+                    }
+                    catch { /* a session being written concurrently; skip it */ }
+                }
+            }
+            catch { /* staging not present yet */ }
+        }
+
+        public ChunkedUploadInitResponse ChunkInit(ChunkedUploadInitRequest req, long? userId = null)
+        {
+            var ext = (Path.GetExtension(req.FileName) ?? string.Empty).ToLowerInvariant();
+            if (!MediaFileValidator.IsAllowedExtension(ext))
+                throw new MediaValidationException($"File type '{ext}' is not allowed. Allowed: {string.Join(", ", MediaFileValidator.AllowedExtensions)}");
+            if (req.TotalSize <= 0 || req.TotalSize > MaxUploadBytes)
+                throw new MediaValidationException($"File size must be between 1 byte and {MaxUploadBytes} bytes.");
+            // The declared part count must be able to cover the file with the advertised chunk size,
+            // and there can never be more parts than bytes. A client that declares too few parts will
+            // be caught by the per-chunk size cap; too many is rejected here.
+            var minChunks = (int)((req.TotalSize + ChunkSize - 1) / ChunkSize);
+            if (req.TotalChunks < minChunks || req.TotalChunks > req.TotalSize || req.TotalChunks > 200000)
+                throw new MediaValidationException("Invalid chunk count for the declared size.");
+
+            CleanupStaleChunkSessions();
+
+            var uploadId = Guid.NewGuid().ToString("N");
+            var folder = ChunkSessionFolder(uploadId);
+            Directory.CreateDirectory(folder);
+            var manifest = new ChunkManifest
+            {
+                FileName = req.FileName,
+                Ext = ext,
+                TotalSize = req.TotalSize,
+                TotalChunks = req.TotalChunks,
+                Sha256 = string.IsNullOrWhiteSpace(req.Sha256) ? null : req.Sha256.Trim().ToLowerInvariant(),
+                CreatedAtUtc = DateTime.UtcNow,
+                OwnerUserId = userId
+            };
+            File.WriteAllText(Path.Combine(folder, "manifest.json"), JsonSerializer.Serialize(manifest));
+            return new ChunkedUploadInitResponse { UploadId = uploadId, ChunkSize = ChunkSize };
+        }
+
+        public Task ChunkSaveAsync(string uploadId, int index, Stream body, long? userId = null)
+        {
+            var key = NormalizeUploadId(uploadId);
+            var folder = ChunkSessionFolder(uploadId);
+            return UnderSessionLock(key, async () =>
+            {
+                if (!Directory.Exists(folder)) throw new MediaValidationException("Upload session not found or expired.");
+                var manifest = ReadManifest(folder);
+                AssertOwner(manifest, userId);
+                if (index < 0 || index >= manifest.TotalChunks)
+                    throw new MediaValidationException("Chunk index out of range.");
+
+                var partPath = Path.Combine(folder, $"{index}.part");
+                // Unique temp name so an in-flight retry of the SAME index never shares a file with
+                // the original (which could raise a sharing violation or be deleted out from under it).
+                var tmpPath = Path.Combine(folder, $"{index}.{Guid.NewGuid():N}.tmp");
+                try
+                {
+                    long written;
+                    using (var fs = new FileStream(tmpPath, FileMode.Create))
+                    {
+                        await body.CopyToAsync(fs);
+                        written = fs.Length;
+                    }
+                    // A single part must never exceed the advertised chunk size (plus a little slack).
+                    if (written > ChunkSize + (1024 * 1024))
+                        throw new MediaValidationException("Chunk exceeds the maximum chunk size.");
+
+                    // Bound TOTAL stored bytes BEFORE committing this part: the sum of every other part
+                    // plus this one must not exceed the declared size. This closes the disk-fill hole
+                    // where a client ignored the rejection and kept sending parts (each one otherwise
+                    // stayed on disk). Nothing is committed until it is known to fit. Safe because the
+                    // session lock makes this read-sum-then-commit atomic across concurrent chunks.
+                    long existingOthers = new DirectoryInfo(folder).GetFiles("*.part")
+                        .Where(f => Path.GetFileNameWithoutExtension(f.Name) != index.ToString())
+                        .Sum(f => f.Length);
+                    if (existingOthers + written > manifest.TotalSize)
+                        throw new MediaValidationException("Uploaded data exceeds the declared file size.");
+
+                    // Idempotent: re-sending a part replaces it (safe for retries/resume).
+                    File.Move(tmpPath, partPath, overwrite: true);
+                }
+                finally
+                {
+                    try { if (File.Exists(tmpPath)) File.Delete(tmpPath); } catch { }
+                }
+            });
+        }
+
+        public ChunkedUploadStatusResponse ChunkStatus(string uploadId, long? userId = null)
+        {
+            var folder = ChunkSessionFolder(uploadId);
+            if (!Directory.Exists(folder)) throw new MediaValidationException("Upload session not found or expired.");
+            var manifest = ReadManifest(folder);
+            AssertOwner(manifest, userId);
+            var received = Directory.GetFiles(folder, "*.part")
+                .Select(f => Path.GetFileNameWithoutExtension(f))
+                .Select(n => int.TryParse(n, out var i) ? i : -1)
+                .Where(i => i >= 0)
+                .OrderBy(i => i)
+                .ToList();
+            return new ChunkedUploadStatusResponse { UploadId = uploadId, ReceivedChunks = received, TotalChunks = manifest.TotalChunks };
+        }
+
+        public Task ChunkAbortAsync(string uploadId, long? userId = null)
+        {
+            var key = NormalizeUploadId(uploadId);
+            var folder = ChunkSessionFolder(uploadId);
+            return UnderSessionLock(key, () =>
+            {
+                if (Directory.Exists(folder))
+                {
+                    var manifest = ReadManifest(folder);
+                    AssertOwner(manifest, userId);
+                    Directory.Delete(folder, true);
+                }
+                return Task.CompletedTask;
+            });
+        }
+
+        public Task<MediaFile?> ChunkCompleteAsync(string uploadId, ChunkedUploadCompleteRequest req, long? userId)
+        {
+            var key = NormalizeUploadId(uploadId);
+            var folder = ChunkSessionFolder(uploadId);
+            return UnderSessionLock<MediaFile?>(key, async () =>
+            {
+                if (!Directory.Exists(folder)) throw new MediaValidationException("Upload session not found or expired.");
+                var manifest = ReadManifest(folder);
+                AssertOwner(manifest, userId);
+
+                // A missing chunk leaves the session ALIVE (the folder is not deleted here) so the
+                // client can upload the gap and retry complete. Corrupt/oversize data below is terminal.
+                for (int i = 0; i < manifest.TotalChunks; i++)
+                {
+                    if (!File.Exists(Path.Combine(folder, $"{i}.part")))
+                        throw new MediaValidationException($"Upload incomplete: missing chunk {i} of {manifest.TotalChunks}.");
+                }
+
+                var assembledPath = Path.Combine(folder, $"assembled{manifest.Ext}");
+                try
+                {
+                    using (var outFs = new FileStream(assembledPath, FileMode.Create))
+                    {
+                        for (int i = 0; i < manifest.TotalChunks; i++)
+                        {
+                            using var inFs = File.OpenRead(Path.Combine(folder, $"{i}.part"));
+                            await inFs.CopyToAsync(outFs);
+                        }
+                    }
+
+                    var assembledLen = new FileInfo(assembledPath).Length;
+                    if (assembledLen != manifest.TotalSize)
+                        throw new MediaValidationException($"Assembled size {assembledLen} does not match the declared {manifest.TotalSize}.");
+
+                    if (!string.IsNullOrEmpty(manifest.Sha256))
+                    {
+                        var actual = ComputeSha256(assembledPath);
+                        if (!string.Equals(actual, manifest.Sha256, StringComparison.OrdinalIgnoreCase))
+                            throw new MediaValidationException("Checksum mismatch; the upload is corrupted. Please try again.");
+                    }
+
+                    // Same validation + publish as a single-shot upload (magic bytes, move, hash, size).
+                    var stored = FinalizeStagedFile(assembledPath, manifest.Ext);
+
+                    var request = new MediaUploadRequest
+                    {
+                        FileName = string.IsNullOrWhiteSpace(req.FileName) ? manifest.FileName : req.FileName,
+                        DisplayName = req.DisplayName,
+                        Supplier_Code = req.Supplier_Code,
+                        DurationSec = req.DurationSec,
+                        Ratio = req.Ratio,
+                        FileSizeKb = (req.FileSizeKb == null || req.FileSizeKb == 0) ? stored.SizeKb : req.FileSizeKb,
+                        Remark1 = req.Remark1,
+                        Remark2 = req.Remark2,
+                        EndDate = req.EndDate
+                    };
+
+                    return await BuildAndSaveMediaAsync(request, $"/media/{stored.UniqueFileName}", stored.Hash, stored.NeedsTranscoding, stored.FilePath, userId);
+                }
+                finally
+                {
+                    // Reached once assembly has started (all chunks were present). Drop the whole session
+                    // folder: on success the assembled file was already moved out by FinalizeStagedFile;
+                    // on a corrupt/size/magic failure the bad data is discarded with it.
+                    try { if (Directory.Exists(folder)) Directory.Delete(folder, true); } catch { }
+                }
+            });
         }
 
         // F22 / contract item 3. The converted file is published under a NEW GUID name and the row's
