@@ -17,6 +17,9 @@ namespace SignageUnicorn.Api.Repositories.Interfaces
         Task<RepositoryResult<int>> GetOfflineDeviceCountAsync(int days = 14);
         Task<IEnumerable<DeviceDto>> GetDevicesByMediaIdAsync(string mediaId);
         Task<IEnumerable<DeviceDto>> GetDevicesByPlaylistIdAsync(string playlistId);
+        // The "where is this playlist playing" view: every screen playing this playlist now
+        // (current_playlist_id) or with it explicitly assigned, with status + heartbeat age + flags.
+        Task<IEnumerable<PlaylistDeviceDto>> GetDevicesForPlaylistViewAsync(string playlistId);
         Task<IEnumerable<DevicePlaylistDto>> GetAssignedPlaylistsAsync(string deviceId);
         Task<string?> GetSiblingDeviceIdWithAssignmentsAsync(string deviceId);
         Task UpdateAssignedPlaylistsAsync(string deviceId, List<DevicePlaylistDto> playlists);

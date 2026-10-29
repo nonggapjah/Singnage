@@ -180,6 +180,7 @@ namespace SignageUnicorn.Api.Tests.Fakes
         public Task<RepositoryResult<int>> GetOfflineDeviceCountAsync(int days = 14) => throw new NotImplementedException();
         public Task<IEnumerable<DeviceDto>> GetDevicesByMediaIdAsync(string mediaId) => throw new NotImplementedException();
         public Task<IEnumerable<DeviceDto>> GetDevicesByPlaylistIdAsync(string playlistId) => throw new NotImplementedException();
+        public Task<IEnumerable<PlaylistDeviceDto>> GetDevicesForPlaylistViewAsync(string playlistId) => Task.FromResult(Enumerable.Empty<PlaylistDeviceDto>());
         public Task<IEnumerable<DevicePlaylistDto>> GetAssignedPlaylistsAsync(string deviceId) => throw new NotImplementedException();
         public Task<string?> GetSiblingDeviceIdWithAssignmentsAsync(string deviceId) => throw new NotImplementedException();
         public Task UpdateAssignedPlaylistsAsync(string deviceId, List<DevicePlaylistDto> playlists) => throw new NotImplementedException();

@@ -335,6 +335,7 @@ namespace SignageUnicorn.Api.Tests
             public Task<RepositoryResult<int>> GetOfflineDeviceCountAsync(int days = 14) => _inner.GetOfflineDeviceCountAsync(days);
             public Task<IEnumerable<DeviceDto>> GetDevicesByMediaIdAsync(string mediaId) => _inner.GetDevicesByMediaIdAsync(mediaId);
             public Task<IEnumerable<DeviceDto>> GetDevicesByPlaylistIdAsync(string playlistId) => _inner.GetDevicesByPlaylistIdAsync(playlistId);
+            public Task<IEnumerable<PlaylistDeviceDto>> GetDevicesForPlaylistViewAsync(string playlistId) => _inner.GetDevicesForPlaylistViewAsync(playlistId);
             public Task<IEnumerable<DevicePlaylistDto>> GetAssignedPlaylistsAsync(string deviceId) => _inner.GetAssignedPlaylistsAsync(deviceId);
             public Task<string?> GetSiblingDeviceIdWithAssignmentsAsync(string deviceId) => _inner.GetSiblingDeviceIdWithAssignmentsAsync(deviceId);
             public Task UpdateAssignedPlaylistsAsync(string deviceId, List<DevicePlaylistDto> playlists) => _inner.UpdateAssignedPlaylistsAsync(deviceId, playlists);

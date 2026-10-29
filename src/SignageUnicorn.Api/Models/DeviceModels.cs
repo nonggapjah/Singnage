@@ -4,6 +4,32 @@ using System.Text.Json.Serialization;
 
 namespace SignageUnicorn.Api.Models
 {
+    // A screen in the context of one playlist: which screens play it now, or have it assigned.
+    // Returned by GET /playlists/{id}/devices for the "where is this playlist playing" view.
+    public class PlaylistDeviceDto
+    {
+        public string DeviceId { get; set; } = string.Empty;
+        public string? DeviceUuid { get; set; }
+        public string? DeviceName { get; set; }
+        public string? BranchCode { get; set; }
+        public string? Status { get; set; }
+        public DateTime? LastCheckIn { get; set; }
+        // Seconds since the last heartbeat (computed with SYSUTCDATETIME() — last_check_in is UTC).
+        // The UI treats <= 120 s as online. long (DATEDIFF_BIG) so a legacy 1900-01-01 row cannot
+        // overflow a 32-bit DATEDIFF and throw.
+        public long? SecondsSinceCheckIn { get; set; }
+        // Reserved. The reliable view does not derive a real-time "playing now": current_playlist_id is
+        // stale/ambiguous during SCHEDULE-mode playback (the client reports a placeholder, not the real
+        // playlist), so this is left false. A future version that reports the real playing playlist can
+        // populate it.
+        public bool IsPlayingNow { get; set; }
+        // This playlist is directly assigned to the screen (active sn_device_playlists row). The view
+        // currently returns only directly-assigned screens, so this is true for every row.
+        public bool IsAssigned { get; set; }
+        // Reserved for a future "playing now" view; not populated by the reliable assigned-screens view.
+        public string? CurrentMediaName { get; set; }
+    }
+
     public class DeviceDto
     {
         public string DeviceId { get; set; } = string.Empty;

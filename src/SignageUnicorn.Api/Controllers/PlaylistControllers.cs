@@ -46,6 +46,14 @@ namespace SignageUnicorn.Api.Controllers
             return Ok(ApiResponse<PlaylistDto>.SuccessResponse(playlist));
         }
 
+        // Which screens play this playlist now, or have it assigned (the "where is it playing" view).
+        [HttpGet("{id}/devices")]
+        public async Task<ActionResult<ApiResponse<IEnumerable<SignageUnicorn.Api.Models.PlaylistDeviceDto>>>> GetDevices(string id)
+        {
+            var devices = await _playlistService.GetDevicesForPlaylistAsync(id);
+            return Ok(ApiResponse<IEnumerable<SignageUnicorn.Api.Models.PlaylistDeviceDto>>.SuccessResponse(devices));
+        }
+
         [HttpPost]
         [Authorize(Roles = UserRoles.Admin + "," + UserRoles.Editor)]
         public async Task<ActionResult<ApiResponse<PlaylistDto>>> Create([FromBody] PlaylistDto playlist)

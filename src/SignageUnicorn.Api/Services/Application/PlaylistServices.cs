@@ -92,6 +92,12 @@ namespace SignageUnicorn.Api.Services.Application
             }
         }
 
+        // The "where is this playlist playing" view: screens playing it now or with it assigned.
+        public async Task<IEnumerable<SignageUnicorn.Api.Models.PlaylistDeviceDto>> GetDevicesForPlaylistAsync(string playlistId)
+        {
+            return await _deviceRepo.GetDevicesForPlaylistViewAsync(playlistId);
+        }
+
         public async Task<List<PlaylistDto>> GetAllPlaylistsAsync(bool onlyActive = false, string searchTerm = null)
         {
             var playlists = await _playlistRepo.GetAllPlaylistsAsync(onlyActive, searchTerm);

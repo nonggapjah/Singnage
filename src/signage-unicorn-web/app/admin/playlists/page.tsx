@@ -5,6 +5,7 @@ import { Playlist } from '@/features/playlists/types/playlist';
 import { playlistApi } from '@/features/playlists/api/playlist-api';
 import { PlaylistTable } from '@/features/playlists/components/PlaylistTable';
 import { BatchAssignModal } from '@/features/playlists/components/BatchAssignModal';
+import { PlaylistDevicesModal } from '@/features/playlists/components/PlaylistDevicesModal';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -20,6 +21,8 @@ export default function PlaylistsPage() {
 
     // Modal State
     const [selectedPlaylist, setSelectedPlaylist] = useState<Playlist | null>(null);
+    // The playlist whose screens are being viewed (the "where does it play" modal).
+    const [screensPlaylist, setScreensPlaylist] = useState<Playlist | null>(null);
 
     // Duplicate State
     const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
@@ -191,7 +194,16 @@ export default function PlaylistsPage() {
                     onDelete={handleDelete}
                     onDeploy={(p) => setSelectedPlaylist(p)}
                     onDuplicate={handleDuplicate}
+                    onViewScreens={(p) => setScreensPlaylist(p)}
                     duplicatingId={duplicatingId}
+                />
+            )}
+
+            {screensPlaylist && (
+                <PlaylistDevicesModal
+                    playlistId={screensPlaylist.playlistId}
+                    playlistName={screensPlaylist.playlistName}
+                    onClose={() => setScreensPlaylist(null)}
                 />
             )}
 

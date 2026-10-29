@@ -408,6 +408,45 @@ namespace SignageUnicorn.Api.Repositories.Implementations
              return await connection.QueryAsync<DeviceDto>(sql, new { playlistId = pid, playlistUuid = puuid });
         }
 
+        public async Task<IEnumerable<PlaylistDeviceDto>> GetDevicesForPlaylistViewAsync(string playlistId)
+        {
+            using var connection = new SqlConnection(_connectionString);
+            long? pid = null; string? puuid = null;
+            if (long.TryParse(playlistId, out var parsed)) pid = parsed; else puuid = playlistId;
+
+            // Reliable view: screens that have this playlist DIRECTLY ASSIGNED (an active
+            // sn_device_playlists row). This is the one signal that is always correct. Real-time
+            // "playing now" is deliberately NOT derived from current_playlist_id, because a screen in
+            // SCHEDULE-mode playback reports a placeholder id (not the real playlist), so that column
+            // is stale/ambiguous for most of the fleet; and sibling INHERITANCE is not included here
+            // because resolving the true donor per screen is a separate, heavier computation. The UI
+            // shows online/offline from the heartbeat age (DATEDIFF_BIG + SYSUTCDATETIME(); _BIG avoids
+            // a 32-bit overflow on a legacy 1900 row).
+            string sql = @"
+                DECLARE @pid BIGINT = @playlistId;
+                IF @pid IS NULL AND @playlistUuid IS NOT NULL
+                    SELECT @pid = playlist_id FROM sn_playlists WHERE playlist_uuid = @playlistUuid;
+
+                SELECT
+                    CAST(d.device_id AS NVARCHAR(36)) AS DeviceId,
+                    d.device_uuid AS DeviceUuid,
+                    d.device_name AS DeviceName,
+                    d.branch_code AS BranchCode,
+                    d.status AS Status,
+                    d.last_check_in AS LastCheckIn,
+                    DATEDIFF_BIG(SECOND, d.last_check_in, SYSUTCDATETIME()) AS SecondsSinceCheckIn,
+                    CAST(0 AS BIT) AS IsPlayingNow,
+                    CAST(1 AS BIT) AS IsAssigned,
+                    CAST(NULL AS NVARCHAR(255)) AS CurrentMediaName
+                FROM sn_devices d
+                WHERE d.is_deleted = 0
+                  AND @pid IS NOT NULL
+                  AND EXISTS (SELECT 1 FROM sn_device_playlists dp
+                              WHERE dp.device_id = d.device_id AND dp.is_active = 1 AND dp.playlist_id = @pid)
+                ORDER BY d.branch_code, d.device_name;";
+            return await connection.QueryAsync<PlaylistDeviceDto>(sql, new { playlistId = pid, playlistUuid = puuid });
+        }
+
         public async Task<IEnumerable<DevicePlaylistDto>> GetAssignedPlaylistsAsync(string deviceId)
         {
             using var connection = new SqlConnection(_connectionString);

@@ -9,6 +9,7 @@ interface PlaylistTableProps {
     onDelete?: (id: string) => void;
     onDeploy?: (playlist: Playlist) => void;
     onDuplicate?: (playlist: Playlist) => void;
+    onViewScreens?: (playlist: Playlist) => void;
     duplicatingId?: string | null;
 }
 
@@ -20,7 +21,7 @@ const formatDuration = (seconds?: number) => {
     return [hrs, mins, secs].map(v => v.toString().padStart(2, '0')).join(':');
 };
 
-export const PlaylistTable: React.FC<PlaylistTableProps> = ({ playlists, onDelete, onDeploy, onDuplicate, duplicatingId }) => {
+export const PlaylistTable: React.FC<PlaylistTableProps> = ({ playlists, onDelete, onDeploy, onDuplicate, onViewScreens, duplicatingId }) => {
     return (
         <div className="glass-panel rounded-xl overflow-hidden">
             <div className="overflow-x-auto">
@@ -67,6 +68,15 @@ export const PlaylistTable: React.FC<PlaylistTableProps> = ({ playlists, onDelet
                                         title={playlist.active === 'Y' ? 'Deploy to devices' : 'Playlist must be Active to deploy'}
                                     >
                                         🚀 Deploy
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => onViewScreens?.(playlist)}
+                                        aria-label={`See which screens play ${playlist.playlistName}`}
+                                        className="text-muted-foreground hover:text-foreground text-xs font-bold mr-3 transition-colors"
+                                        title="See which screens are playing or assigned this playlist"
+                                    >
+                                        Screens
                                     </button>
                                     <Link
                                         href={`/admin/playlists/${playlist.playlistId}`}

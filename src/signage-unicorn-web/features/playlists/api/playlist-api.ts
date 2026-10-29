@@ -23,6 +23,20 @@ export function mapPlaylistItems(apiItems: any[]): PlaylistItem[] {
     }));
 }
 
+/** A screen in the context of one playlist (GET /playlists/{id}/devices). */
+export interface PlaylistDevice {
+    deviceId: string;
+    deviceUuid?: string;
+    deviceName?: string;
+    branchCode?: string;
+    status?: string;
+    lastCheckIn?: string;
+    secondsSinceCheckIn?: number | null;
+    isPlayingNow: boolean;
+    isAssigned: boolean;
+    currentMediaName?: string | null;
+}
+
 export const playlistApi = {
     getAll: async (onlyActive: boolean = false, searchTerm?: string): Promise<ApiResponse<Playlist[]>> => {
         const params = new URLSearchParams();
@@ -30,6 +44,11 @@ export const playlistApi = {
         if (searchTerm) params.append('searchTerm', searchTerm);
         const qs = params.toString();
         return apiFetch(`/playlists${qs ? `?${qs}` : ''}`);
+    },
+
+    /** Which screens play this playlist now, or have it assigned (the "where is it playing" view). */
+    getDevices: async (id: string): Promise<ApiResponse<PlaylistDevice[]>> => {
+        return apiFetch(`/playlists/${encodeURIComponent(id)}/devices`);
     },
 
     getActive: async (init?: ApiFetchInit): Promise<ApiResponse<Playlist[]>> => {
