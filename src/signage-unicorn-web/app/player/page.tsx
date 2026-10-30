@@ -15,7 +15,7 @@ import {
     blobBasename, mediaCacheKey, cacheRequestUrl, applyPlaybackBatchResult, nextBackoffMs, shouldAttemptClaim, playbackPlaylistId,
     nextClaimRetryMs, isRetryableClaimFailure, isTokenRace,
     emptyOwnership, ownerOf, beginActiveLoad, beginPendingLoad, promotePending, dropAllOwnership, type UrlMapOwnership,
-    isLatestLoad, cancelPendingLoad, pageMediaUrl, withPageMediaUrls,
+    isLatestLoad, cancelPendingLoad, pageMediaUrl, withPageMediaUrls, playWithMutedFallback,
 } from '@/lib/player-sync';
 import { getCapabilities } from '@/lib/api-capabilities';
 import pkg from '../../package.json';
@@ -146,13 +146,25 @@ export default function PlayerPage() {
     const itemsRef = useRef<PlaylistItem[]>([]);
     useEffect(() => { itemsRef.current = items; }, [items]);
 
-    // Explicit Play Trigger for Video
+    // Explicit Play Trigger for Video. Browsers refuse unmuted autoplay on a page nobody has
+    // interacted with yet -- the normal state of an unattended screen that boots straight into
+    // /player -- and the clip would sit on its first frame for the whole slot. Fall back to muted
+    // playback and say so once; F2/F3 (a key press is the gesture) brings the sound back.
+    const autoplayNoticeShownRef = useRef(false);
     useEffect(() => {
-        if (videoRef.current && currentItem && isVideo(currentItem.media?.fileName)) {
+        const video = videoRef.current;
+        if (video && currentItem && isVideo(currentItem.media?.fileName)) {
             // Reset to beginning just in case
-            videoRef.current.currentTime = 0;
-            videoRef.current.play().catch(e => {
-                console.warn("Video play() failed (often due to autoplay policy):", e);
+            video.currentTime = 0;
+            void playWithMutedFallback(video).then(result => {
+                if (result === 'muted') {
+                    if (autoplayNoticeShownRef.current) return;
+                    autoplayNoticeShownRef.current = true;
+                    addLog('SYS: Browser blocked autoplay with sound; playing muted. Press F3 for sound.', 'WARN');
+                    showToast('AUTOPLAY BLOCKED: PLAYING MUTED (F3 FOR SOUND)');
+                } else if (result === 'failed') {
+                    addLog(`PLAY FAILED: ${currentItem.media?.displayName || currentItem.media?.fileName || currentItem.mediaId}`, 'ERROR');
+                }
             });
         }
     }, [currentItem, loopTick]);
@@ -1119,6 +1131,9 @@ export default function PlayerPage() {
 
     const handleVolumeChange = (newVol: number) => {
         setVolume(newVol);
+        // The key press that got us here is a user gesture, so sound is allowed again: undo the
+        // muted-autoplay fallback (React re-applies `muted` only when its prop value changes).
+        if (videoRef.current && newVol > 0 && videoRef.current.muted) videoRef.current.muted = false;
         setShowVolumeOSD(true);
         if (osdTimerRef.current) clearTimeout(osdTimerRef.current);
         osdTimerRef.current = setTimeout(() => setShowVolumeOSD(false), 2000);

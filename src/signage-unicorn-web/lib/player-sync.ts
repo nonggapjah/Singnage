@@ -71,6 +71,41 @@ export function withPageMediaUrls<T extends { media?: { blobUrl?: string } | nul
         : i);
 }
 
+/** The part of HTMLMediaElement the autoplay fallback needs (kept minimal so tests can fake it). */
+export interface PlayableMedia {
+    muted: boolean;
+    play(): Promise<void>;
+}
+
+/** True for the rejection browsers raise when autoplay policy refuses to start a clip with sound. */
+export function isAutoplayBlocked(err: unknown): boolean {
+    return typeof err === 'object' && err !== null && (err as { name?: unknown }).name === 'NotAllowedError';
+}
+
+/**
+ * Starts a clip, falling back to muted playback when the browser refuses unmuted autoplay.
+ * Chrome (and Safari) reject play() with NotAllowedError until the viewer has interacted with the
+ * page -- the normal state of an unattended screen that boots straight into /player -- and without
+ * the fallback the clip sits on its first frame for the whole slot. Anything other than an autoplay
+ * block (source cannot be decoded, element went away) is reported as 'failed' unchanged, and a clip
+ * that is already muted when it is refused is not retried.
+ */
+export async function playWithMutedFallback(media: PlayableMedia): Promise<'playing' | 'muted' | 'failed'> {
+    try {
+        await media.play();
+        return 'playing';
+    } catch (err) {
+        if (media.muted || !isAutoplayBlocked(err)) return 'failed';
+        media.muted = true;
+        try {
+            await media.play();
+            return 'muted';
+        } catch {
+            return 'failed';
+        }
+    }
+}
+
 export interface BatchResponseLike {
     success: boolean;
     code: number;

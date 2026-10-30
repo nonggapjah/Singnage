@@ -3,6 +3,7 @@ import {
     blobBasename,
     mediaCacheKey,
     pageMediaUrl, withPageMediaUrls,
+    playWithMutedFallback, isAutoplayBlocked,
     cacheRequestUrl,
     applyPlaybackBatchResult,
     nextBackoffMs,
@@ -199,5 +200,54 @@ describe('pageMediaUrl (web player media must be same-origin)', () => {
         expect(mediaCacheKey({ mediaId: '120', blobUrl: out[0].media!.blobUrl, fileHash: 'h1' }))
             .toBe(mediaCacheKey({ mediaId: '120', blobUrl: items[0].media!.blobUrl, fileHash: 'h1' }));
         expect(out[1]).toBe(items[1]);
+    });
+});
+
+describe('playWithMutedFallback (an unattended screen must not freeze on the first frame)', () => {
+    const notAllowed = () => Object.assign(new Error('autoplay blocked'), { name: 'NotAllowedError' });
+    const fake = (outcomes: Array<Error | null>) => {
+        const calls: boolean[] = [];
+        const m = {
+            muted: false,
+            play: () => {
+                calls.push(m.muted);
+                const o = outcomes.shift();
+                return o ? Promise.reject(o) : Promise.resolve();
+            },
+        };
+        return { m, calls };
+    };
+
+    it('plays with sound when the browser allows it', async () => {
+        const { m, calls } = fake([null]);
+        expect(await playWithMutedFallback(m)).toBe('playing');
+        expect(m.muted).toBe(false);
+        expect(calls).toEqual([false]);
+    });
+
+    it('retries muted when autoplay with sound is refused', async () => {
+        const { m, calls } = fake([notAllowed(), null]);
+        expect(await playWithMutedFallback(m)).toBe('muted');
+        expect(m.muted).toBe(true);
+        expect(calls).toEqual([false, true]);
+    });
+
+    it('does not retry for other errors or when already muted', async () => {
+        const broken = fake([Object.assign(new Error('no supported source'), { name: 'NotSupportedError' })]);
+        expect(await playWithMutedFallback(broken.m)).toBe('failed');
+        expect(broken.m.muted).toBe(false);
+        expect(broken.calls).toEqual([false]);
+
+        const muted = fake([notAllowed()]);
+        muted.m.muted = true;
+        expect(await playWithMutedFallback(muted.m)).toBe('failed');
+        expect(muted.calls).toEqual([true]);
+    });
+
+    it('isAutoplayBlocked recognises only NotAllowedError', () => {
+        expect(isAutoplayBlocked(notAllowed())).toBe(true);
+        expect(isAutoplayBlocked(new Error('x'))).toBe(false);
+        expect(isAutoplayBlocked(undefined)).toBe(false);
+        expect(isAutoplayBlocked('NotAllowedError')).toBe(false);
     });
 });
