@@ -144,14 +144,15 @@ export const BatchAssignPlaylistModal: React.FC<BatchAssignPlaylistModalProps> =
             </div>
 
             {/* Optional schedule window */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4 shrink-0">
+            {/* One picker per row: date + hour + minute need the full modal width to stay legible. */}
+            <div className="grid grid-cols-1 gap-4 mt-4 shrink-0">
                 <div>
-                    <label htmlFor="batch-assign-start" className="block text-xs font-bold text-muted-foreground uppercase tracking-widest mb-1">Start date (optional)</label>
-                    <DateTimePicker24h id="batch-assign-start" value={startDate} onChange={setStartDate} placeholderDate="Start date" />
+                    <label htmlFor="batch-assign-start" className="block text-sm font-bold text-muted-foreground uppercase tracking-widest mb-1.5">Start date (optional)</label>
+                    <DateTimePicker24h id="batch-assign-start" value={startDate} onChange={setStartDate} placeholderDate="Start date" isLarge={true} />
                 </div>
                 <div>
-                    <label htmlFor="batch-assign-end" className="block text-xs font-bold text-muted-foreground uppercase tracking-widest mb-1">End date (optional)</label>
-                    <DateTimePicker24h id="batch-assign-end" value={endDate} onChange={setEndDate} placeholderDate="End date" defaultTime="23:59" />
+                    <label htmlFor="batch-assign-end" className="block text-sm font-bold text-muted-foreground uppercase tracking-widest mb-1.5">End date (optional)</label>
+                    <DateTimePicker24h id="batch-assign-end" value={endDate} onChange={setEndDate} placeholderDate="End date" defaultTime="23:59" isLarge={true} />
                 </div>
             </div>
 

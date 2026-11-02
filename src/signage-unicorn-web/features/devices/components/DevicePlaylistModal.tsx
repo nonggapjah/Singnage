@@ -251,8 +251,8 @@ export const DevicePlaylistModal: React.FC<DevicePlaylistModalProps> = ({ isOpen
                                 <thead>
                                     <tr className="border-b border-border text-xs text-muted-foreground uppercase tracking-wider bg-muted/20">
                                         <th scope="col" className="p-3 font-bold min-w-[200px]">Playlist</th>
-                                        <th scope="col" className="p-3 font-bold min-w-[220px]">Start date (optional)</th>
-                                        <th scope="col" className="p-3 font-bold min-w-[220px]">End date (optional)</th>
+                                        <th scope="col" className="p-3 font-bold min-w-[380px]">Start date (optional)</th>
+                                        <th scope="col" className="p-3 font-bold min-w-[380px]">End date (optional)</th>
                                         <th scope="col" className="p-3 font-bold text-center w-[110px]">Status</th>
                                         <th scope="col" className="p-3 font-bold w-12"><span className="sr-only">Remove</span></th>
                                     </tr>

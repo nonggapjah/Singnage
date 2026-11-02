@@ -47,17 +47,20 @@ export const DateTimePicker24h: React.FC<DateTimePicker24hProps> = ({
     ariaLabel,
     defaultTime = '00:00',
 }) => {
-    const heightClass = isLarge ? 'h-[46px] text-sm' : 'h-[38px] text-xs';
+    // Operators read these across a room on a 1080p console; the first cut (text-xs, 38 px) was
+    // reported as "tiny", so both variants are a step up and the selects get real padding.
+    const sizeClass = isLarge ? 'h-[52px] text-base' : 'h-[44px] text-sm';
+    const selectWidth = isLarge ? 'min-w-[4.25rem]' : 'min-w-[3.75rem]';
     const { date, hh, mm } = splitLocalDateTime(value);
     const isEmpty = !date;
     // Without a date the selects preview the time a pick would get; with one they show the value.
     const shown = isEmpty ? splitTime(defaultTime) : { hh: hh || '00', mm: mm || '00' };
     const name = ariaLabel || 'Date';
-    const field = `bg-muted/20 border border-border rounded-xl font-mono text-foreground outline-none focus:border-accent-cyan focus:ring-1 focus:ring-accent-cyan/30 transition-colors [color-scheme:dark] ${heightClass}`;
-    const select = `${field} px-1 text-center cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed`;
+    const field = `bg-muted/20 border border-border rounded-xl font-mono text-foreground outline-none focus:border-accent-cyan focus:ring-1 focus:ring-accent-cyan/30 transition-colors [color-scheme:dark] ${sizeClass}`;
+    const select = `${field} ${selectWidth} px-2 text-center cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed`;
 
     return (
-        <div className="flex w-full items-center gap-1">
+        <div className="flex w-full items-center gap-2">
             <div className="relative flex-1 min-w-0">
                 {/* Custom placeholder overlay, shown while no date is set. pointer-events-none lets
                     clicks fall through to the input; the native "mm/dd/yyyy" text is made
@@ -65,7 +68,7 @@ export const DateTimePicker24h: React.FC<DateTimePicker24hProps> = ({
                 {isEmpty && (
                     <span
                         aria-hidden="true"
-                        className="pointer-events-none absolute inset-0 flex items-center px-3 font-mono uppercase tracking-wider text-muted-foreground/70 whitespace-nowrap overflow-hidden text-xs"
+                        className={`pointer-events-none absolute inset-0 flex items-center px-3 font-mono uppercase tracking-wider text-muted-foreground/70 whitespace-nowrap overflow-hidden ${isLarge ? 'text-sm' : 'text-xs'}`}
                     >
                         {placeholderDate}
                     </span>
@@ -89,7 +92,7 @@ export const DateTimePicker24h: React.FC<DateTimePicker24hProps> = ({
             >
                 {HOURS.map(h => <option key={h} value={h}>{h}</option>)}
             </select>
-            <span aria-hidden="true" className="font-mono text-muted-foreground">:</span>
+            <span aria-hidden="true" className={`font-mono text-muted-foreground ${isLarge ? 'text-lg' : 'text-base'}`}>:</span>
             <select
                 aria-label={`${name}: minute`}
                 title="Minute (00-59)"
@@ -106,7 +109,7 @@ export const DateTimePicker24h: React.FC<DateTimePicker24hProps> = ({
                     onClick={() => onChange('')}
                     title="Clear date"
                     aria-label={`Clear ${name.toLowerCase()}`}
-                    className="shrink-0 text-muted-foreground hover:text-red-500 transition-colors text-sm rounded px-1"
+                    className="shrink-0 text-muted-foreground hover:text-red-500 transition-colors text-base rounded px-1"
                 >
                     ✕
                 </button>

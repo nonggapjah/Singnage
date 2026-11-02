@@ -202,7 +202,7 @@ export const BatchAssignModal: React.FC<BatchAssignModalProps> = ({ playlistId, 
                 </div>
 
                 {/* Schedule Column */}
-                <div className="w-full md:w-64 space-y-4">
+                <div className="w-full md:w-[28rem] space-y-4">
                     <h4 className="text-xs font-bold text-muted-foreground uppercase tracking-widest mb-4">Schedule window</h4>
                     <div className="glass-panel p-4 rounded-xl space-y-4">
                         <div>
@@ -216,6 +216,7 @@ export const BatchAssignModal: React.FC<BatchAssignModalProps> = ({ playlistId, 
                                 value={startDate}
                                 onChange={setStartDate}
                                 placeholderDate="Start date"
+                                isLarge={true}
                             />
                         </div>
                         <div>
@@ -226,6 +227,7 @@ export const BatchAssignModal: React.FC<BatchAssignModalProps> = ({ playlistId, 
                                 onChange={setEndDate}
                                 placeholderDate="End date"
                                 defaultTime="23:59"
+                                isLarge={true}
                             />
                         </div>
                     </div>
