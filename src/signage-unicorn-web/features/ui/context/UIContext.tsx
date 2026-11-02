@@ -68,9 +68,9 @@ function writePref(key: string, value: string) {
 }
 
 const getTheme = () => readPref<Theme>('theme', THEMES, 'dark');
-const getFontSize = () => readPref<FontSize>('fontSize', FONT_SIZES, 'small');
+const getFontSize = () => readPref<FontSize>('fontSize', FONT_SIZES, 'medium');
 const getServerTheme = (): Theme => 'dark';
-const getServerFontSize = (): FontSize => 'small';
+const getServerFontSize = (): FontSize => 'medium';
 
 export function UIProvider({ children }: { children: React.ReactNode }) {
     const theme = useSyncExternalStore(subscribePrefs, getTheme, getServerTheme);

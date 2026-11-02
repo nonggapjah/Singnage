@@ -553,7 +553,7 @@ export default function DevicesPage() {
     const activeScreenshotDevice = activeScreenshotDeviceId ? devices.find(d => d.deviceId === activeScreenshotDeviceId) : undefined;
 
     const controlClass = 'bg-muted/20 border border-border rounded-lg px-4 py-2 text-xs font-bold uppercase outline-none focus:border-accent-cyan focus:ring-1 focus:ring-accent-cyan/30 text-foreground hover:bg-muted/40 cursor-pointer transition-colors';
-    const smallActionClass = 'py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors border';
+    const smallActionClass = 'py-2 rounded-lg text-sm font-bold uppercase tracking-wider transition-colors border';
 
     if (loading) {
         return <div className="p-10 text-center text-accent-cyan tracking-widest font-mono" role="status">Loading devices…</div>;
@@ -697,7 +697,7 @@ export default function DevicesPage() {
                                 </button>
 
                                 {!isCollapsed && (
-                                    <div id={panelId} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                                    <div id={panelId} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 min-[2200px]:grid-cols-4 gap-6">
                                         {branchDevices.map((device, index) => {
                                             const isOnline = isDeviceOnline(device);
                                             const currentPlaylist = findCurrentPlaylist(device);
@@ -740,8 +740,8 @@ export default function DevicesPage() {
                                                                     {device.status}
                                                                 </span>
                                                             </div>
-                                                            <h3 className="text-base font-bold text-foreground truncate w-full" title={device.deviceName}>{device.deviceName}</h3>
-                                                            <p className="text-xs text-muted-foreground font-mono mt-0.5 flex items-center gap-2 truncate">
+                                                            <h3 className="text-lg font-bold text-foreground truncate w-full" title={device.deviceName}>{device.deviceName}</h3>
+                                                            <p className="text-sm text-muted-foreground font-mono mt-0.5 flex items-center gap-2 truncate">
                                                                 #{displayId.substring(0, 12)}…
                                                                 {device.appVersion && <span className="text-muted-foreground/70">[{device.appVersion}]</span>}
                                                                 {device.currentPlaylistId && <span className="text-accent-cyan font-bold">: Active</span>}
@@ -754,38 +754,38 @@ export default function DevicesPage() {
                                                     </div>
 
                                                     <dl className="space-y-3 mb-6 bg-muted/10 rounded-xl p-3 border border-border/50">
-                                                        <div className="flex justify-between items-center gap-2 text-xs">
-                                                            <dt className="text-muted-foreground uppercase tracking-wider font-bold text-xs shrink-0">Device ID</dt>
+                                                        <div className="flex justify-between items-center gap-2 text-sm">
+                                                            <dt className="text-muted-foreground uppercase tracking-wider font-bold shrink-0">Device ID</dt>
                                                             <dd className="min-w-0">
                                                                 <button
                                                                     type="button"
                                                                     onClick={() => copyDeviceId(device.deviceId)}
                                                                     title={`${device.deviceId} (click to copy)`}
                                                                     aria-label={`Copy device ID ${device.deviceId}`}
-                                                                    className="text-foreground font-mono text-xs truncate max-w-full hover:text-accent-cyan transition-colors flex items-center gap-1 rounded"
+                                                                    className="text-foreground font-mono text-sm truncate max-w-full hover:text-accent-cyan transition-colors flex items-center gap-1 rounded"
                                                                 >
                                                                     <span className="truncate">{device.deviceId}</span>
                                                                     <span className="opacity-40 shrink-0" aria-hidden="true">⧉</span>
                                                                 </button>
                                                             </dd>
                                                         </div>
-                                                        <div className="flex justify-between items-center text-xs">
+                                                        <div className="flex justify-between items-center text-sm">
                                                             <dt className="text-muted-foreground uppercase tracking-wider font-bold">Check-in</dt>
-                                                            <dd className="text-foreground font-mono text-xs">
+                                                            <dd className="text-foreground font-mono text-sm">
                                                                 {formatDateTime(device.lastCheckIn)}
                                                             </dd>
                                                         </div>
-                                                        <div className="flex justify-between items-center text-xs gap-2">
+                                                        <div className="flex justify-between items-center text-sm gap-2">
                                                             <dt className="text-muted-foreground uppercase tracking-wider font-bold shrink-0">Playlist</dt>
-                                                            <dd className="text-accent-cyan font-bold truncate min-w-0 text-sm" title={currentPlaylistLabel(device, currentPlaylist)}>
+                                                            <dd className="text-accent-cyan font-bold truncate min-w-0 text-base" title={currentPlaylistLabel(device, currentPlaylist)}>
                                                                 {currentPlaylistLabel(device, currentPlaylist)}
                                                             </dd>
                                                         </div>
                                                         {device.scheduleMode && (
-                                                            <div className="flex justify-between items-center text-xs gap-2">
+                                                            <div className="flex justify-between items-center text-sm gap-2">
                                                                 <dt className="text-muted-foreground uppercase tracking-wider font-bold shrink-0">Schedule</dt>
                                                                 <dd
-                                                                    className={`text-xs uppercase ${device.scheduleMode === 'explicit' && !device.currentPlaylistId ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`}
+                                                                    className={`text-sm uppercase ${device.scheduleMode === 'explicit' && !device.currentPlaylistId ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`}
                                                                     title={device.scheduleMode === 'explicit' && !device.currentPlaylistId
                                                                         ? 'An admin cleared the playlists of this screen, so it stays idle on purpose instead of inheriting a sibling. Assign a playlist or reset it to inherit.'
                                                                         : undefined}
@@ -798,9 +798,9 @@ export default function DevicesPage() {
                                                         )}
                                                         {(device.currentPlaylistId || device.currentMediaId) && (
                                                             <>
-                                                                <div className="flex justify-between items-center text-xs pt-2 mt-2 border-t border-border/50 gap-2">
+                                                                <div className="flex justify-between items-center text-sm pt-2 mt-2 border-t border-border/50 gap-2">
                                                                     <dt className="text-muted-foreground uppercase tracking-wider font-bold shrink-0">Current clip</dt>
-                                                                    <dd className="text-foreground font-mono text-xs truncate min-w-0 text-right" title={mediaName}>{mediaName}</dd>
+                                                                    <dd className="text-foreground font-mono text-sm truncate min-w-0 text-right" title={mediaName}>{mediaName}</dd>
                                                                 </div>
 
                                                                 {/* Segmented Playlist Progress */}
@@ -873,14 +873,14 @@ export default function DevicesPage() {
                                                             <button
                                                                 type="button"
                                                                 onClick={() => viewScreenshot(device.deviceId)}
-                                                                className="w-full py-2 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-xs font-black text-emerald-700 dark:text-emerald-400 uppercase tracking-wider transition-colors flex items-center justify-center gap-1.5"
+                                                                className="w-full py-2 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-sm font-black text-emerald-700 dark:text-emerald-400 uppercase tracking-wider transition-colors flex items-center justify-center gap-1.5"
                                                             >
                                                                 <span aria-hidden="true">📺</span> View screen
                                                             </button>
                                                         </div>
                                                         <div className="col-span-3 flex gap-2 mb-1">
-                                                            <button type="button" onClick={() => openAssignModal(device.deviceId)} className="flex-[2] py-2 rounded-lg bg-accent-cyan/10 hover:bg-accent-cyan/20 border border-accent-cyan/20 text-xs font-black text-accent-cyan uppercase tracking-wider transition-colors">Assign playlist</button>
-                                                            <button type="button" onClick={() => handleClearSchedule([device.deviceId])} className="flex-1 py-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-xs font-black text-red-600 dark:text-red-400 uppercase tracking-wider transition-colors" title="Clear playlists">Clear</button>
+                                                            <button type="button" onClick={() => openAssignModal(device.deviceId)} className="flex-[2] py-2 rounded-lg bg-accent-cyan/10 hover:bg-accent-cyan/20 border border-accent-cyan/20 text-sm font-black text-accent-cyan uppercase tracking-wider transition-colors">Assign playlist</button>
+                                                            <button type="button" onClick={() => handleClearSchedule([device.deviceId])} className="flex-1 py-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-sm font-black text-red-600 dark:text-red-400 uppercase tracking-wider transition-colors" title="Clear playlists">Clear</button>
                                                         </div>
                                                         <button type="button" onClick={() => handleCommand(device.deviceId, 'RELOAD')} className={`${smallActionClass} bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/20 text-amber-700 dark:text-amber-400`}>Reset</button>
                                                         <button type="button" onClick={() => handleCommand(device.deviceId, 'REFRESH')} className={`${smallActionClass} bg-muted/20 hover:bg-muted/40 border-border text-muted-foreground hover:text-foreground`}>Refresh</button>

@@ -361,17 +361,20 @@ samp,
   }
 }
 
-/* Font size scaling (user preference, persisted by UIContext) */
+/* Font size scaling (user preference, persisted by UIContext; the AAA button in the header).
+   Was 12 / 14 / 16 px with 'small' as the default, which made text-xs render at 9 px -- operators
+   on a 1080p console called the device cards unreadable. Every step is 2 px larger now and the
+   default is 'medium' (a normal 16 px). */
 :root[data-font-size="small"] {
-  font-size: 12px;
-}
-
-:root[data-font-size="medium"] {
   font-size: 14px;
 }
 
-:root[data-font-size="large"] {
+:root[data-font-size="medium"] {
   font-size: 16px;
+}
+
+:root[data-font-size="large"] {
+  font-size: 18px;
 }
 
 /* Native <select> popups follow the theme and stay opaque. Kept with
