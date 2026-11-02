@@ -289,6 +289,7 @@ export const DevicePlaylistModal: React.FC<DevicePlaylistModalProps> = ({ isOpen
                                                         onChange={val => updateRow(idx, 'endDate', val)}
                                                         isLarge={true}
                                                         ariaLabel={`End date for row ${idx + 1}`}
+                                                        defaultTime="23:59"
                                                     />
                                                 </td>
                                                 <td className="p-2 text-center">
@@ -354,7 +355,7 @@ export const DevicePlaylistModal: React.FC<DevicePlaylistModalProps> = ({ isOpen
                                         </div>
                                         <div>
                                             <label htmlFor={`sched-end-${idx}`} className="block text-xs font-bold text-muted-foreground uppercase tracking-wider mb-1">End date (optional)</label>
-                                            <DateTimePicker24h id={`sched-end-${idx}`} value={assignment.endDate || ''} onChange={val => updateRow(idx, 'endDate', val)} isLarge={true} />
+                                            <DateTimePicker24h id={`sched-end-${idx}`} value={assignment.endDate || ''} onChange={val => updateRow(idx, 'endDate', val)} isLarge={true} defaultTime="23:59" />
                                         </div>
                                     </li>
                                 );

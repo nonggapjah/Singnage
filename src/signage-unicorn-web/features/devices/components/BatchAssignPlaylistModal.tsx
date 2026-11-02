@@ -151,7 +151,7 @@ export const BatchAssignPlaylistModal: React.FC<BatchAssignPlaylistModalProps> =
                 </div>
                 <div>
                     <label htmlFor="batch-assign-end" className="block text-xs font-bold text-muted-foreground uppercase tracking-widest mb-1">End date (optional)</label>
-                    <DateTimePicker24h id="batch-assign-end" value={endDate} onChange={setEndDate} placeholderDate="End date" />
+                    <DateTimePicker24h id="batch-assign-end" value={endDate} onChange={setEndDate} placeholderDate="End date" defaultTime="23:59" />
                 </div>
             </div>
 

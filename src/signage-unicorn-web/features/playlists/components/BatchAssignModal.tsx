@@ -225,6 +225,7 @@ export const BatchAssignModal: React.FC<BatchAssignModalProps> = ({ playlistId, 
                                 value={endDate}
                                 onChange={setEndDate}
                                 placeholderDate="End date"
+                                defaultTime="23:59"
                             />
                         </div>
                     </div>

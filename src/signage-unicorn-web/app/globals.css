@@ -401,10 +401,12 @@ input[type="datetime-local"] {
 
 /* When the field is empty (.dt-empty set via JS), hide the native
    "mm/dd/yyyy --:-- --" ghost text so our custom label shows cleanly */
-input[type="datetime-local"].dt-empty::-webkit-datetime-edit {
+input[type="datetime-local"].dt-empty::-webkit-datetime-edit,
+input[type="date"].dt-empty::-webkit-datetime-edit {
   opacity: 0;
 }
-input[type="datetime-local"].dt-empty::-webkit-datetime-edit-fields-wrapper {
+input[type="datetime-local"].dt-empty::-webkit-datetime-edit-fields-wrapper,
+input[type="date"].dt-empty::-webkit-datetime-edit-fields-wrapper {
   opacity: 0;
 }
 
