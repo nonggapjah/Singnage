@@ -25,7 +25,8 @@ namespace SignageUnicorn.Api.Controllers
 
         private string? PresentedToken => Request.Headers.TryGetValue(DeviceAuthService.HeaderName, out var v) ? v.ToString() : null;
         private string? RemoteIp => HttpContext.Connection.RemoteIpAddress?.ToString();
-        private IActionResult DeviceTokenRejected() => Unauthorized(ApiResponse<object>.ErrorResponse(401, DeviceAuthService.RejectMessage));
+        private IActionResult DeviceTokenRejected(string? detail = null)
+            => Unauthorized(ApiResponse<object>.ErrorResponse(401, string.IsNullOrEmpty(detail) ? DeviceAuthService.RejectMessage : DeviceAuthService.RejectMessage + ": " + detail));
         private IActionResult DeviceAuthRejected(DeviceAuthResult auth) => Unauthorized(ApiResponse<object>.ErrorResponse(401, auth.Message));
         // Round 3 (R3): a token write lost against a concurrent issuance; the caller retries later.
         private IActionResult TokenRace() => StatusCode(409, ApiResponse<object>.ErrorResponse(409, DeviceAuthService.RaceMessage));
@@ -62,13 +63,14 @@ namespace SignageUnicorn.Api.Controllers
 
             var tokenCapable = DeviceAuthService.IsTokenCapable(request.TokenCapable, Request.Headers[DeviceAuthService.CapabilityHeaderName]);
 
+            RegisterPreAuth preAuth;
             try
             {
-                await _deviceAuth.PreAuthorizeRegisterAsync(request.DeviceKey, PresentedToken, remoteIp);
+                preAuth = await _deviceAuth.PreAuthorizeRegisterAsync(request.DeviceKey, PresentedToken, remoteIp, tokenCapable);
             }
-            catch (DeviceAuthRejectedException)
+            catch (DeviceAuthRejectedException ex)
             {
-                return DeviceTokenRejected();
+                return DeviceTokenRejected(ex.Detail);
             }
 
             var device = await _deviceService.RegisterDeviceAsync(request);
@@ -77,7 +79,7 @@ namespace SignageUnicorn.Api.Controllers
 
             try
             {
-                var token = await _deviceAuth.IssueOrRotateAsync(device, PresentedToken, tokenCapable, remoteIp);
+                var token = await _deviceAuth.IssueOrRotateAsync(device, PresentedToken, tokenCapable, remoteIp, preAuth);
                 if (token != null)
                 {
                     device.DeviceToken = token;

@@ -61,6 +61,14 @@ times are stored and how the admin console signs in. Everything is staged so tha
   `UPDATE sn_devices SET device_uuid = 'RETIRED-' + CAST(device_id AS NVARCHAR(20)) WHERE is_deleted = 1 AND device_uuid = '<uuid>'`.
   2.8.4 also stops `MaintenanceWorker` retiring same-name screens that are merely switched off
   overnight (the twin must have appeared after, and within 24 h of, the row's last check-in).
+- A kiosk setup screen answering **`Registration rejected: DEVICE_TOKEN_INVALID`** is a screen that
+  was reinstalled (config.json lost) on hardware whose row still holds a token. Since API 2.8.5 a
+  token-capable register may take such a row back once its previous holder has not checked in for
+  `Security:DeviceTokenReclaimAfterOfflineSeconds` (default 120, read from code when the key is
+  absent; 0 disables): same device_id, playlist assignments kept, old token invalidated, audited as
+  `RECLAIMED_AFTER_OFFLINE`. While the holder is still checking in the 401 now names the device and
+  the way out; **Reset device token** on the card remains the manual path, and the blanket
+  `DeviceTokenReclaimOnRegister` switch is unchanged (still off).
 
 ## New files and keys on a kiosk
 

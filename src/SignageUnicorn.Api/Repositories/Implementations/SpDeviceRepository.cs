@@ -598,7 +598,8 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             string sql = @"
                 SELECT TOP 1 device_id AS DeviceId, device_uuid AS DeviceUuid, device_token_hash AS TokenHash,
                        mac_address AS MacAddress, device_token_issued_at AS TokenIssuedAt,
-                       device_token_reset_at AS TokenResetAt
+                       device_token_reset_at AS TokenResetAt,
+                       DATEDIFF(SECOND, last_check_in, SYSUTCDATETIME()) AS SecondsSinceCheckIn
                 FROM sn_devices WITH (NOLOCK)
                 WHERE is_deleted = 0
                   AND (device_id = @devId OR device_uuid = @devUuid OR device_uuid = @idAsUuid)

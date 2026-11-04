@@ -95,20 +95,30 @@ namespace SignageUnicorn.Api.Services
         // answers 200 for them instead of 404.
         public const string PseudoCommandPrefix = "PSEUDO-";
 
+        // Round 7: how long the current token holder must have been silent before a token-capable
+        // register with the same hardware uuid may take the row over (Security:DeviceTokenReclaimAfterOfflineSeconds).
+        // Screens check in every 15-20 s and the fleet view calls a row OFFLINE after 60 s, so 120 s
+        // is six missed heartbeats -- long enough that a merely slow screen is not mistaken for a gone
+        // one, short enough that a reinstall (minutes) never waits on it. 0 disables the rule.
+        public const int DefaultReclaimAfterOfflineSeconds = 120;
+
         private readonly IDeviceRepository _devices;
         private readonly ISystemLogRepository _log;
         private readonly DeviceAuthMode _mode;
         private readonly bool _reclaimOnRegister;
+        private readonly int _reclaimAfterOfflineSeconds;
 
         public DeviceAuthService(IDeviceRepository devices, ISystemLogRepository log, IConfiguration configuration)
             : this(devices, log,
                    ParseMode(configuration["Security:DeviceAuth"]),
-                   string.Equals(configuration["Security:DeviceTokenReclaimOnRegister"], "true", StringComparison.OrdinalIgnoreCase))
+                   string.Equals(configuration["Security:DeviceTokenReclaimOnRegister"], "true", StringComparison.OrdinalIgnoreCase),
+                   ParseSeconds(configuration["Security:DeviceTokenReclaimAfterOfflineSeconds"], DefaultReclaimAfterOfflineSeconds))
         {
         }
 
         // Used by tests; production wiring goes through the IConfiguration constructor.
-        internal DeviceAuthService(IDeviceRepository devices, ISystemLogRepository log, DeviceAuthMode mode, bool reclaimOnRegister)
+        internal DeviceAuthService(IDeviceRepository devices, ISystemLogRepository log, DeviceAuthMode mode, bool reclaimOnRegister,
+                                   int reclaimAfterOfflineSeconds = DefaultReclaimAfterOfflineSeconds)
         {
             _devices = devices;
             _log = log;
@@ -117,8 +127,20 @@ namespace SignageUnicorn.Api.Services
             // back without an operator resetting its token: a token-capable register call that proves
             // the hardware uuid may re-claim. OFF by default because it weakens the token to "whoever
             // knows the uuid" for that one call; the claim endpoint + reset-token is the primary path.
+            // Round 7 narrows the same need to the case that actually happens in the field: the holder
+            // of the token has stopped checking in (see PreAuthorizeRegisterAsync).
             _reclaimOnRegister = reclaimOnRegister;
+            _reclaimAfterOfflineSeconds = reclaimAfterOfflineSeconds;
         }
+
+        internal static int ParseSeconds(string? raw, int fallback)
+            => int.TryParse((raw ?? string.Empty).Trim(), out var s) && s >= 0 ? s : fallback;
+
+        // Round 7: a token-protected row may be taken over by a register that proves the hardware uuid
+        // only while its holder is demonstrably gone. A screen that never checked in has no holder to
+        // protect; a negative age (clock skew) counts as "just seen".
+        public static bool IsHolderOffline(int? secondsSinceCheckIn, int thresholdSeconds)
+            => thresholdSeconds > 0 && (!secondsSinceCheckIn.HasValue || secondsSinceCheckIn.Value >= thresholdSeconds);
 
         internal static DeviceAuthMode ParseMode(string? raw)
             => Enum.TryParse<DeviceAuthMode>(raw ?? "IfIssued", ignoreCase: true, out var parsed) ? parsed : DeviceAuthMode.IfIssued;
@@ -217,7 +239,8 @@ namespace SignageUnicorn.Api.Services
                 await Audit("TOKEN_RACE", deviceId.ToString(), uuid, remoteIp, $"during {outcome}");
                 throw new DeviceTokenRaceException();
             }
-            await Audit(outcome, deviceId.ToString(), uuid, remoteIp);
+            await Audit(outcome, deviceId.ToString(), uuid, remoteIp,
+                outcome == "RECLAIMED_AFTER_OFFLINE" ? "reinstalled screen took its row back; previous token invalidated" : null);
             return token;
         }
 
@@ -354,9 +377,18 @@ namespace SignageUnicorn.Api.Services
         // which already holds a token must present that token; otherwise the row is left untouched
         // and the caller answers 401. Unknown keys (brand-new screens) pass: enrollment is how a new
         // screen gets its first token.
-        public async Task PreAuthorizeRegisterAsync(string? deviceKey, string? presentedToken, string? remoteIp)
+        //
+        // Round 7 (04-11-2026, branch 1023): the case this refused in the field was never an attacker.
+        // It was a kiosk reinstalled on the same hardware (Windows re-imaged, config.json gone): same
+        // uuid, no token, and the row's previous holder had not checked in for hours. Such a register
+        // -- token-capable, so it will store what it is handed -- may take the row back once the holder
+        // has been silent for _reclaimAfterOfflineSeconds. The decision is made HERE and carried to
+        // IssueOrRotateAsync, because REGISTER_OR_LOGIN refreshes last_check_in and the row no longer
+        // looks stale by then. A holder that is still checking in keeps the old refusal, and the 401
+        // now says which device it is and what to do, so the operator is not left with a bare code.
+        public async Task<RegisterPreAuth> PreAuthorizeRegisterAsync(string? deviceKey, string? presentedToken, string? remoteIp, bool tokenCapable = false)
         {
-            if (_mode == DeviceAuthMode.Off || string.IsNullOrWhiteSpace(deviceKey)) return;
+            if (_mode == DeviceAuthMode.Off || string.IsNullOrWhiteSpace(deviceKey)) return RegisterPreAuth.None;
 
             DeviceAuthInfo? info;
             try
@@ -367,21 +399,43 @@ namespace SignageUnicorn.Api.Services
             {
                 Console.WriteLine($"[DeviceAuth] REGISTER_LOOKUP_FAILED | key={deviceKey} | {ex.Message}");
                 if (_mode == DeviceAuthMode.Required) throw new DeviceAuthRejectedException();
-                return;
+                return RegisterPreAuth.None;
             }
 
-            if (info == null || string.IsNullOrEmpty(info.TokenHash)) return;
-            if (TokenMatches(presentedToken, info.TokenHash)) return;
+            if (info == null || string.IsNullOrEmpty(info.TokenHash)) return RegisterPreAuth.None;
+            if (TokenMatches(presentedToken, info.TokenHash)) return RegisterPreAuth.None;
 
-            await Audit("REJECT_REGISTER", info.DeviceId.ToString(), deviceKey, remoteIp);
-            throw new DeviceAuthRejectedException();
+            var seen = info.SecondsSinceCheckIn.HasValue ? $"{info.SecondsSinceCheckIn.Value} s ago" : "never";
+            if (tokenCapable && IsHolderOffline(info.SecondsSinceCheckIn, _reclaimAfterOfflineSeconds))
+            {
+                Console.WriteLine($"[DeviceAuth] STALE_ROW_RECLAIM_ALLOWED | device={info.DeviceId} | uuid={deviceKey} | ip={remoteIp ?? "-"} | holder last seen {seen}, threshold {_reclaimAfterOfflineSeconds} s");
+                return new RegisterPreAuth { StaleReclaim = true, DeviceId = info.DeviceId, TokenHash = info.TokenHash };
+            }
+
+            await Audit("REJECT_REGISTER", info.DeviceId.ToString(), deviceKey, remoteIp, $"holder last seen {seen}; tokenCapable={tokenCapable}");
+            throw new DeviceAuthRejectedException(RejectRegisterDetail(info.DeviceId, seen, tokenCapable));
+        }
+
+        // The operator reads this on the kiosk's setup screen ("Registration rejected: ..."), so it
+        // names the row and the way out. Revealing the id to a caller who already knows the hardware
+        // uuid is accepted: ids appear in URLs, logs and screenshot names anyway.
+        private string RejectRegisterDetail(long deviceId, string seen, bool tokenCapable)
+        {
+            const string manual = "press Reset device token on its card in Admin > Devices (Assign playlist), then register again";
+            if (!tokenCapable)
+                return $"this hardware is already registered as device {deviceId} with a device token and this client cannot store one. Update the client, or {manual}.";
+            if (_reclaimAfterOfflineSeconds <= 0)
+                return $"this hardware is already registered as device {deviceId} and holds a device token. {char.ToUpperInvariant(manual[0])}{manual.Substring(1)}.";
+            return $"this hardware is already registered as device {deviceId} and that screen checked in {seen}. "
+                 + $"If this is a reinstall, retry once it has been offline for {_reclaimAfterOfflineSeconds} s, or {manual}.";
         }
 
         // Called after a successful register/login. Returns the plaintext token when one was issued or
         // rotated (the only moment it ever exists in clear), null when the response must not carry one.
         // Contract T1: nothing is issued unless the client declared token capability.
         // Throws DeviceTokenRaceException (R3) when another issuance changed the row meanwhile.
-        public async Task<string?> IssueOrRotateAsync(DeviceDto device, string? presentedToken, bool tokenCapable, string? remoteIp)
+        public async Task<string?> IssueOrRotateAsync(DeviceDto device, string? presentedToken, bool tokenCapable, string? remoteIp,
+                                                      RegisterPreAuth? preAuth = null)
         {
             if (_mode == DeviceAuthMode.Off) return null;
             if (!long.TryParse(device.DeviceId, out var numericId)) return null;
@@ -443,6 +497,15 @@ namespace SignageUnicorn.Api.Services
 
             if (TokenMatches(presentedToken, info!.TokenHash))
                 return await WriteTokenOrThrowAsync(numericId, info.TokenHash, "ROTATED", device.DeviceUuid, remoteIp);
+
+            // Round 7: PreAuthorizeRegister found the holder offline and let the register through. The
+            // write is conditional on the hash it saw, so a holder that came back and rotated in the
+            // meantime wins (the hash differs -> no reclaim; a concurrent rotation -> TOKEN_RACE).
+            if (preAuth is { StaleReclaim: true } && preAuth.DeviceId == numericId
+                && string.Equals(preAuth.TokenHash, info.TokenHash, StringComparison.OrdinalIgnoreCase))
+            {
+                return await WriteTokenOrThrowAsync(numericId, info.TokenHash, "RECLAIMED_AFTER_OFFLINE", device.DeviceUuid, remoteIp);
+            }
 
             // Device already holds a token and this request did not present it. PreAuthorizeRegister
             // normally refuses this earlier; the branch stays as a defensive check.
@@ -531,7 +594,7 @@ namespace SignageUnicorn.Api.Services
             Console.WriteLine(line);
             if (outcome.StartsWith("REJECT", StringComparison.Ordinal) || outcome.Contains("WITHOUT_TOKEN") || outcome.StartsWith("CLAIM_", StringComparison.Ordinal)
                 || outcome.StartsWith("LEGACY_", StringComparison.Ordinal) || outcome == "ADOPTION_BLOCKED" || outcome == "TOKEN_RACE"
-                || outcome == "REGISTER_ROW_CORRECTED")
+                || outcome == "REGISTER_ROW_CORRECTED" || outcome.StartsWith("RECLAIMED", StringComparison.Ordinal))
             {
                 try { await _log.LogAsync(deviceId, "WARNING", line, "API"); } catch { }
             }
@@ -541,6 +604,21 @@ namespace SignageUnicorn.Api.Services
     public sealed class DeviceAuthRejectedException : Exception
     {
         public DeviceAuthRejectedException() : base(DeviceAuthService.RejectMessage) { }
+        public DeviceAuthRejectedException(string detail) : base(DeviceAuthService.RejectMessage + ": " + detail) { Detail = detail; }
+
+        // Round 7: human-readable reason the controller appends to the 401 body (register only).
+        public string? Detail { get; }
+    }
+
+    // Round 7: what PreAuthorizeRegisterAsync decided, handed to IssueOrRotateAsync by the controller.
+    public sealed class RegisterPreAuth
+    {
+        public static readonly RegisterPreAuth None = new();
+        // The uuid names a token-protected live row whose holder has stopped checking in; this
+        // token-capable register may take it over if the row still holds TokenHash at issue time.
+        public bool StaleReclaim { get; init; }
+        public long DeviceId { get; init; }
+        public string? TokenHash { get; init; }
     }
 
     // Round 3 (R3): a conditional token write found the row changed by another issuance.
@@ -558,5 +636,8 @@ namespace SignageUnicorn.Api.Services
         public DateTime? TokenIssuedAt { get; set; }
         // Round 3 (R2): set by an operator reset, cleared by the next successful token write.
         public DateTime? TokenResetAt { get; set; }
+        // Round 7: age of last_check_in in seconds (computed in SQL against SYSUTCDATETIME so no
+        // clock conversion happens here); null when the row never checked in.
+        public int? SecondsSinceCheckIn { get; set; }
     }
 }

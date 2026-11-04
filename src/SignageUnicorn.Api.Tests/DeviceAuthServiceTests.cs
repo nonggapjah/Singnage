@@ -250,6 +250,129 @@ namespace SignageUnicorn.Api.Tests
             Assert.Empty(repo.TokenWrites);
         }
 
+        // ---------- register after a reinstall (Round 7: stale-holder re-claim) ----------
+
+        [Theory]
+        [InlineData(null, 120, true)]    // never checked in: nothing to protect
+        [InlineData(3600, 120, true)]    // holder silent for an hour
+        [InlineData(120, 120, true)]     // exactly the threshold
+        [InlineData(119, 120, false)]
+        [InlineData(15, 120, false)]     // a live screen (heartbeat every 15-20 s)
+        [InlineData(-30, 120, false)]    // clock skew reads as "just seen"
+        [InlineData(3600, 0, false)]     // 0 disables the rule
+        public void IsHolderOffline_follows_the_threshold(int? seen, int threshold, bool expected)
+            => Assert.Equal(expected, DeviceAuthService.IsHolderOffline(seen, threshold));
+
+        [Theory]
+        [InlineData(null, 120)]
+        [InlineData("", 120)]
+        [InlineData("abc", 120)]
+        [InlineData("-5", 120)]
+        [InlineData("0", 0)]
+        [InlineData(" 300 ", 300)]
+        public void ParseSeconds_falls_back_on_garbage(string? raw, int expected)
+            => Assert.Equal(expected, DeviceAuthService.ParseSeconds(raw, 120));
+
+        [Theory]
+        [InlineData(DeviceAuthMode.IfIssued)]
+        [InlineData(DeviceAuthMode.Required)]
+        public async Task Reinstalled_screen_takes_its_row_back_once_the_old_holder_is_offline(DeviceAuthMode mode)
+        {
+            var oldToken = DeviceAuthService.GenerateToken();
+            var repo = new FakeDeviceRepository().Add(1, "uuid-1", DeviceAuthService.Hash(oldToken), seenSecondsAgo: 3600);
+            var svc = Make(repo, mode);
+
+            // The setup screen sends the hardware uuid, no token, tokenCapable: true.
+            var pre = await svc.PreAuthorizeRegisterAsync("uuid-1", null, "ip", tokenCapable: true);
+            Assert.True(pre.StaleReclaim);
+            Assert.Equal(1, pre.DeviceId);
+
+            // REGISTER_OR_LOGIN refreshed last_check_in in between; the decision still stands.
+            repo.Rows[0].SecondsSinceCheckIn = 0;
+            var device = new DeviceDto { DeviceId = "1", DeviceUuid = "uuid-1" };
+            var fresh = await svc.IssueOrRotateAsync(device, null, tokenCapable: true, "ip", pre);
+
+            Assert.NotNull(fresh);
+            Assert.NotEqual(oldToken, fresh);
+            Assert.Equal(DeviceAuthService.Hash(fresh!), repo.Rows[0].TokenHash);   // old token is dead
+            Assert.Single(repo.TokenWrites);
+            Assert.True(DeviceAuthService.TokenMatches(fresh, repo.Rows[0].TokenHash));
+        }
+
+        [Fact]
+        public async Task Register_still_refuses_while_the_holder_is_checking_in_and_says_why()
+        {
+            var token = DeviceAuthService.GenerateToken();
+            var repo = new FakeDeviceRepository().Add(7, "uuid-7", DeviceAuthService.Hash(token), seenSecondsAgo: 15);
+            var svc = Make(repo, DeviceAuthMode.IfIssued);
+
+            var ex = await Assert.ThrowsAsync<DeviceAuthRejectedException>(() => svc.PreAuthorizeRegisterAsync("uuid-7", null, "ip", tokenCapable: true));
+            Assert.StartsWith(DeviceAuthService.RejectMessage, ex.Message);   // clients key on the code
+            Assert.Contains("device 7", ex.Detail);
+            Assert.Contains("15 s ago", ex.Detail);
+            Assert.Contains("Reset device token", ex.Detail);
+            Assert.Empty(repo.TokenWrites);
+            Assert.Equal(DeviceAuthService.Hash(token), repo.Rows[0].TokenHash);
+        }
+
+        [Fact]
+        public async Task Legacy_client_cannot_take_over_a_stale_row()
+        {
+            // A client that would discard the token must not strip the row of its current one.
+            var repo = new FakeDeviceRepository().Add(1, "uuid-1", DeviceAuthService.Hash("t"), seenSecondsAgo: 3600);
+            var svc = Make(repo, DeviceAuthMode.IfIssued);
+
+            var ex = await Assert.ThrowsAsync<DeviceAuthRejectedException>(() => svc.PreAuthorizeRegisterAsync("uuid-1", null, "ip", tokenCapable: false));
+            Assert.Contains("cannot store one", ex.Detail);
+            Assert.Empty(repo.TokenWrites);
+        }
+
+        [Fact]
+        public async Task Stale_reclaim_is_dropped_when_the_holder_rotated_in_between()
+        {
+            var oldToken = DeviceAuthService.GenerateToken();
+            var repo = new FakeDeviceRepository().Add(1, "uuid-1", DeviceAuthService.Hash(oldToken), seenSecondsAgo: 3600);
+            var svc = Make(repo, DeviceAuthMode.IfIssued);
+            var pre = await svc.PreAuthorizeRegisterAsync("uuid-1", null, "ip", tokenCapable: true);
+            Assert.True(pre.StaleReclaim);
+
+            // The "offline" screen came back and rotated its token before our register issued.
+            var rotated = DeviceAuthService.GenerateToken();
+            repo.Rows[0].TokenHash = DeviceAuthService.Hash(rotated);
+
+            var device = new DeviceDto { DeviceId = "1", DeviceUuid = "uuid-1" };
+            var token = await svc.IssueOrRotateAsync(device, null, tokenCapable: true, "ip", pre);
+            Assert.Null(token);                                                     // REGISTER_WITHOUT_TOKEN path
+            Assert.Equal(DeviceAuthService.Hash(rotated), repo.Rows[0].TokenHash); // the live holder keeps its token
+            Assert.Empty(repo.TokenWrites);
+
+            await Assert.ThrowsAsync<DeviceAuthRejectedException>(
+                () => Make(repo, DeviceAuthMode.Required).IssueOrRotateAsync(device, null, tokenCapable: true, "ip", pre));
+        }
+
+        [Fact]
+        public async Task Stale_reclaim_can_be_switched_off()
+        {
+            var repo = new FakeDeviceRepository().Add(1, "uuid-1", DeviceAuthService.Hash("t"), seenSecondsAgo: 3600);
+            var svc = new DeviceAuthService(repo, new FakeSystemLogRepository(), DeviceAuthMode.IfIssued, false, reclaimAfterOfflineSeconds: 0);
+
+            var ex = await Assert.ThrowsAsync<DeviceAuthRejectedException>(() => svc.PreAuthorizeRegisterAsync("uuid-1", null, "ip", tokenCapable: true));
+            Assert.Contains("device 1", ex.Detail);
+            Assert.Empty(repo.TokenWrites);
+        }
+
+        [Fact]
+        public async Task Pre_auth_without_a_stale_decision_leaves_issuance_unchanged()
+        {
+            var repo = new FakeDeviceRepository().Add(1, "uuid-1", DeviceAuthService.Hash("t"), seenSecondsAgo: 3600);
+            var svc = Make(repo, DeviceAuthMode.IfIssued);
+            var device = new DeviceDto { DeviceId = "1", DeviceUuid = "uuid-1" };
+
+            Assert.Null(await svc.IssueOrRotateAsync(device, null, tokenCapable: true, "ip"));
+            Assert.Null(await svc.IssueOrRotateAsync(device, null, tokenCapable: true, "ip", RegisterPreAuth.None));
+            Assert.Empty(repo.TokenWrites);
+        }
+
         // ---------- claim (T2) ----------
 
         [Fact]

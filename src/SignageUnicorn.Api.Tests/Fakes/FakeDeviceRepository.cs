@@ -25,9 +25,9 @@ namespace SignageUnicorn.Api.Tests.Fakes
         public List<string> AppliedMigrations { get; } = new();
         public Dictionary<string, string> RecordedProcedureHashes { get; } = new(StringComparer.OrdinalIgnoreCase);
 
-        public FakeDeviceRepository Add(long id, string? uuid, string? tokenHash = null, string? mac = null, DateTime? resetAt = null)
+        public FakeDeviceRepository Add(long id, string? uuid, string? tokenHash = null, string? mac = null, DateTime? resetAt = null, int? seenSecondsAgo = null)
         {
-            Rows.Add(new DeviceAuthInfo { DeviceId = id, DeviceUuid = uuid, TokenHash = tokenHash, MacAddress = mac, TokenResetAt = resetAt });
+            Rows.Add(new DeviceAuthInfo { DeviceId = id, DeviceUuid = uuid, TokenHash = tokenHash, MacAddress = mac, TokenResetAt = resetAt, SecondsSinceCheckIn = seenSecondsAgo });
             return this;
         }
 
