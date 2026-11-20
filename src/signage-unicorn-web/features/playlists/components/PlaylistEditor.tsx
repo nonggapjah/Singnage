@@ -6,6 +6,7 @@ import { MediaSelector } from './MediaSelector';
 import { useRouter } from 'next/navigation';
 
 import { generateId } from '@/lib/utils';
+import { mediaKind } from '@/features/media/utils/media-helpers';
 
 interface PlaylistEditorProps {
     initialData?: Playlist;
@@ -224,6 +225,9 @@ export const PlaylistEditor: React.FC<PlaylistEditorProps> = ({ initialData, onS
                                 <div className="font-semibold text-accent-cyan text-base truncate" title={item.media?.displayName || item.media?.fileName}>
                                     {item.media?.displayName || item.media?.fileName}
                                 </div>
+                                {mediaKind(item.media?.fileName || item.media?.blobUrl) === 'audio' && (
+                                    <span className="inline-block mt-1 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-accent-cyan bg-accent-cyan/10 border border-accent-cyan/30" title="Sound only: plays on audio devices; screens skip this item">Audio</span>
+                                )}
                                 {item.media?.displayName && item.media?.displayName !== item.media?.fileName && (
                                     <div className="text-xs text-muted-foreground font-mono truncate" title={item.media?.fileName}>{item.media?.fileName}</div>
                                 )}

@@ -66,6 +66,48 @@ const TokenBadges: React.FC<{ device: Device; compact?: boolean }> = ({ device, 
 };
 const isDeviceOnline = (d: Device) => ONLINE_STATES.includes((d.status || '').toUpperCase());
 
+// Audio player (web 2.4.14 / API 2.8.6): a row registered by the Signage Unicorn Audio app. It has
+// no screen, so the card shows a volume control instead of "View screen" and "Restart player"
+// instead of "Reboot" (the same RESTART command: the app restarts, never the PC it runs on).
+const isAudioDevice = (d: Device) => (d.playbackMode || 'screen') === 'audio';
+const AudioBadge: React.FC<{ compact?: boolean }> = ({ compact }) => (
+    <span
+        className={`inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-wider border text-accent-cyan bg-accent-cyan/10 border-accent-cyan/30 ${compact ? '' : 'ml-1'}`}
+        title="Audio player (Signage Unicorn Audio): sound only, no screen"
+    >
+        Audio
+    </span>
+);
+
+/** Slider + mute for an audio device. Sends SET_VOLUME:<n> 400 ms after the last move, without the confirm dialog. */
+const VolumeControl: React.FC<{ deviceId: string; initial: number | null | undefined; onSend: (deviceId: string, level: number) => Promise<void> }> = ({ deviceId, initial, onSend }) => {
+    const start = typeof initial === 'number' ? Math.min(100, Math.max(0, initial)) : 70;
+    const [level, setLevel] = useState<number>(start);
+    const [lastAudible, setLastAudible] = useState<number>(start > 0 ? start : 70);
+    const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const change = (v: number) => {
+        setLevel(v);
+        if (v > 0) setLastAudible(v);
+        if (timer.current) clearTimeout(timer.current);
+        timer.current = setTimeout(() => { void onSend(deviceId, v); }, 400);
+    };
+    const id = `volume-${deviceId}`;
+    return (
+        <div className="flex items-center gap-2 w-full">
+            <label htmlFor={id} className="text-xs font-bold uppercase tracking-wider text-muted-foreground shrink-0">Volume</label>
+            <input id={id} type="range" min={0} max={100} value={level} onChange={(e) => change(Number(e.target.value))} className="flex-1 min-w-0 h-6 accent-[var(--primary)]" />
+            <span className="w-10 text-right font-mono text-sm text-foreground">{level}%</span>
+            <button
+                type="button"
+                onClick={() => change(level === 0 ? lastAudible : 0)}
+                className="py-1 px-2 rounded-lg text-xs font-bold uppercase tracking-wider border border-border bg-muted/20 hover:bg-muted/40 text-foreground"
+            >
+                {level === 0 ? 'Unmute' : 'Mute'}
+            </button>
+        </div>
+    );
+};
+
 export default function DevicesPage() {
     const { showModal } = useUI();
     const [devices, setDevices] = useState<Device[]>([]);
@@ -179,6 +221,16 @@ export default function DevicesPage() {
         fetchDevices();
         fetchPlaylists();
         fetchMediaNames();
+    }
+
+    // Audio devices: the volume slider sends straight away (a confirm per nudge would be unusable).
+    async function sendVolume(deviceId: string, level: number) {
+        try {
+            const res = await deviceApi.sendCommand(deviceId, `SET_VOLUME:${level}`);
+            if (!res.success) showNotify('Volume not sent', res.message || 'Unknown error', 'ERROR');
+        } catch {
+            showNotify('Volume not sent', 'A critical error occurred while sending the command.', 'ERROR');
+        }
     }
 
     async function handleCommand(deviceId: string, command: string) {
@@ -746,6 +798,7 @@ export default function DevicesPage() {
                                                                 {device.appVersion && <span className="text-muted-foreground/70">[{device.appVersion}]</span>}
                                                                 {device.currentPlaylistId && <span className="text-accent-cyan font-bold">: Active</span>}
                                                                 <TokenBadges device={device} />
+                                                                {isAudioDevice(device) && <AudioBadge />}
                                                             </p>
                                                         </div>
                                                         <div className="text-right">
@@ -870,13 +923,19 @@ export default function DevicesPage() {
 
                                                     <div className="grid grid-cols-3 gap-2 mt-auto">
                                                         <div className="col-span-3 mb-1">
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => viewScreenshot(device.deviceId)}
-                                                                className="w-full py-2 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-sm font-black text-emerald-700 dark:text-emerald-400 uppercase tracking-wider transition-colors flex items-center justify-center gap-1.5"
-                                                            >
-                                                                <span aria-hidden="true">📺</span> View screen
-                                                            </button>
+                                                            {isAudioDevice(device) ? (
+                                                                <div className="w-full py-2 px-3 rounded-lg bg-muted/10 border border-border/50">
+                                                                    <VolumeControl deviceId={device.deviceId} initial={device.volume} onSend={sendVolume} />
+                                                                </div>
+                                                            ) : (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => viewScreenshot(device.deviceId)}
+                                                                    className="w-full py-2 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-sm font-black text-emerald-700 dark:text-emerald-400 uppercase tracking-wider transition-colors flex items-center justify-center gap-1.5"
+                                                                >
+                                                                    <span aria-hidden="true">📺</span> View screen
+                                                                </button>
+                                                            )}
                                                         </div>
                                                         <div className="col-span-3 flex gap-2 mb-1">
                                                             <button type="button" onClick={() => openAssignModal(device.deviceId)} className="flex-[2] py-2 rounded-lg bg-accent-cyan/10 hover:bg-accent-cyan/20 border border-accent-cyan/20 text-sm font-black text-accent-cyan uppercase tracking-wider transition-colors">Assign playlist</button>
@@ -885,7 +944,7 @@ export default function DevicesPage() {
                                                         <button type="button" onClick={() => handleCommand(device.deviceId, 'RELOAD')} className={`${smallActionClass} bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/20 text-amber-700 dark:text-amber-400`}>Reset</button>
                                                         <button type="button" onClick={() => handleCommand(device.deviceId, 'REFRESH')} className={`${smallActionClass} bg-muted/20 hover:bg-muted/40 border-border text-muted-foreground hover:text-foreground`}>Refresh</button>
                                                         {isOnline ? (
-                                                            <button type="button" onClick={() => handleCommand(device.deviceId, 'RESTART')} className={`${smallActionClass} bg-muted/20 hover:bg-red-500/10 border-border text-muted-foreground hover:text-red-500`}>Reboot</button>
+                                                            <button type="button" onClick={() => handleCommand(device.deviceId, 'RESTART')} className={`${smallActionClass} bg-muted/20 hover:bg-red-500/10 border-border text-muted-foreground hover:text-red-500`}>{isAudioDevice(device) ? 'Restart player' : 'Reboot'}</button>
                                                         ) : (
                                                             <button type="button" onClick={() => handleDeleteDevice(device.deviceId)} className={`${smallActionClass} bg-muted/20 hover:bg-red-500/10 border-border text-muted-foreground hover:text-red-500`}>Remove</button>
                                                         )}
@@ -995,6 +1054,7 @@ export default function DevicesPage() {
                                                                     <div className="text-xs text-muted-foreground font-mono mt-0.5 flex items-center gap-1 flex-wrap">
                                                                         <span>{device.appVersion || 'version unknown'}</span>
                                                                         <TokenBadges device={device} compact />
+                                                                        {isAudioDevice(device) && <AudioBadge compact />}
                                                                     </div>
                                                                 </td>
                                                                 <td className="p-4">
@@ -1083,10 +1143,10 @@ export default function DevicesPage() {
                                                                         <button
                                                                             type="button"
                                                                             onClick={() => handleCommand(device.deviceId, 'RESTART')}
-                                                                            aria-label={`Reboot ${device.deviceName}`}
+                                                                            aria-label={`${isAudioDevice(device) ? 'Restart player' : 'Reboot'} ${device.deviceName}`}
                                                                             className="text-xs text-red-600 dark:text-red-400 hover:bg-red-500/10 border border-transparent hover:border-red-500/20 px-3 py-1.5 rounded transition-colors uppercase font-bold tracking-wider"
                                                                         >
-                                                                            Reboot
+                                                                            {isAudioDevice(device) ? 'Restart player' : 'Reboot'}
                                                                         </button>
                                                                     ) : (
                                                                         <button

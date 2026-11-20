@@ -57,8 +57,9 @@ export const MediaReplaceModal: React.FC<MediaReplaceModalProps> = ({ targetMedi
         }
     }, [step]);
 
+    // Audio files take the <video> branch too: the element plays them and an <img> would be broken.
     const isVideo = (fileName: string) =>
-        /\.(mp4|webm|mov)$/i.test(fileName);
+        /\.(mp4|webm|mov|mp3|wav|m4a|aac)$/i.test(fileName);
 
     const loadMedia = async () => {
         setLoadingMedia(true);

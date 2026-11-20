@@ -3,7 +3,7 @@
 import React, { useState, useRef, useId } from 'react';
 import { expiryDateForApi } from '@/features/ui/utils/datetime';
 import { getCapabilities } from '@/lib/api-capabilities';
-import { getMediaMetadata } from '../utils/media-helpers';
+import { getMediaMetadata, isAudioFile } from '../utils/media-helpers';
 import { mediaApi } from '../api/media-api';
 import { Modal } from '@/components/ui/Modal';
 
@@ -393,7 +393,7 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({ onUploadSucces
                                 type="file"
                                 className="sr-only"
                                 onChange={(e) => e.target.files && handleFiles(e.target.files)}
-                                accept="image/*,video/*"
+                                accept="image/*,video/*,audio/*,.mp3,.wav,.m4a,.aac"
                             />
                             <div className="w-20 h-20 rounded-full bg-accent-cyan/10 text-accent-cyan flex items-center justify-center transition-transform duration-300 group-hover:scale-110 border border-accent-cyan/20 group-hover:bg-accent-cyan group-hover:text-white" aria-hidden="true">
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -402,7 +402,8 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({ onUploadSucces
                             </div>
                             <div className="text-center">
                                 <p className="text-xl font-black text-foreground uppercase tracking-tight">Drop media here</p>
-                                <p className="mt-2 text-xs font-bold text-muted-foreground uppercase tracking-widest">or click to browse (images and videos)</p>
+                                <p className="mt-2 text-xs font-bold text-muted-foreground uppercase tracking-widest">or click to browse (images, videos and audio)</p>
+                                <p className="mt-1 text-[11px] text-muted-foreground">Audio (mp3, wav, m4a, aac) is converted and loudness-matched on the server and plays on audio devices only</p>
                             </div>
                         </label>
                     ) : (
@@ -415,13 +416,17 @@ export const MediaUploadZone: React.FC<MediaUploadZoneProps> = ({ onUploadSucces
                                             {previewUrl && (
                                                 selectedFile.type.includes('video') ? (
                                                     <video src={previewUrl} muted playsInline preload="metadata" className="h-full w-full object-cover opacity-80" />
+                                                ) : isAudioFile(selectedFile) ? (
+                                                    <div className="h-full w-full flex items-center justify-center bg-accent-cyan/10 text-accent-cyan" aria-hidden="true">
+                                                        <svg className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></svg>
+                                                    </div>
                                                 ) : (
                                                     <img src={previewUrl} className="h-full w-full object-cover opacity-80 border-0" alt="Preview of the selected file" />
                                                 )
                                             )}
                                             <div className="absolute inset-0 flex items-center justify-center" aria-hidden="true">
                                                 <div className="flex h-8 w-8 items-center justify-center rounded-full border border-white/20 bg-black/40">
-                                                    {selectedFile.type.includes('video') ? (
+                                                    {(selectedFile.type.includes('video') || isAudioFile(selectedFile)) ? (
                                                         <svg className="ml-0.5 h-4 w-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
                                                     ) : (
                                                         <svg className="h-4 w-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
