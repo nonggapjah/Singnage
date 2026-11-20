@@ -438,6 +438,10 @@ namespace SignageUnicorn.Api.Controllers
                         PlaylistId = request.PlaylistId,
                         StartDate = request.StartDate,
                         EndDate = request.EndDate,
+                        StartTime = request.StartTime,
+                        EndTime = request.EndTime,
+                        DaysOfWeek = request.DaysOfWeek,
+                        RepeatEveryMinutes = request.RepeatEveryMinutes,
                         IsActive = true
                     });
 

@@ -20,6 +20,12 @@ const CLIENT_PROTOCOL = '2';                 // contract T5: server leases every
 let AUDIO_MODE = false;
 let appInfo = null;
 let lastGoodSyncAt = 0;
+// Audio player 2.8.2: repeating announcements. Groups come with the SCHEDULE ({playlistId,
+// playlistName, everyMinutes, items}); a due group's items are queued and played between the loop's
+// tracks without touching currentIndex. Last-played times live in localStorage so a restart does
+// not replay every announcement at once.
+let scheduleInterjections = [];
+let interjectionQueue = [];
 const TOKEN_RECLAIM_MIN_MS = 10 * 60 * 1000; // contract T3: one re-claim per 10 minutes at most
 const HEALTH_REPORT_MS = 15000;              // Codex 22: renderer liveness report cadence
 const EMPTY_RETRY_MIN_MS = 5 * 60 * 1000;    // Codex 7: do not re-ask for an empty schedule every heartbeat
@@ -1350,6 +1356,7 @@ async function loadPlaylist(playlistId, resumeIndex = 0) {
         let items = [];
         let playlistName = 'Standard Loop';
         let fromServer = false;
+        let interjectionsFromServer = [];
 
         try {
             const apiPath = playlistId === 'SCHEDULE'
@@ -1367,12 +1374,14 @@ async function loadPlaylist(playlistId, resumeIndex = 0) {
                 items = data.data.items.filter(i => i.media).sort((a, b) => a.positionOrder - b.positionOrder);
             }
             playlistName = data.data.playlistName || playlistName;
+            if (Array.isArray(data.data.interjections)) interjectionsFromServer = data.data.interjections;
         } catch (fetchErr) {
             addLog(`Server unreachable, trying SQLite cache...`, 'warn');
             const cachedData = await ipcRenderer.invoke('db-get-playlist', playlistId);
             if (cachedData) {
                 items = cachedData.items || [];
                 playlistName = cachedData.playlistName || playlistName;
+                if (Array.isArray(cachedData.interjections)) interjectionsFromServer = cachedData.interjections;
                 addLog(`Offline Mode: Loaded from SQLite cache`);
             } else {
                 throw new Error("No local SQLite cache found for this playlist.");
@@ -1387,11 +1396,26 @@ async function loadPlaylist(playlistId, resumeIndex = 0) {
         // --- Cache in SQLite for Offline Survival (an empty list is cached too). Written only
         // AFTER the generation check (Codex #10): a superseded response must leave no trace.
         if (fromServer) {
-            await ipcRenderer.invoke('db-save-playlist', { id: playlistId, data: { items, playlistName } });
+            await ipcRenderer.invoke('db-save-playlist', { id: playlistId, data: { items, playlistName, interjections: interjectionsFromServer } });
             if (!loadSeq.isCurrent(loadNo)) return true;
         }
 
-        if (items.length === 0) {
+        // Audio player: announcements travel beside the loop. Their files are synced in the same job
+        // (same content hash) but they never become part of `playlist`.
+        const announcementGroups = [];
+        const extraItems = [];
+        if (AUDIO_MODE && playlistId === 'SCHEDULE') {
+            for (const g of interjectionsFromServer) {
+                const groupItems = (Array.isArray(g && g.items) ? g.items : []).filter(i => i && i.media).sort((a, b) => a.positionOrder - b.positionOrder);
+                const every = parseInt(g && g.everyMinutes, 10) || 0;
+                if (!groupItems.length || every <= 0) continue;
+                augmentItems(groupItems);
+                announcementGroups.push({ playlistId: String(g.playlistId || ''), playlistName: g.playlistName || '', everyMinutes: every, items: groupItems });
+                for (const it of groupItems) extraItems.push(it);
+            }
+        }
+
+        if (items.length === 0 && extraItems.length === 0) {
             // Both the live server answer and a cached empty answer mean "nothing assigned"; the
             // local fallback folder is only for an unreachable server (see the catch below).
             await applyEmptyPlaylist(playlistId, playlistName);
@@ -1399,7 +1423,8 @@ async function loadPlaylist(playlistId, resumeIndex = 0) {
         }
 
         augmentItems(items);
-        const contentHash = contentHashFor(playlistId, items);
+        const syncItems = extraItems.length ? items.concat(extraItems) : items;
+        const contentHash = contentHashFor(playlistId, syncItems);
         const savedHash = localStorage.getItem('playlist_hash');
 
         dashPlaylistName.textContent = playlistName;
@@ -1412,13 +1437,14 @@ async function loadPlaylist(playlistId, resumeIndex = 0) {
             // ownership SYNCHRONOUSLY, before the file check below yields -- otherwise B could swap
             // in during that await and we would still report A as ready.
             cancelPendingForOtherVersion(contentHash);
-            const complete = await allFilesExist(items);
+            const complete = await allFilesExist(syncItems);
             if (!loadSeq.isCurrent(loadNo)) return true;
             // A swap that was already in flight when we cancelled can still have completed during
             // the await: re-read the active hash and decide from the real state, not from `savedHash`.
             const decision = decideAfterVerify({ contentHash, activeHashAfterAwait: activeContentHash(), complete });
             if (decision === 'ready') {
                 refreshAttribution(items);
+                if (AUDIO_MODE && playlistId === 'SCHEDULE') scheduleInterjections = announcementGroups;
                 cancelPendingForOtherVersion(contentHash); // idempotent re-check after yielding
                 addLog("Smart Sync: Hash matches and all files exist. Skipping re-download.");
                 dashReadyStatus.textContent = 'READY';
@@ -1442,7 +1468,9 @@ async function loadPlaylist(playlistId, resumeIndex = 0) {
         // (not `savedHash`, which may predate a swap that finished during the awaits above).
         const silent = playlist.length > 0 && contentHash === activeContentHash();
         addLog(`Smooth Sync: Queuing ${items.length} items in background...`);
-        requestedJob = newJob(playlistId, playlistName, items, contentHash, { silent, resumeIndex });
+        requestedJob = newJob(playlistId, playlistName, syncItems, contentHash, { silent, resumeIndex });
+        requestedJob.loopItems = items;
+        requestedJob.interjections = announcementGroups;
         swapTarget = silent ? null : requestedJob;
         runSyncWorker();
         return true;
@@ -1491,6 +1519,7 @@ async function runSyncWorker() {
             if (requestedJob !== job) continue; // superseded: converge on the newest request
 
             job.completed = true;
+            if (AUDIO_MODE && job.interjections && job.hash === activeContentHash()) scheduleInterjections = job.interjections;
             const isFullySynced = job.synced === job.items.length;
             if (isFullySynced) {
                 addLog(`Background Sync Complete (${job.items.length} clips).`);
@@ -1568,7 +1597,8 @@ async function syncJobAssets(job) {
 async function swapToJob(job) {
     if (!job) return;
     addLog(`Swapping to new playlist: '${job.name}'`);
-    playlist = job.items;
+    playlist = job.loopItems || job.items;
+    if (AUDIO_MODE) { scheduleInterjections = job.interjections || []; interjectionQueue = []; }
     config.lastPlaylistId = job.id;
     localStorage.setItem('playlist_hash', job.hash);
     await ipcRenderer.invoke('save-config', config);
@@ -1587,6 +1617,7 @@ async function pruneCache() {
     try {
         const keep = new Set();
         for (const it of playlist) if (it.media && it.media.cacheName && !it.media.isFallback) keep.add(it.media.cacheName);
+        for (const g of scheduleInterjections) for (const it of g.items) if (it.media && it.media.cacheName) keep.add(it.media.cacheName);
         for (const job of [requestedJob, activeJob, swapTarget]) {
             if (!job) continue;
             for (const it of job.items) if (it.media && it.media.cacheName) keep.add(it.media.cacheName);
@@ -1665,7 +1696,8 @@ async function playNext() {
         skipTimer = null;
     }
 
-    if (playlist.length === 0) {
+    const fromQueue = AUDIO_MODE && interjectionQueue.length > 0;
+    if (playlist.length === 0 && !fromQueue) {
         isPlaying = false;
         reportPlaybackState();
         jingleEl.classList.remove('hidden');
@@ -1678,9 +1710,11 @@ async function playNext() {
         } catch (e) { /* ignore */ }
         return;
     }
-    if (currentIndex >= playlist.length) currentIndex = 0;
-    localStorage.setItem('last_playlist_index', String(currentIndex));
-    const item = playlist[currentIndex];
+    if (!fromQueue) {
+        if (currentIndex >= playlist.length) currentIndex = 0;
+        localStorage.setItem('last_playlist_index', String(currentIndex));
+    }
+    const item = fromQueue ? interjectionQueue.shift() : playlist[currentIndex];
     const media = item.media;
     const isFallback = !!(media && media.isFallback) || !!(item.playlistItemId && String(item.playlistItemId).startsWith('FALLBACK'));
 
@@ -1718,7 +1752,7 @@ async function playNext() {
     reportPlaybackState();
 
     dashCurrentMedia.textContent = `▶ ${media.displayName || media.fileName || media.cacheName}`;
-    dashLoopInfo.textContent = `ITEM ${currentIndex + 1} / ${playlist.length}`;
+    dashLoopInfo.textContent = fromQueue ? 'ANNOUNCEMENT' : `ITEM ${currentIndex + 1} / ${playlist.length}`;
 
     mediaStartTime = Date.now();
     const override = parseInt(item.durationOverride, 10) || 0;
@@ -1747,7 +1781,8 @@ async function playNext() {
             addLog("Smooth Swap: Next playlist first item not ready yet. Staying on current.", "warn");
         }
 
-        currentIndex = (currentIndex + 1) % playlist.length;
+        if (!fromQueue && playlist.length > 0) currentIndex = (currentIndex + 1) % playlist.length;
+        if (AUDIO_MODE) queueDueInterjections();
         playNext();
     };
 
@@ -2112,6 +2147,72 @@ document.getElementById('btn-esc').onclick = () => {
     updateCursorVisibility();
 };
 
+// --- Audio player: repeating announcements -------------------------------------------------------
+function interjectionLastKey(id) { return `interjection_last_${id}`; }
+
+function queueDueInterjections() {
+    if (!AUDIO_MODE || !scheduleInterjections.length) return;
+    const now = Date.now();
+    for (const g of scheduleInterjections) {
+        const last = parseInt(localStorage.getItem(interjectionLastKey(g.playlistId)) || '0', 10) || 0;
+        if (now - last < g.everyMinutes * 60000) continue;
+        localStorage.setItem(interjectionLastKey(g.playlistId), String(now));
+        for (const it of g.items) interjectionQueue.push(it);
+        addLog(`Announcement due: ${g.playlistName || g.playlistId} (${g.items.length} item(s), every ${g.everyMinutes} min)`, 'info', true);
+    }
+}
+
+// With an empty loop (announcements only) nothing else would ever call playNext.
+setInterval(() => {
+    if (!AUDIO_MODE || isPlaying || !scheduleInterjections.length || interjectionQueue.length) return;
+    queueDueInterjections();
+    if (interjectionQueue.length) playNext();
+}, 15000);
+
+// --- Audio player: output device --------------------------------------------------------------------
+async function populateAudioOutputs() {
+    const sel = document.getElementById('audio-output');
+    if (!sel || !navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+    try {
+        const outputs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'audiooutput');
+        const current = (config && config.audioSinkId) || '';
+        sel.replaceChildren();
+        const def = document.createElement('option');
+        def.value = '';
+        def.textContent = 'Windows default output';
+        sel.appendChild(def);
+        let n = 0;
+        for (const d of outputs) {
+            if (!d.deviceId || d.deviceId === 'default' || d.deviceId === 'communications') continue;
+            n++;
+            const o = document.createElement('option');
+            o.value = d.deviceId;
+            o.textContent = d.label || `Output ${n}`;
+            sel.appendChild(o);
+        }
+        sel.value = Array.from(sel.options).some(o => o.value === current) ? current : '';
+    } catch (e) {
+        addLog(`Audio outputs unavailable: ${e.message}`, 'warn', true);
+    }
+}
+
+async function applyAudioSink(sinkId, quiet) {
+    if (typeof videoEl.setSinkId !== 'function') {
+        if (!quiet) addLog('Output selection is not supported on this machine.', 'warn', true);
+        return false;
+    }
+    try {
+        await videoEl.setSinkId(sinkId || '');
+        config.audioSinkId = sinkId || null;
+        await ipcRenderer.invoke('save-config', config);
+        if (!quiet) { addLog(`Audio output set to ${sinkId ? 'selected device' : 'Windows default'}.`, 'info', true); showHUD('OUTPUT CHANGED'); }
+        return true;
+    } catch (e) {
+        addLog(`Audio output change failed: ${e.message}`, 'warn', true);
+        return false;
+    }
+}
+
 // --- Audio player helpers (also used by SET_VOLUME / MUTE commands on any build) ---------------
 async function applyVolume() {
     videoEl.muted = isMuted;
@@ -2173,6 +2274,14 @@ function enterAudioMode() {
     bind('audio-settings', () => document.getElementById('show-config').onclick());
     bind('audio-dashboard', () => toggleDashboard());
     bind('audio-hide', () => ipcRenderer.invoke('hide-to-tray').catch(() => { }));
+
+    const out = document.getElementById('audio-output');
+    if (out) {
+        out.onchange = (e) => { applyAudioSink(e.target.value, false).then(() => populateAudioOutputs()); };
+        populateAudioOutputs();
+        if (navigator.mediaDevices) navigator.mediaDevices.ondevicechange = () => populateAudioOutputs();
+    }
+    if (config && config.audioSinkId) applyAudioSink(config.audioSinkId, true);
 
     if (window.signage && typeof window.signage.onAudioControl === 'function') {
         window.signage.onAudioControl((msg) => {

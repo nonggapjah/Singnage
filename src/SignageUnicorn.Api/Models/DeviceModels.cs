@@ -226,6 +226,12 @@ namespace SignageUnicorn.Api.Models
         public DateTime? StartDate { get; set; }
         public DateTime? EndDate { get; set; }
         public bool IsActive { get; set; } = true;
+        // Dayparts (2.8.7): daily window 'HH:mm' in store time, ISO days "1,2,3" (Mon = 1), and for
+        // audio players a repeat interval that turns the playlist into an announcement.
+        public string? StartTime { get; set; }
+        public string? EndTime { get; set; }
+        public string? DaysOfWeek { get; set; }
+        public int? RepeatEveryMinutes { get; set; }
     }
 
     public class BatchAddScheduleRequest
@@ -241,6 +247,15 @@ namespace SignageUnicorn.Api.Models
 
         [JsonPropertyName("endDate")]
         public DateTime? EndDate { get; set; }
+
+        [JsonPropertyName("startTime")]
+        public string? StartTime { get; set; }
+        [JsonPropertyName("endTime")]
+        public string? EndTime { get; set; }
+        [JsonPropertyName("daysOfWeek")]
+        public string? DaysOfWeek { get; set; }
+        [JsonPropertyName("repeatEveryMinutes")]
+        public int? RepeatEveryMinutes { get; set; }
     }
 
     public class CommandAckRequest

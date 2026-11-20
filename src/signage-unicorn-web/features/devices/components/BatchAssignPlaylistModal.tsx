@@ -6,6 +6,8 @@ import { deviceApi } from '../api/device-api';
 import { Playlist } from '@/features/playlists/types/playlist';
 import { useUI } from '@/features/ui/context/UIContext';
 import { DateTimePicker24h } from '@/components/ui/DateTimePicker24h';
+import { DaypartFields } from './DaypartFields';
+import { Daypart } from '@/lib/daypart';
 import { Modal } from '@/components/ui/Modal';
 
 /**
@@ -31,6 +33,7 @@ export const BatchAssignPlaylistModal: React.FC<BatchAssignPlaylistModalProps> =
     const [selectedPlaylistId, setSelectedPlaylistId] = useState<string>('');
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
+    const [daypart, setDaypart] = useState<Daypart>({});
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
 
@@ -71,7 +74,7 @@ export const BatchAssignPlaylistModal: React.FC<BatchAssignPlaylistModalProps> =
 
         setSubmitting(true);
         try {
-            const res = await deviceApi.batchAddSchedule(deviceIds, selectedPlaylistId, st, ed);
+            const res = await deviceApi.batchAddSchedule(deviceIds, selectedPlaylistId, st, ed, daypart);
             if (res.success) {
                 showModal({ title: 'SUCCESS', message: `Playlist assigned to ${deviceIds.length} devices. Sync command sent.`, type: 'SUCCESS' });
                 onSuccess();
@@ -153,6 +156,10 @@ export const BatchAssignPlaylistModal: React.FC<BatchAssignPlaylistModalProps> =
                 <div>
                     <label htmlFor="batch-assign-end" className="block text-sm font-bold text-muted-foreground uppercase tracking-widest mb-1.5">End date (optional)</label>
                     <DateTimePicker24h id="batch-assign-end" value={endDate} onChange={setEndDate} placeholderDate="End date" defaultTime="23:59" isLarge={true} />
+                </div>
+                <div>
+                    <span className="block text-sm font-bold text-muted-foreground uppercase tracking-widest mb-1.5">Daily window · days · repeat (optional)</span>
+                    <DaypartFields idPrefix="batch-assign" value={daypart} onChange={setDaypart} />
                 </div>
             </div>
 

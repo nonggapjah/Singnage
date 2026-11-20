@@ -102,17 +102,44 @@ namespace SignageUnicorn.Api.Services
             int currentOrder = 1;
 
             var now = DateTime.UtcNow;
+            // Dayparts (2.8.7): daily windows and days of the week are evaluated in the store's time zone.
+            var configuration = _serviceProvider.GetService(typeof(Microsoft.Extensions.Configuration.IConfiguration)) as Microsoft.Extensions.Configuration.IConfiguration;
+            var tz = ScheduleWindow.ResolveTimeZone(configuration?["Schedule:TimeZoneId"]);
+            var localNow = ScheduleWindow.ToLocal(now, tz);
+            var isAudioDevice = playbackMode == PlaybackModes.Audio;
 
             foreach (var assignment in assignments)
             {
                 // Check Schedule Dates
                 if (assignment.StartDate.HasValue && now < assignment.StartDate.Value) continue;
                 if (assignment.EndDate.HasValue && now > assignment.EndDate.Value) continue;
+                if (!ScheduleWindow.IsWithin(localNow, assignment.StartTime, assignment.EndTime, assignment.DaysOfWeek)) continue;
 
                 var playlist = await playlistService.GetPlaylistByIdAsync(assignment.PlaylistId);
                 
                 if (playlist != null && playlist.Active == "Y" && playlist.Items != null)
                 {
+                    var repeat = ScheduleWindow.NormalizeRepeat(assignment.RepeatEveryMinutes);
+                    if (isAudioDevice && repeat.HasValue)
+                    {
+                        // Repeating announcement: not part of the loop. The audio player plays these items
+                        // once every N minutes between its regular tracks. Screens ignore the flag.
+                        var group = new SignageUnicorn.Api.Models.Domain.InterjectionDto
+                        {
+                            PlaylistId = playlist.PlaylistId,
+                            PlaylistName = playlist.PlaylistName,
+                            EveryMinutes = repeat.Value
+                        };
+                        foreach (var item in playlist.Items)
+                        {
+                            if (!PlaybackModes.Accepts(playbackMode, item.Media?.FileName ?? item.Media?.BlobUrl)) continue;
+                            group.Items.Add(item);
+                        }
+                        if (group.Items.Count > 0)
+                            (schedule.Interjections ??= new List<SignageUnicorn.Api.Models.Domain.InterjectionDto>()).Add(group);
+                        continue;
+                    }
+
                     foreach (var item in playlist.Items)
                     {
                         // Audio player: a screen never receives an audio file (the deployed kiosk
@@ -139,7 +166,7 @@ namespace SignageUnicorn.Api.Services
             var versionSource = string.Join("|", assignmentList
                 .OrderBy(a => a.PlaylistId, StringComparer.Ordinal)
                 .ThenBy(a => a.StartDate)
-                .Select(a => $"{a.PlaylistId}:{a.StartDate:O}:{a.EndDate:O}:{a.IsActive}"));
+                .Select(a => $"{a.PlaylistId}:{a.StartDate:O}:{a.EndDate:O}:{a.IsActive}:{a.StartTime}:{a.EndTime}:{a.DaysOfWeek}:{a.RepeatEveryMinutes}"));
             using (var sha = System.Security.Cryptography.SHA256.Create())
             {
                 var bytes = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(versionSource));
@@ -150,6 +177,11 @@ namespace SignageUnicorn.Api.Services
             {
                 if (a.StartDate.HasValue && a.StartDate.Value > now && (next == null || a.StartDate.Value < next)) next = a.StartDate.Value;
                 if (a.EndDate.HasValue && a.EndDate.Value > now && (next == null || a.EndDate.Value < next)) next = a.EndDate.Value;
+            }
+            foreach (var a in assignmentList)
+            {
+                var boundary = ScheduleWindow.NextBoundaryUtc(now, tz, a.StartTime, a.EndTime, a.DaysOfWeek);
+                if (boundary.HasValue && boundary.Value > now && (next == null || boundary.Value < next)) next = boundary.Value;
             }
             schedule.NextTransitionAtUtc = next;
             return schedule;

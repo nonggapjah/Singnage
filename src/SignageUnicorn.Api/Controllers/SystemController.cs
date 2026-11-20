@@ -34,6 +34,9 @@ namespace SignageUnicorn.Api.Controllers
             // Audio player (2.8.6): devices carry playbackMode/volume, register accepts playbackMode,
             // audio uploads are transcoded, schedules are filtered per mode, SET_VOLUME:<n> exists.
             public bool AudioDevices { get; init; } = true;
+            // Dayparts (2.8.7): assignments carry startTime/endTime/daysOfWeek/repeatEveryMinutes;
+            // schedules may carry interjections for audio players.
+            public bool Dayparts { get; init; } = true;
         }
 
         [HttpGet("capabilities")]

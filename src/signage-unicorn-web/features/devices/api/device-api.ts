@@ -126,17 +126,18 @@ export const deviceApi = {
         return await apiFetch<any[]>(`/devices/${deviceId}/playlists`, { method: 'GET' });
     },
 
-    updateAssignedPlaylists: async (deviceId: string, playlists: { playlistId: string; startDate?: string; endDate?: string }[]) => {
+    updateAssignedPlaylists: async (deviceId: string, playlists: { playlistId: string; startDate?: string; endDate?: string; startTime?: string; endTime?: string; daysOfWeek?: string; repeatEveryMinutes?: number | null }[]) => {
         return await apiFetch<{ success: boolean }>(`/devices/${deviceId}/playlists`, {
             method: 'POST',
             body: JSON.stringify(playlists),
         });
     },
 
-    batchAddSchedule: async (deviceIds: string[], playlistId: string, startDate?: string, endDate?: string) => {
+    // daypart (web 2.4.15 / API 2.8.7): startTime, endTime, daysOfWeek, repeatEveryMinutes; older APIs ignore them.
+    batchAddSchedule: async (deviceIds: string[], playlistId: string, startDate?: string, endDate?: string, daypart?: { startTime?: string; endTime?: string; daysOfWeek?: string; repeatEveryMinutes?: number | null }) => {
         return await apiFetch<{ success: boolean }>('/devices/batch-add-playlist', {
             method: 'POST',
-            body: JSON.stringify({ deviceIds, playlistId, startDate, endDate }),
+            body: JSON.stringify({ deviceIds, playlistId, startDate, endDate, ...(daypart || {}) }),
         });
     },
 

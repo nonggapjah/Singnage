@@ -42,7 +42,8 @@ namespace SignageUnicorn.Api.Repositories.Interfaces
         Task SetDeviceVolumeAsync(string deviceId, int volume);
         // T8: drops the device's own assignments and sets inherit mode in one transaction.
         Task ResetScheduleToInheritAsync(string deviceId);
-        Task<IEnumerable<string>> GetDevicesWithScheduleTransitionsAsync(DateTime fromUtc, DateTime toUtc);
+        // 2.8.7: timeZoneId (Windows id) decides what "today" and a daily window mean; null = Thailand.
+        Task<IEnumerable<string>> GetDevicesWithScheduleTransitionsAsync(DateTime fromUtc, DateTime toUtc, string? timeZoneId = null);
         // Round 3 (#11): screens whose EFFECTIVE schedule inherits from this device (and have no
         // SYNC_SCHEDULE waiting already); the device itself is not included.
         Task<IEnumerable<string>> GetScheduleInheritorsAsync(string deviceId);

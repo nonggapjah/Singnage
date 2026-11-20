@@ -4,6 +4,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { deviceApi } from '@/features/devices/api/device-api';
 import { Device } from '@/features/devices/types';
 import { DateTimePicker24h } from '@/components/ui/DateTimePicker24h';
+import { DaypartFields } from '@/features/devices/components/DaypartFields';
+import { Daypart } from '@/lib/daypart';
 import { Modal } from '@/components/ui/Modal';
 
 interface BatchAssignModalProps {
@@ -22,6 +24,7 @@ export const BatchAssignModal: React.FC<BatchAssignModalProps> = ({ playlistId, 
     const [searchTerm, setSearchTerm] = useState('');
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
+    const [daypart, setDaypart] = useState<Daypart>({});
 
     useEffect(() => {
         fetchDevices();
@@ -87,7 +90,7 @@ export const BatchAssignModal: React.FC<BatchAssignModalProps> = ({ playlistId, 
         try {
             const st = startDate ? new Date(startDate).toISOString() : undefined;
             const ed = endDate ? new Date(endDate).toISOString() : undefined;
-            const res = await deviceApi.batchAddSchedule(selectedDeviceIds, playlistId, st, ed);
+            const res = await deviceApi.batchAddSchedule(selectedDeviceIds, playlistId, st, ed, daypart);
             if (res.success) {
                 onSuccess();
             } else {
@@ -229,6 +232,10 @@ export const BatchAssignModal: React.FC<BatchAssignModalProps> = ({ playlistId, 
                                 defaultTime="23:59"
                                 isLarge={true}
                             />
+                        </div>
+                        <div>
+                            <span className="block text-xs font-bold text-muted-foreground uppercase mb-1">Daily window · days · repeat (optional)</span>
+                            <DaypartFields idPrefix="batch-deploy" value={daypart} onChange={setDaypart} />
                         </div>
                     </div>
                 </div>

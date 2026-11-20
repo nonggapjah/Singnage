@@ -456,6 +456,15 @@
         #audio-panel button.primary { background: #22d3ee; color: #06252b; border: 0; font-weight: 700; }
         #audio-panel input[type=range] { flex: 1; min-width: 0; accent-color: #22d3ee; height: 24px; }
         .ap-footer { font-size: 10px; font-family: monospace; color: #9aa7b4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        #audio-output { flex: 1; min-width: 0; height: 28px; background: #111820; color: #e6edf3; border: 1px solid #2a3542; border-radius: 8px; font-size: 11px; padding: 0 6px; }
+        /* The kiosk's full-screen overlays (setup, F7 dashboard, config, playlist picker, help) scaled
+           to fit the 480x420 audio window; they scroll when taller than the window. */
+        body.audio-mode #setup-screen { zoom: 0.8; padding: 12px; box-sizing: border-box; justify-content: flex-start; overflow-y: auto; }
+        body.audio-mode #setup-screen h1 { font-size: 26px; margin: 8px 0 4px; }
+        body.audio-mode #setup-screen .input-group { margin-bottom: 10px; width: 100%; max-width: 360px; }
+        body.audio-mode #setup-screen input[type=text] { width: 100%; box-sizing: border-box; }
+        body.audio-mode #dashboard-screen { zoom: 0.62; align-items: flex-start; padding: 10px; overflow-y: auto; }
+        body.audio-mode #playlist-select-screen, body.audio-mode #help-screen, body.audio-mode #patch-history-screen { zoom: 0.75; overflow-y: auto; }
     </style>
 </head>
 
@@ -497,6 +506,10 @@
             <input id="audio-volume" type="range" min="0" max="100" value="70">
             <span id="audio-volume-label" class="ap-time" style="width: 48px; text-align: right;">70%</span>
             <button id="audio-mute" type="button">MUTE</button>
+        </div>
+        <div class="ap-row">
+            <label for="audio-output" class="ap-meta">OUT</label>
+            <select id="audio-output" aria-label="Audio output device"><option value="">Windows default output</option></select>
         </div>
         <div class="ap-row" style="margin-top: auto; flex-wrap: wrap; justify-content: flex-start;">
             <button id="audio-skip" type="button">Skip</button>

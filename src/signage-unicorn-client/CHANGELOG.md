@@ -3,6 +3,15 @@
 รายการอัปเดตและประวัติการแก้ไขระบบ (Patch Version History)
 
 ---
+## 2.8.2 — Signage Unicorn Audio: announcements and output device (screens still on 2.8.0)
+
+- Repeating announcements: the SCHEDULE may carry `interjections` (API 2.8.7, assignments with
+  "repeat every N min"); their files sync with the loop, they play between tracks when due (first
+  time right away), last-played times survive restarts, and an announcements-only schedule plays
+  them from idle.
+- Output device picker in the audio window (`setSinkId`), remembered as `audioSinkId`.
+- Setup, F7 dashboard, config, playlist picker and help are scaled to fit the small window.
+
 ## 2.8.1 — Signage Unicorn Audio (separate product; screens stay on 2.8.0)
 
 - New build target `npm run build:audio` → `Signage Unicorn Audio Setup 2.8.1.exe` (appId

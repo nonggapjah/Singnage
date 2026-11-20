@@ -14,7 +14,10 @@ param(
 
     [Parameter(HelpMessage = "Number of pilot devices to queue UPDATE_CLIENT for (1-5). UPDATE_RULES.md: never more than 5.")]
     [ValidateRange(1, 5)]
-    [int]$CanaryCount = 1
+    [int]$CanaryCount = 1,
+
+    [Parameter(HelpMessage = "Publish the audio player (Signage Unicorn Audio) instead of the screen client: audio installer, Audio* setting keys, UPDATE_CLIENT only to audio devices. Screens never see these keys.")]
+    [switch]$Audio
 )
 
 # Any failure stops the script BEFORE it touches the database or queues a command: a half-published
@@ -27,12 +30,17 @@ if (-not $ServerUrl.StartsWith('https://', [System.StringComparison]::OrdinalIgn
     throw "ServerUrl must be https (got '$ServerUrl'). Installers and their hashes travel over TLS only."
 }
 
+# Audio player (20-11-2026): a separate product with its own installer name, setting keys and
+# device population, so publishing one never reaches the other.
+$KeyPrefix = if ($Audio) { 'Audio' } else { '' }
+$PlaybackMode = if ($Audio) { 'audio' } else { 'screen' }
 if ([string]::IsNullOrWhiteSpace($SourceFile)) {
-    $SourceFile = Join-Path $RepoRoot "src\signage-unicorn-client\dist\Signage Unicorn Setup $Version.exe"
+    $SourceFile = if ($Audio) { Join-Path $RepoRoot "src\signage-unicorn-client\dist-audio\Signage Unicorn Audio Setup $Version.exe" }
+                  else        { Join-Path $RepoRoot "src\signage-unicorn-client\dist\Signage Unicorn Setup $Version.exe" }
 }
 $TargetDir = Join-Path $RepoRoot "src\SignageUnicorn.Api\wwwroot\setup"
 $WebPublicDir = Join-Path $RepoRoot "src\signage-unicorn-web\public\setup"
-$TargetFileName = "Signage_Unicorn_Setup_$Version.exe"
+$TargetFileName = if ($Audio) { "Signage_Unicorn_Audio_Setup_$Version.exe" } else { "Signage_Unicorn_Setup_$Version.exe" }
 $TargetPath = Join-Path $TargetDir $TargetFileName
 $WebTargetPath = Join-Path $WebPublicDir $TargetFileName
 $DownloadUrl = "$($ServerUrl.TrimEnd('/'))/setup/$TargetFileName"
@@ -41,6 +49,7 @@ Write-Host "=========================================="
 Write-Host "   Signage Unicorn - Automated Updater    "
 Write-Host "=========================================="
 Write-Host "Version      : $Version"
+Write-Host "Product      : $(if ($Audio) { 'Signage Unicorn Audio (audio devices only)' } else { 'Signage Unicorn (screens only)' })"
 Write-Host "Repo root    : $RepoRoot"
 Write-Host "Installer    : $SourceFile"
 Write-Host "Download URL : $DownloadUrl"
@@ -92,9 +101,9 @@ IF @@ROWCOUNT = 0
     VALUES (@key, @value, @description, SYSUTCDATETIME());
 "@
     $settings = @(
-        @{ key = 'LatestClientVersion'; value = $Version;      description = 'Latest published client version' },
-        @{ key = 'ClientDownloadUrl';   value = $DownloadUrl;  description = 'Installer download URL for the latest client' },
-        @{ key = 'ClientDownloadSha256'; value = $SourceHash;  description = 'SHA-256 (lowercase hex) of the installer at ClientDownloadUrl' }
+        @{ key = "Latest${KeyPrefix}ClientVersion"; value = $Version;      description = "Latest published $PlaybackMode client version" },
+        @{ key = "${KeyPrefix}ClientDownloadUrl";   value = $DownloadUrl;  description = "Installer download URL for the latest $PlaybackMode client" },
+        @{ key = "${KeyPrefix}ClientDownloadSha256"; value = $SourceHash;  description = "SHA-256 (lowercase hex) of the installer at ${KeyPrefix}ClientDownloadUrl" }
     )
     foreach ($s in $settings) {
         $cmd = New-Object System.Data.SqlClient.SqlCommand($upsert, $conn, $tx)
@@ -104,7 +113,7 @@ IF @@ROWCOUNT = 0
         [void]$cmd.ExecuteNonQuery()
     }
     $tx.Commit()
-    Write-Host "   -> OK: LatestClientVersion=$Version, ClientDownloadUrl, ClientDownloadSha256 published together" -ForegroundColor Green
+    Write-Host "   -> OK: Latest${KeyPrefix}ClientVersion=$Version, ${KeyPrefix}ClientDownloadUrl, ${KeyPrefix}ClientDownloadSha256 published together" -ForegroundColor Green
 }
 catch {
     try { $tx.Rollback() } catch { }
@@ -120,6 +129,7 @@ try {
 SELECT TOP (@count) d.device_id
 FROM sn_devices d
 WHERE d.is_deleted = 0
+  AND ISNULL(d.playback_mode, 'screen') = @mode
   AND d.status IN ('PLAYING', 'IDLE', 'ONLINE', 'online')
   AND (d.app_version IS NULL OR d.app_version NOT LIKE @versionLike)
   AND NOT EXISTS (
@@ -130,6 +140,7 @@ ORDER BY d.last_check_in DESC
     $cmd = New-Object System.Data.SqlClient.SqlCommand($select, $conn)
     [void]$cmd.Parameters.AddWithValue('@count', $CanaryCount)
     [void]$cmd.Parameters.AddWithValue('@versionLike', "%$Version%")
+    [void]$cmd.Parameters.AddWithValue('@mode', $PlaybackMode)
     $reader = $cmd.ExecuteReader()
     $deviceIds = @()
     while ($reader.Read()) { $deviceIds += [int64]$reader['device_id'] }

@@ -188,7 +188,7 @@ namespace SignageUnicorn.Api.Tests.Fakes
         public List<(string deviceId, int volume)> VolumeWrites { get; } = new();
         public Task SetDeviceVolumeAsync(string deviceId, int volume) { VolumeWrites.Add((deviceId, volume)); return Task.CompletedTask; }
         public Task ResetScheduleToInheritAsync(string deviceId) => throw new NotImplementedException();
-        public Task<IEnumerable<string>> GetDevicesWithScheduleTransitionsAsync(DateTime fromUtc, DateTime toUtc) => throw new NotImplementedException();
+        public Task<IEnumerable<string>> GetDevicesWithScheduleTransitionsAsync(DateTime fromUtc, DateTime toUtc, string? timeZoneId = null) => throw new NotImplementedException();
     }
 
     public sealed class FakeSystemLogRepository : ISystemLogRepository

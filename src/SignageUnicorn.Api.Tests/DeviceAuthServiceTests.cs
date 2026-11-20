@@ -465,7 +465,7 @@ namespace SignageUnicorn.Api.Tests
             public Task SetScheduleModeAsync(string deviceId, string mode) => _inner.SetScheduleModeAsync(deviceId, mode);
             public Task SetDeviceVolumeAsync(string deviceId, int volume) => _inner.SetDeviceVolumeAsync(deviceId, volume);
             public Task ResetScheduleToInheritAsync(string deviceId) => _inner.ResetScheduleToInheritAsync(deviceId);
-            public Task<IEnumerable<string>> GetDevicesWithScheduleTransitionsAsync(DateTime fromUtc, DateTime toUtc) => _inner.GetDevicesWithScheduleTransitionsAsync(fromUtc, toUtc);
+            public Task<IEnumerable<string>> GetDevicesWithScheduleTransitionsAsync(DateTime fromUtc, DateTime toUtc, string? timeZoneId = null) => _inner.GetDevicesWithScheduleTransitionsAsync(fromUtc, toUtc, timeZoneId);
         }
     }
 }
