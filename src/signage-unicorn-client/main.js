@@ -1060,7 +1060,21 @@ ipcMain.handle('get-mac-address', async () => {
     }
 });
 
+// Review 2.8.3 (Codex #1): the audio product must never share the screen's server identity. Both
+// read the same hardware uuid; on a PC with both installed the audio register would reclaim the
+// screen's row (stale-holder reclaim) and flip it to playback_mode=audio. Derive a second, stable
+// 36-char key for audio builds instead (device_uuid is NVARCHAR(36), so no suffix).
+function audioDeviceKeyFrom(hardwareUuid) {
+    const hex = crypto.createHash('sha256').update(`${hardwareUuid}|signage-unicorn-audio`).digest('hex').toUpperCase();
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
+
 ipcMain.handle('get-machine-uuid', async () => {
+    const raw = await readMachineUuid();
+    return AUDIO ? audioDeviceKeyFrom(raw) : raw;
+});
+
+function readMachineUuid() {
     return new Promise((resolve) => {
         exec('wmic csproduct get uuid', (err, stdout) => {
             const fallback = 'WIN-' + (process.env.COMPUTERNAME || Math.random().toString(36).substr(2, 6).toUpperCase());
@@ -1091,7 +1105,7 @@ ipcMain.handle('get-machine-uuid', async () => {
             }
         });
     });
-});
+}
 
 ipcMain.handle('read-changelog', async () => {
     // Try to find changelog in common locations
@@ -1626,10 +1640,13 @@ ipcMain.handle('launch-installer', async (event, filePath, meta) => {
 
         const batPath = path.join(app.getPath('temp'), `update_launcher_${Date.now()}.bat`);
         const appExePath = process.execPath;
-        // Default install location for NSIS oneClick (perUser)
+        // Default install location for NSIS oneClick (perUser). Review 2.8.3 (Codex #3): the audio
+        // product installs beside the screen client; relaunching 'Signage Unicorn.exe' after an audio
+        // update would bring the fullscreen kiosk forward on a PC that has both.
+        const productDir = AUDIO ? 'Signage Unicorn Audio' : 'Signage Unicorn';
         const defaultInstallExe = path.join(
             process.env.LOCALAPPDATA || 'C:\\Users\\Default\\AppData\\Local',
-            'Programs', 'Signage Unicorn', 'Signage Unicorn.exe'
+            'Programs', productDir, `${productDir}.exe`
         );
 
         const batContent = `@echo off

@@ -1,6 +1,6 @@
 # Signage Unicorn Audio — the audio-only player
 
-Added 20-11-2026 (API 2.8.6 -> 2.8.7, web 2.4.14 -> 2.4.15, audio client 2.8.2). An in-store sound player built from
+Added 20-11-2026 (API 2.8.6 -> 2.8.8, web 2.4.14 -> 2.4.16, audio client 2.8.3). An in-store sound player built from
 the kiosk client's code base but shipped as a **separate product**, so the screens and their
 client 2.8.0 are never touched.
 
@@ -8,10 +8,10 @@ client 2.8.0 are never touched.
 
 | | Screen (kiosk client) | Audio player |
 |---|---|---|
-| Installer | `Signage Unicorn Setup 2.8.0.exe` (unchanged) | `Signage Unicorn Audio Setup 2.8.2.exe` (`npm run build:audio`) |
+| Installer | `Signage Unicorn Setup 2.8.0.exe` (unchanged) | `Signage Unicorn Audio Setup 2.8.3.exe` (`npm run build:audio`) |
 | appId / install folder / userData | `com.signage.unicorn`, `Signage Unicorn` | `com.signage.unicorn.audio`, `Signage Unicorn Audio` (can sit beside a screen client on one PC) |
 | Window | kiosk, fullscreen, always on top | 480×420 window, minimise, close = hide to tray, tray menu (Open / Mute / Volume / Skip / Restart player / Exit) |
-| Device row | `playback_mode = 'screen'` (every existing row) | `playback_mode = 'audio'` (sent at register) |
+| Device row | `playback_mode = 'screen'` (every existing row), `device_uuid` = hardware uuid | `playback_mode = 'audio'` (sent at register), `device_uuid` = a second key derived from the hardware uuid (SHA-256), so a PC with both products has two rows |
 | Schedule items received | video + image, **never audio** | audio + video (sound track), **never image** |
 | Update keys | `LatestClientVersion`, `ClientDownloadUrl`, `ClientDownloadSha256` | `LatestAudioClientVersion`, `AudioClientDownloadUrl`, `AudioClientDownloadSha256` |
 | Watchdog task / diag port | `SignageUnicornWatchdog`, 8088 | `SignageUnicornAudioWatchdog`, 8089 |
@@ -89,9 +89,34 @@ cd C:\Singnage\_release_2.8.0
 `UPDATE_CLIENT` for audio devices only (`playback_mode = 'audio'`). The screen path
 (no `-Audio`) now excludes audio devices from its canary pick.
 
+## Review round (Codex + Impeccable, 20-11-2026 evening): API 2.8.8 / web 2.4.16 / audio 2.8.3
+
+Codex (correctness) and Impeccable (UI audit) reviewed the audio/daypart work before deploy. Fixed:
+
+- **Identity**: the audio build registers under its own 36-char key derived from the hardware
+  uuid (`audioDeviceKeyFrom` in main.js). Before, a PC that already ran a screen would have had
+  its screen row reclaimed and flipped to `audio` by the audio app.
+- **Inheritance**: sibling-inherit and the inheritor CTE match `playback_mode` too; a screen never
+  inherits an audio player's assignments (or the reverse).
+- **Update launcher**: after an audio update the launcher restarts `Signage Unicorn Audio.exe`,
+  never the screen exe beside it.
+- **Announcements**: an authoritative empty schedule clears them; moving a playlist between the
+  loop and "repeat every N min" changes the content hash (Smart Sync re-applies the partition);
+  a missing announcement file no longer skips the next regular track.
+- **Midnight**: an open-ended window (start only / end only) flips at 00:00; `NextBoundaryLocal`
+  and the transition worker SQL now include that boundary.
+- **Console**: the daily window sits on a second row under each assignment (the extra column was
+  off-screen below ~1,560 px); the repeat field is shown for audio devices only; clicking a day
+  while "every day" is active excludes that day (toggles read the same to the eye and to
+  `aria-pressed`); the volume slider follows a refreshed row; 11 px minimum text in the audio
+  window; the output picker asks for device labels once when Chromium hides them.
+
+Reviewed and kept as designed: daily windows and days of week apply to screens as well (the
+user asked for them fleet-wide; existing assignments carry no window and are unchanged).
+
 ## Installing an audio box
 
-1. Install `Signage Unicorn Audio Setup 2.8.2.exe` (per user, one click). Set the Windows default
+1. Install `Signage Unicorn Audio Setup 2.8.3.exe` (per user, one click). Set the Windows default
    output device to the amplifier/speakers first; the app plays through the default device.
 2. On the setup screen: server, device name, branch, location; leave **Start hidden in tray**
    ticked for an unattended box, untick it on a desk PC. CONNECT & REGISTER.

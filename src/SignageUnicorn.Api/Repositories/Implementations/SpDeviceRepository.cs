@@ -509,16 +509,20 @@ namespace SignageUnicorn.Api.Repositories.Implementations
                              CASE WHEN device_id  = @devId  THEN 0 ELSE 1 END,
                              device_id DESC);
 
-                DECLARE @branch NVARCHAR(50), @name NVARCHAR(255);
+                DECLARE @branch NVARCHAR(50), @name NVARCHAR(255), @mode NVARCHAR(10);
                 SELECT @branch = LTRIM(RTRIM(branch_code)),
-                       @name   = {string.Format(NormaliseName, "device_name")}
+                       @name   = {string.Format(NormaliseName, "device_name")},
+                       @mode   = ISNULL(playback_mode, 'screen')
                 FROM sn_devices WHERE device_id = @self;
 
+                -- Review 2.8.8 (Codex #2): a screen never inherits from an audio player or vice versa,
+                -- even when both carry the same branch + name (one PC with both products installed).
                 SELECT TOP 1 sib.device_id
                 FROM sn_devices sib
                 JOIN sn_device_playlists dp ON dp.device_id = sib.device_id AND dp.is_active = 1
                 WHERE sib.is_deleted = 0
                   AND sib.device_id <> @self
+                  AND ISNULL(sib.playback_mode, 'screen') = @mode
                   AND LTRIM(RTRIM(sib.branch_code)) = @branch
                   AND {string.Format(NormaliseName, "sib.device_name")}
                       COLLATE SQL_Latin1_General_CP1_CI_AS = @name COLLATE SQL_Latin1_General_CP1_CI_AS
@@ -756,6 +760,7 @@ namespace SignageUnicorn.Api.Repositories.Implementations
                     WHERE i.is_deleted = 0 AND o.is_deleted = 0
                       AND i.device_id <> o.device_id
                       AND ISNULL(i.schedule_mode, 'inherit') = 'inherit'
+                      AND ISNULL(i.playback_mode, 'screen') = ISNULL(o.playback_mode, 'screen')
                       AND LTRIM(RTRIM(i.branch_code)) = LTRIM(RTRIM(o.branch_code))
                       AND {string.Format(InheritorNameNorm, "i.device_name")} COLLATE SQL_Latin1_General_CP1_CI_AS
                         = {string.Format(InheritorNameNorm, "o.device_name")} COLLATE SQL_Latin1_General_CP1_CI_AS
@@ -793,7 +798,10 @@ namespace SignageUnicorn.Api.Repositories.Implementations
                         OR (TRY_CAST(dp.end_time AS time) IS NOT NULL AND (
                                (@crossMidnight = 0 AND TRY_CAST(dp.end_time AS time) > @fromT AND TRY_CAST(dp.end_time AS time) <= @toT)
                             OR (@crossMidnight = 1 AND (TRY_CAST(dp.end_time AS time) > @fromT OR TRY_CAST(dp.end_time AS time) <= @toT))))
-                        OR (dp.days_of_week IS NOT NULL AND @crossMidnight = 1))") + @"
+                        OR (dp.days_of_week IS NOT NULL AND @crossMidnight = 1)
+                        OR (@crossMidnight = 1 AND (
+                               (TRY_CAST(dp.start_time AS time) IS NOT NULL AND TRY_CAST(dp.end_time AS time) IS NULL)
+                            OR (TRY_CAST(dp.start_time AS time) IS NULL AND TRY_CAST(dp.end_time AS time) IS NOT NULL))))") + @"
                 SELECT DISTINCT CAST(t.device_id AS NVARCHAR(36))
                 FROM targets t
                 WHERE NOT EXISTS (SELECT 1 FROM sn_device_commands c

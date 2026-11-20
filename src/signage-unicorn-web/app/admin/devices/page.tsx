@@ -85,11 +85,19 @@ const VolumeControl: React.FC<{ deviceId: string; initial: number | null | undef
     const [level, setLevel] = useState<number>(start);
     const [lastAudible, setLastAudible] = useState<number>(start > 0 ? start : 70);
     const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // A refreshed row (another admin or the tray menu changed the level) updates the slider unless a
+    // local change is still waiting to be sent.
+    useEffect(() => {
+        if (typeof initial !== 'number' || timer.current) return;
+        const v = Math.min(100, Math.max(0, initial));
+        setLevel(v);
+        if (v > 0) setLastAudible(v);
+    }, [initial]);
     const change = (v: number) => {
         setLevel(v);
         if (v > 0) setLastAudible(v);
         if (timer.current) clearTimeout(timer.current);
-        timer.current = setTimeout(() => { void onSend(deviceId, v); }, 400);
+        timer.current = setTimeout(() => { timer.current = null; void onSend(deviceId, v); }, 400);
     };
     const id = `volume-${deviceId}`;
     return (
@@ -1188,6 +1196,7 @@ export default function DevicesPage() {
                     availablePlaylists={playlists}
                     scheduleMode={selectedDevice?.scheduleMode}
                     onScheduleModeChanged={fetchDevices}
+                    playbackMode={selectedDevice?.playbackMode}
                 />
             )}
 

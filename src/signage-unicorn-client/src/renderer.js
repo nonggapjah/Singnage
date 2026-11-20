@@ -26,6 +26,7 @@ let lastGoodSyncAt = 0;
 // not replay every announcement at once.
 let scheduleInterjections = [];
 let interjectionQueue = [];
+let audioLabelProbeDone = false;
 const TOKEN_RECLAIM_MIN_MS = 10 * 60 * 1000; // contract T3: one re-claim per 10 minutes at most
 const HEALTH_REPORT_MS = 15000;              // Codex 22: renderer liveness report cadence
 const EMPTY_RETRY_MIN_MS = 5 * 60 * 1000;    // Codex 7: do not re-ask for an empty schedule every heartbeat
@@ -261,6 +262,12 @@ function refreshAttribution(freshItems) {
 // media id or file name is noticed (F21), and each item's playlist/item identity (Codex #16).
 function contentHashFor(playlistId, items) {
     return libContentHashFor(playlistId, items);
+}
+
+// '' for a plain loop; otherwise a stable suffix naming each announcement group and its items.
+function announcementSignature(groups) {
+    if (!Array.isArray(groups) || groups.length === 0) return '';
+    return ':a:' + groups.map(g => `${g.playlistId}@${g.everyMinutes}=${(g.items || []).map(i => i.playlistItemId || (i.media && i.media.cacheName) || '').join(',')}`).join('|');
 }
 
 function mediaExists(media) {
@@ -1329,6 +1336,10 @@ async function applyEmptyPlaylist(playlistId, playlistName) {
     swapTarget = null;
     playlist = [];
     currentIndex = 0;
+    // Review 2.8.3 (Codex #5): nothing assigned means no announcements either; a queued one must
+    // not play and the old groups must not keep repeating from idle.
+    scheduleInterjections = [];
+    interjectionQueue = [];
     config.lastPlaylistId = playlistId;
     localStorage.setItem('playlist_hash', contentHashFor(playlistId, []));
     localStorage.setItem('last_playlist_index', '0');
@@ -1424,7 +1435,9 @@ async function loadPlaylist(playlistId, resumeIndex = 0) {
 
         augmentItems(items);
         const syncItems = extraItems.length ? items.concat(extraItems) : items;
-        const contentHash = contentHashFor(playlistId, syncItems);
+        // Review 2.8.3 (Codex #6): the flattened list alone cannot tell "A, B in the loop" from "A in
+        // the loop, B every 30 min". Fold the partition into the hash so Smart Sync re-applies it.
+        const contentHash = contentHashFor(playlistId, syncItems) + announcementSignature(announcementGroups);
         const savedHash = localStorage.getItem('playlist_hash');
 
         dashPlaylistName.textContent = playlistName;
@@ -1656,8 +1669,18 @@ setInterval(updatePlaybackHUD, 500);
 
 // Codex 21: a single tracked retry timer, cancelled on every transition and bound to the playback
 // token that scheduled it, so a stale callback can never interrupt a clip that started meanwhile.
-function skipAfterDelay(delayMs, token) {
+// advance=false when the failed item came from the announcement queue (Review 2.8.3, Codex #8):
+// the loop index points at the track that has not played yet and must stay there.
+function skipAfterDelay(delayMs, token, advance = true) {
     if (skipTimer) clearTimeout(skipTimer);
+    if (!advance) {
+        skipTimer = setTimeout(() => {
+            skipTimer = null;
+            if (token !== playbackToken) return;
+            playNext();
+        }, delayMs);
+        return;
+    }
     skipStreak++;
     const lapped = playlist.length > 0 && skipStreak >= playlist.length;
     if (lapped && isPlaying) {
@@ -1720,7 +1743,7 @@ async function playNext() {
 
     if (!media || !media.cacheName) {
         addLog('Skip: item without media', 'warn');
-        skipAfterDelay(1000, myToken);
+        skipAfterDelay(1000, myToken, !fromQueue);
         return;
     }
 
@@ -1732,7 +1755,7 @@ async function playNext() {
         if (await trySwapIfReady()) return;
         if (myToken !== playbackToken) return;
         addLog(`Skip: ${media.displayName || media.cacheName} (still syncing)`, 'warn');
-        skipAfterDelay(1000, myToken);
+        skipAfterDelay(1000, myToken, !fromQueue);
         return;
     }
 
@@ -1741,7 +1764,7 @@ async function playNext() {
         localFile = await mediaFileUrl(media);
     } catch (e) {
         addLog(`Skip: cannot resolve ${media.cacheName}: ${e.message}`, 'warn');
-        skipAfterDelay(1000, myToken);
+        skipAfterDelay(1000, myToken, !fromQueue);
         return;
     }
     if (myToken !== playbackToken) return;
@@ -2174,7 +2197,17 @@ async function populateAudioOutputs() {
     const sel = document.getElementById('audio-output');
     if (!sel || !navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
     try {
-        const outputs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'audiooutput');
+        let outputs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'audiooutput');
+        // Chromium reveals device labels only after the page once held a media permission; without
+        // them the list would read "Output 1, Output 2". Probe once (no mic = labels stay generic).
+        if (!audioLabelProbeDone && outputs.length && outputs.every(d => !d.label) && navigator.mediaDevices.getUserMedia) {
+            audioLabelProbeDone = true;
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                stream.getTracks().forEach(t => t.stop());
+                outputs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'audiooutput');
+            } catch (e) { /* no microphone or permission: generic names below */ }
+        }
         const current = (config && config.audioSinkId) || '';
         sel.replaceChildren();
         const def = document.createElement('option');

@@ -89,8 +89,10 @@ namespace SignageUnicorn.Api.Services
             return start < end ? (t >= start && t < end) : (t >= start || t < end);
         }
 
-        // The next local moment at which IsWithin may change: the next start or end time, and the
-        // next midnight when days of the week are restricted. Null when there is no constraint.
+        // The next local moment at which IsWithin may change: the next start or end time, the next
+        // midnight when days of the week are restricted, and the next midnight for an open-ended
+        // window (start only = active until midnight; end only = active from midnight; Codex 2.8.8 #7).
+        // Null when there is no constraint.
         public static DateTime? NextBoundaryLocal(DateTime localNow, string? startTime, string? endTime, string? days)
         {
             DateTime? best = null;
@@ -100,13 +102,11 @@ namespace SignageUnicorn.Api.Services
                 if (best == null || candidate < best.Value) best = candidate;
             }
             var today = localNow.Date;
-            foreach (var raw in new[] { startTime, endTime })
-            {
-                if (!TryParseTime(raw, out var t)) continue;
-                Consider(today + t);
-                Consider(today.AddDays(1) + t);
-            }
-            if (ParseDays(days).Count > 0) Consider(today.AddDays(1));
+            var hasStart = TryParseTime(startTime, out var start);
+            var hasEnd = TryParseTime(endTime, out var end);
+            if (hasStart) { Consider(today + start); Consider(today.AddDays(1) + start); }
+            if (hasEnd) { Consider(today + end); Consider(today.AddDays(1) + end); }
+            if (ParseDays(days).Count > 0 || hasStart != hasEnd) Consider(today.AddDays(1));
             return best;
         }
 

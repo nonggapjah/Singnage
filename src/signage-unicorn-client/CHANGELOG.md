@@ -3,6 +3,16 @@
 รายการอัปเดตและประวัติการแก้ไขระบบ (Patch Version History)
 
 ---
+## 2.8.3 — Signage Unicorn Audio: review fixes (Codex + Impeccable; screens still on 2.8.0)
+
+- The audio product registers under its own device key derived from the hardware uuid, so a PC
+  that also runs a screen keeps its screen row (the same uuid would have reclaimed it).
+- After an audio update the launcher restarts `Signage Unicorn Audio.exe`, never the screen exe.
+- An empty schedule also stops announcements; moving a playlist between the loop and
+  "repeat every N min" is a content change (Smart Sync re-applies it); a failed announcement
+  no longer skips the next regular track.
+- Output picker: labels are requested once when Chromium hides them; 11 px minimum text.
+
 ## 2.8.2 — Signage Unicorn Audio: announcements and output device (screens still on 2.8.0)
 
 - Repeating announcements: the SCHEDULE may carry `interjections` (API 2.8.7, assignments with

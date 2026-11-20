@@ -78,6 +78,11 @@ namespace SignageUnicorn.Api.Tests
         [InlineData("2026-11-20 23:00", "22:00", "02:00", null, "2026-11-21 02:00")]
         [InlineData("2026-11-20 12:00", null, null, "1,2,3", "2026-11-21 00:00")]
         [InlineData("2026-11-20 23:30", "09:00", null, "5", "2026-11-21 00:00")]
+        // Codex 2.8.8 #7: open-ended windows flip at midnight even without a day restriction
+        [InlineData("2026-11-20 12:00", "09:00", null, null, "2026-11-21 00:00")]
+        [InlineData("2026-11-20 08:00", "09:00", null, null, "2026-11-20 09:00")]
+        [InlineData("2026-11-20 19:00", null, "18:00", null, "2026-11-21 00:00")]
+        [InlineData("2026-11-20 12:00", null, "18:00", null, "2026-11-20 18:00")]
         public void NextBoundaryLocal(string localNow, string? start, string? end, string? days, string expected)
             => Assert.Equal(L(expected), ScheduleWindow.NextBoundaryLocal(L(localNow), start, end, days));
 

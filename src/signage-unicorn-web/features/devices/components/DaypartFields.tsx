@@ -51,9 +51,15 @@ export const DaypartFields: React.FC<DaypartFieldsProps> = ({ value, onChange, i
     };
 
     const selectedDays = parseDays(value.daysOfWeek);
+    // Empty = every day. The buttons all read as "on" then, so a click on one must EXCLUDE that
+    // day (what the eye expects), not turn it into the only allowed day.
+    const clickDay = (d: number) => {
+        const next = selectedDays.size === 0 ? DAY_NUMBERS.filter(x => x !== d).join(',') : toggleDay(value.daysOfWeek, d);
+        onChange({ ...value, daysOfWeek: next || undefined });
+    };
 
     return (
-        <div className={`flex flex-col ${compact ? 'gap-1.5' : 'gap-3'}`}>
+        <div className={compact ? 'flex flex-wrap items-center gap-x-5 gap-y-1.5' : 'flex flex-col gap-3'}>
             <div className={`flex flex-wrap items-center ${compact ? 'gap-2' : 'gap-4'}`}>
                 <TimePair keyName="startTime" text="From" />
                 <TimePair keyName="endTime" text="To" />
@@ -68,14 +74,14 @@ export const DaypartFields: React.FC<DaypartFieldsProps> = ({ value, onChange, i
                         <button
                             key={d}
                             type="button"
-                            aria-pressed={selectedDays.has(d)}
-                            onClick={() => onChange({ ...value, daysOfWeek: toggleDay(value.daysOfWeek, d) })}
+                            aria-pressed={on}
+                            onClick={() => clickDay(d)}
                             className={`${compact ? 'h-7 w-9 text-[11px]' : 'h-9 w-11 text-xs'} rounded-md border font-bold uppercase tracking-wider transition-colors ${
                                 selectedDays.has(d)
                                     ? 'bg-accent-cyan/15 border-accent-cyan/50 text-accent-cyan'
-                                    : on ? 'bg-muted/10 border-border text-foreground/80 hover:bg-muted/30' : 'bg-transparent border-border/60 text-muted-foreground/50 hover:bg-muted/20'
+                                    : on ? 'bg-muted/10 border-border text-foreground/80 hover:bg-muted/30' : 'bg-transparent border-border/60 text-muted-foreground line-through decoration-border hover:bg-muted/20'
                             }`}
-                            title={selectedDays.size === 0 ? 'Every day (click to restrict)' : (selectedDays.has(d) ? 'Allowed' : 'Not on this day')}
+                            title={selectedDays.size === 0 ? 'Every day (click to exclude this day)' : (selectedDays.has(d) ? 'Allowed (click to exclude)' : 'Not on this day (click to allow)')}
                         >
                             {DAY_SHORT[d]}
                         </button>
@@ -100,7 +106,7 @@ export const DaypartFields: React.FC<DaypartFieldsProps> = ({ value, onChange, i
                         className={`${field} w-20 px-2 text-center placeholder:text-muted-foreground/60`}
                     />
                     <span className={label}>min</span>
-                    <span className="text-[11px] text-muted-foreground" title="Audio players play this playlist once every N minutes between the regular tracks (announcements). Screens play it in their loop as usual.">audio players only</span>
+                    <span className="text-[11px] text-muted-foreground" title="Audio players play this playlist once every N minutes between the regular tracks (announcements). Screens play it in their loop as usual.">audio players only · plays between tracks</span>
                 </div>
             )}
         </div>
