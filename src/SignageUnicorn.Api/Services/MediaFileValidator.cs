@@ -10,7 +10,7 @@ namespace SignageUnicorn.Api.Services
         {
             ".jpg", ".jpeg", ".png", ".gif", ".webp",
             ".mp4", ".webm", ".mov", ".avi", ".mkv",
-            ".mp3", ".wav"
+            ".mp3", ".wav", ".m4a", ".aac"
         };
 
         public static bool IsAllowedExtension(string? extension)
@@ -23,6 +23,20 @@ namespace SignageUnicorn.Api.Services
         {
             var e = extension?.ToLowerInvariant();
             return e == ".mp4" || e == ".mov" || e == ".avi" || e == ".webm" || e == ".mkv";
+        }
+
+        // Audio player (20-11-2026): files that are sound only. They are transcoded to a loudness-
+        // normalized AAC .m4a and never scheduled on a screen (PlaybackModes.Accepts).
+        public static bool IsAudioExtension(string? extension)
+        {
+            var e = extension?.ToLowerInvariant();
+            return e == ".mp3" || e == ".wav" || e == ".m4a" || e == ".aac";
+        }
+
+        public static bool IsImageExtension(string? extension)
+        {
+            var e = extension?.ToLowerInvariant();
+            return e == ".jpg" || e == ".jpeg" || e == ".png" || e == ".gif" || e == ".webp";
         }
 
         // Returns null when the first bytes are consistent with the extension, otherwise a reason.
@@ -43,6 +57,10 @@ namespace SignageUnicorn.Api.Services
                 ".webm" or ".mkv" => head[0] == 0x1A && head[1] == 0x45 && head[2] == 0xDF && head[3] == 0xA3,
                 ".mp4" or ".mov" => IsIsoBmff(head),
                 ".mp3" => Ascii(head, 0, "ID3") || (head[0] == 0xFF && (head[1] & 0xE0) == 0xE0),
+                ".m4a" => IsIsoBmff(head),
+                // ADTS frames start with a 12-bit sync word (FFF) + MPEG version/layer bits; some
+                // encoders prepend an ID3 tag.
+                ".aac" => Ascii(head, 0, "ID3") || (head[0] == 0xFF && (head[1] & 0xF6) == 0xF0),
                 _ => false
             };
             return ok ? null : $"content does not look like a {ext} file";

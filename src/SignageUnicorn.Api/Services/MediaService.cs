@@ -449,12 +449,14 @@ namespace SignageUnicorn.Api.Services
         // Converts into media/temp_conversion and returns the staged output path, or null when the
         // file needs no conversion or conversion failed. Never touches the published file itself;
         // PublishTranscodedAsync decides what becomes visible to clients.
-        private async Task<string?> TranscodeToStagingAsync(string filePath)
+        private async Task<StagedTranscode?> TranscodeToStagingAsync(string filePath)
         {
             try
             {
                 var ext = Path.GetExtension(filePath)?.ToLowerInvariant();
-                if (!MediaFileValidator.IsVideoExtension(ext)) return null;
+                var isAudio = MediaFileValidator.IsAudioExtension(ext);
+                if (!MediaFileValidator.IsVideoExtension(ext) && !isAudio) return null;
+                int? audioDurationSec = null;
 
                 string ffmpegPath = Path.Combine(Directory.GetCurrentDirectory(), "ffmpeg");
                 if (!Directory.Exists(ffmpegPath)) Directory.CreateDirectory(ffmpegPath);
@@ -471,14 +473,15 @@ namespace SignageUnicorn.Api.Services
                 string tempFolder = Path.Combine(uploadsFolder, "temp_conversion");
                 if (!Directory.Exists(tempFolder)) Directory.CreateDirectory(tempFolder);
 
-                string tempOutputPath = Path.Combine(tempFolder, $"{Guid.NewGuid()}.mp4");
+                string tempOutputPath = Path.Combine(tempFolder, $"{Guid.NewGuid()}{(isAudio ? ".m4a" : ".mp4")}");
                 
                 try 
                 {
                     var mediaInfo = await Xabe.FFmpeg.FFmpeg.GetMediaInfo(filePath);
                     var conversion = Xabe.FFmpeg.FFmpeg.Conversions.New();
 
-                    var videoStream = mediaInfo.VideoStreams.FirstOrDefault();
+                    // An audio file may carry its cover art as a video stream; never map it.
+                    var videoStream = isAudio ? null : mediaInfo.VideoStreams.FirstOrDefault();
                     if (videoStream != null) {
                         conversion.AddStream(videoStream.SetCodec(Xabe.FFmpeg.VideoCodec.h264));
 
@@ -519,6 +522,21 @@ namespace SignageUnicorn.Api.Services
                         conversion.AddStream(audioStream.SetCodec(Xabe.FFmpeg.AudioCodec.aac).SetBitrate(128000));
                     }
 
+                    if (isAudio)
+                    {
+                        if (audioStream == null)
+                        {
+                            Console.WriteLine($"[FFmpeg] {Path.GetFileName(filePath)} has no audio stream; kept as uploaded");
+                            return null;
+                        }
+                        // Audio player: one loudness for the whole library (EBU R128 at -16 LUFS, true
+                        // peak -1.5 dBTP) so a spot recorded loud and a lounge track recorded quiet come
+                        // out of the store speakers at the same level; sound only, .m4a container. The
+                        // real length replaces whatever the uploader guessed (images default to 10 s).
+                        conversion.AddParameter("-vn -af loudnorm=I=-16:TP=-1.5:LRA=11 -movflags +faststart");
+                        audioDurationSec = Math.Max(1, (int)Math.Round(mediaInfo.Duration.TotalSeconds));
+                    }
+
                     conversion.SetOutput(tempOutputPath);
                     Console.WriteLine($"[FFmpeg] Starting conversion for {Path.GetFileName(filePath)}");
                     await conversion.Start();
@@ -530,7 +548,7 @@ namespace SignageUnicorn.Api.Services
                     }
 
                     Console.WriteLine($"[FFmpeg] Conversion finished for {Path.GetFileName(filePath)} -> staging {Path.GetFileName(tempOutputPath)}");
-                    return tempOutputPath;
+                    return new StagedTranscode { Path = tempOutputPath, IsAudio = isAudio, DurationSec = audioDurationSec };
                 }
                 catch (Exception ex)
                 {
@@ -544,6 +562,14 @@ namespace SignageUnicorn.Api.Services
                 Console.WriteLine($"[FFmpeg Error] {ex.Message}");
                 return null; // caller keeps the original file
             }
+        }
+
+        private sealed class StagedTranscode
+        {
+            public string Path = string.Empty;
+            public bool IsAudio;
+            // Measured by ffprobe for audio; null for video, whose stored duration is left as it is.
+            public int? DurationSec;
         }
 
         private sealed class StoredUpload
@@ -622,7 +648,7 @@ namespace SignageUnicorn.Api.Services
                 FilePath = finalPath,
                 Hash = ComputeMd5(finalPath),
                 SizeKb = (int)(info.Length / 1024),
-                NeedsTranscoding = MediaFileValidator.IsVideoExtension(ext)
+                NeedsTranscoding = MediaFileValidator.IsVideoExtension(ext) || MediaFileValidator.IsAudioExtension(ext)
             };
         }
 
@@ -1028,8 +1054,9 @@ namespace SignageUnicorn.Api.Services
             {
                 await _systemLog.LogAsync(null, "INFO", $"[MediaService] {logPrefix}_START | MediaID: {mediaId} | FilePath: {sourcePath}", "SYSTEM", userId);
 
-                var stagedPath = await TranscodeToStagingAsync(sourcePath);
-                if (stagedPath == null)
+                var staged = await TranscodeToStagingAsync(sourcePath);
+                var stagedPath = staged?.Path;
+                if (staged == null || string.IsNullOrEmpty(stagedPath))
                 {
                     await _systemLog.LogAsync(null, "WARNING", $"[MediaService] {logPrefix}_SKIPPED | MediaID: {mediaId} | original kept", "SYSTEM", userId);
                     await NotifyDevicesForMediaAsync(mediaId);
@@ -1037,7 +1064,8 @@ namespace SignageUnicorn.Api.Services
                 }
 
                 var uploadsFolder = UploadsFolder();
-                var newName = $"{Guid.NewGuid()}.mp4";
+                var newExt = staged.IsAudio ? ".m4a" : ".mp4";
+                var newName = $"{Guid.NewGuid()}{newExt}";
                 var finalPath = Path.Combine(uploadsFolder, newName);
                 File.Move(stagedPath, finalPath);
 
@@ -1057,9 +1085,9 @@ namespace SignageUnicorn.Api.Services
                 var update = new MediaFile
                 {
                     MediaId = existing.MediaId,
-                    FileName = MediaFileNaming.NextVersion(existing.FileName, namesInUse, ".mp4") ?? newName,
+                    FileName = MediaFileNaming.NextVersion(existing.FileName, namesInUse, newExt) ?? newName,
                     BlobUrl = $"/media/{newName}",
-                    DurationSec = existing.DurationSec,
+                    DurationSec = staged.DurationSec ?? existing.DurationSec,
                     Ratio = existing.Ratio,
                     FileSizeKb = (int)(info.Length / 1024),
                     FileHash = ComputeMd5(finalPath),

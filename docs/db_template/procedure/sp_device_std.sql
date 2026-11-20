@@ -55,7 +55,12 @@ CREATE OR ALTER PROCEDURE [dbo].[sp_device_std]
     -- Round 3 (#1): whether HEARTBEAT may adopt an existing row by MAC when the hardware uuid is
     -- unknown. The API sets 0 when the MAC-matching row is token-protected and the request did not
     -- prove its token; the beat then creates a new row instead of taking over the protected one.
-    @p_allow_mac_adopt     BIT           = 1
+    @p_allow_mac_adopt     BIT           = 1,
+
+    -- Audio player (20-11-2026): 'screen' (the kiosk client, default) or 'audio' (the separate
+    -- Signage Unicorn Audio app). Sent by REGISTER_OR_LOGIN only; NULL keeps the stored value, so
+    -- every existing screen stays 'screen' without sending anything.
+    @p_playback_mode       NVARCHAR(10)  = NULL
 )
 AS
 BEGIN
@@ -107,7 +112,8 @@ BEGIN
                 app_version = ISNULL(@p_app_version, app_version),
                 device_name = ISNULL(@p_device_name, device_name), -- Allow rename on login too
                 branch_code = ISNULL(@p_branch_code, branch_code),
-                location = ISNULL(@p_location, location)
+                location = ISNULL(@p_location, location),
+                playback_mode = ISNULL(@p_playback_mode, playback_mode)
             -- Only the live row: a soft-deleted twin that shares this uuid must stay retired (it used
             -- to get its last_check_in refreshed here too, which made it look alive in reports).
             WHERE device_uuid = @p_device_uuid AND is_deleted = 0;
@@ -123,9 +129,9 @@ BEGIN
             IF @p_device_uuid IS NULL SET @p_device_uuid = NEWID();
 
             INSERT INTO sn_devices
-            (device_uuid, device_name, status, branch_code, created_at, is_deleted, app_version, ip_address, location, ratio, last_check_in)
+            (device_uuid, device_name, status, branch_code, created_at, is_deleted, app_version, ip_address, location, ratio, last_check_in, playback_mode)
             VALUES
-            (@p_device_uuid, ISNULL(@p_device_name,'Unnamed Device'), 'ONLINE', ISNULL(@p_branch_code,'1000'), SYSUTCDATETIME(), 0, @p_app_version, @p_ip_address, @p_location, @p_ratio, SYSUTCDATETIME());
+            (@p_device_uuid, ISNULL(@p_device_name,'Unnamed Device'), 'ONLINE', ISNULL(@p_branch_code,'1000'), SYSUTCDATETIME(), 0, @p_app_version, @p_ip_address, @p_location, @p_ratio, SYSUTCDATETIME(), ISNULL(@p_playback_mode, 'screen'));
 
             SET @msg = N'Device registered.';
         END
@@ -423,6 +429,8 @@ ResultSection:
                 d.device_token_issued_at AS DeviceTokenIssuedAt,
                 ISNULL(d.client_protocol, 1) AS ClientProtocol,
                 CAST(CASE WHEN d.device_token_hash IS NULL AND d.device_token_reset_at IS NOT NULL THEN 1 ELSE 0 END AS BIT) AS TokenResetPending,
+                ISNULL(d.playback_mode, 'screen') AS PlaybackMode,
+                d.volume AS Volume,
                 'Y' AS Active
             FROM sn_devices d WITH (NOLOCK)
             WHERE d.device_uuid = @p_device_uuid AND d.is_deleted = 0
@@ -474,6 +482,8 @@ ResultSection:
                 d.device_token_issued_at AS DeviceTokenIssuedAt,
                 ISNULL(d.client_protocol, 1) AS ClientProtocol,
                 CAST(CASE WHEN d.device_token_hash IS NULL AND d.device_token_reset_at IS NOT NULL THEN 1 ELSE 0 END AS BIT) AS TokenResetPending,
+                ISNULL(d.playback_mode, 'screen') AS PlaybackMode,
+                d.volume AS Volume,
                 'Y' AS Active
 
             FROM sn_devices d WITH (NOLOCK)
@@ -509,6 +519,8 @@ ResultSection:
                 d.device_token_issued_at AS DeviceTokenIssuedAt,
                 ISNULL(d.client_protocol, 1) AS ClientProtocol,
                 CAST(CASE WHEN d.device_token_hash IS NULL AND d.device_token_reset_at IS NOT NULL THEN 1 ELSE 0 END AS BIT) AS TokenResetPending,
+                ISNULL(d.playback_mode, 'screen') AS PlaybackMode,
+                d.volume AS Volume,
                 'Y' AS Active
             FROM sn_devices d WITH (NOLOCK)
             WHERE d.is_deleted = 0

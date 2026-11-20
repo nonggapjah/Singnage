@@ -31,6 +31,9 @@ namespace SignageUnicorn.Api.Controllers
             public bool PlaybackBatchV2 { get; init; } = true;
             // Heartbeat may carry the RECLAIM_TOKEN pseudo-command after an operator reset.
             public bool ReclaimCommand { get; init; } = true;
+            // Audio player (2.8.6): devices carry playbackMode/volume, register accepts playbackMode,
+            // audio uploads are transcoded, schedules are filtered per mode, SET_VOLUME:<n> exists.
+            public bool AudioDevices { get; init; } = true;
         }
 
         [HttpGet("capabilities")]

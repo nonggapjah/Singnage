@@ -463,6 +463,7 @@ namespace SignageUnicorn.Api.Tests
             public Task<string?> GetSiblingDeviceIdWithAssignmentsAsync(string deviceId) => _inner.GetSiblingDeviceIdWithAssignmentsAsync(deviceId);
             public Task UpdateAssignedPlaylistsAsync(string deviceId, List<DevicePlaylistDto> playlists) => _inner.UpdateAssignedPlaylistsAsync(deviceId, playlists);
             public Task SetScheduleModeAsync(string deviceId, string mode) => _inner.SetScheduleModeAsync(deviceId, mode);
+            public Task SetDeviceVolumeAsync(string deviceId, int volume) => _inner.SetDeviceVolumeAsync(deviceId, volume);
             public Task ResetScheduleToInheritAsync(string deviceId) => _inner.ResetScheduleToInheritAsync(deviceId);
             public Task<IEnumerable<string>> GetDevicesWithScheduleTransitionsAsync(DateTime fromUtc, DateTime toUtc) => _inner.GetDevicesWithScheduleTransitionsAsync(fromUtc, toUtc);
         }

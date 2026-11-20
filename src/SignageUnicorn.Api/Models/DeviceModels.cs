@@ -59,6 +59,10 @@ namespace SignageUnicorn.Api.Models
         public int ClientProtocol { get; set; } = 1;
         // Round 3 (R2): an operator cleared the token and the screen has not claimed a new one yet.
         public bool TokenResetPending { get; set; }
+        // Audio player: 'screen' (default, every kiosk) or 'audio' (see PlaybackModes).
+        public string? PlaybackMode { get; set; }
+        // Last level (0-100) an operator set with SET_VOLUME; null = never set.
+        public int? Volume { get; set; }
     }
 
     public class DeviceCommandDto
@@ -93,6 +97,11 @@ namespace SignageUnicorn.Api.Models
         // X-Device-Token-Capable: 1 is equivalent). Absent on deployed v2.7.x clients.
         [JsonPropertyName("tokenCapable")]
         public bool? TokenCapable { get; set; }
+
+        // Audio player: 'audio' from the Signage Unicorn Audio app; absent from every kiosk, which
+        // leaves the row's mode untouched (new rows default to 'screen').
+        [JsonPropertyName("playbackMode")]
+        public string? PlaybackMode { get; set; }
 
         [JsonPropertyName("macAddress")]
         public string? MacAddress { get; set; }

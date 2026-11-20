@@ -38,6 +38,8 @@ namespace SignageUnicorn.Api.Repositories.Interfaces
 
         // Schedules (contract item 6 / T8)
         Task SetScheduleModeAsync(string deviceId, string mode);
+        // Audio player: last SET_VOLUME level (0-100) shown by the console and restored by the player.
+        Task SetDeviceVolumeAsync(string deviceId, int volume);
         // T8: drops the device's own assignments and sets inherit mode in one transaction.
         Task ResetScheduleToInheritAsync(string deviceId);
         Task<IEnumerable<string>> GetDevicesWithScheduleTransitionsAsync(DateTime fromUtc, DateTime toUtc);

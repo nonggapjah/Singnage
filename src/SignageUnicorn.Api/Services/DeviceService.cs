@@ -88,6 +88,7 @@ namespace SignageUnicorn.Api.Services
             // has assigned or deliberately cleared it (schedule_mode = 'explicit'), an empty list
             // means "play nothing" -- clearing a screen used to make it copy its neighbour instead.
             var deviceRow = await _deviceRepository.GetDeviceByIdAsync(deviceId);
+            var playbackMode = PlaybackModes.Normalize(deviceRow?.PlaybackMode);
             bool mayInherit = !string.Equals(deviceRow?.ScheduleMode, "explicit", StringComparison.OrdinalIgnoreCase);
             if (mayInherit && (assignments == null || !assignments.Any()))
             {
@@ -114,6 +115,11 @@ namespace SignageUnicorn.Api.Services
                 {
                     foreach (var item in playlist.Items)
                     {
+                        // Audio player: a screen never receives an audio file (the deployed kiosk
+                        // client would show it as a broken image) and an audio player never receives
+                        // an image (nothing to hear). Decided per device, so one playlist can be
+                        // assigned to both kinds.
+                        if (!PlaybackModes.Accepts(playbackMode, item.Media?.FileName ?? item.Media?.BlobUrl)) continue;
                         item.PositionOrder = currentOrder++;
                         schedule.Items.Add(item);
                         
@@ -268,6 +274,14 @@ namespace SignageUnicorn.Api.Services
 
         public async Task SendCommandAsync(string deviceId, string command)
         {
+            // Audio player: SET_VOLUME:<0-100> is also remembered on the row so the console shows the
+            // level and the player can pick it up after a restart.
+            if (DeviceCommands.TryParseVolume(command, out var volumeLevel))
+            {
+                command = DeviceCommands.VolumeCommand(volumeLevel);
+                await _deviceRepository.SetDeviceVolumeAsync(deviceId, volumeLevel);
+            }
+
             // Case 4.2 & 3: Enhance RESTART command with resume data
             if (command.ToUpper() == "RESTART")
             {
@@ -325,6 +339,12 @@ namespace SignageUnicorn.Api.Services
                     {
                         finalCommand = $"RESTART:{dev.CurrentMediaId}:{dev.CurrentPositionSec ?? 0}";
                     }
+                }
+
+                if (DeviceCommands.TryParseVolume(finalCommand, out var batchVolume))
+                {
+                    finalCommand = DeviceCommands.VolumeCommand(batchVolume);
+                    await _deviceRepository.SetDeviceVolumeAsync(id, batchVolume);
                 }
 
                 var result = await _deviceRepository.AddCommandAsync(id, finalCommand);

@@ -43,6 +43,7 @@ namespace SignageUnicorn.Api.Repositories.Implementations
                 p.Add("@p_branch_code", request.BranchCode);
                 p.Add("@p_ip_address", request.IpAddress);
                 p.Add("@p_location", request.Location);
+                p.Add("@p_playback_mode", PlaybackModes.NormalizeOrNull(request.PlaybackMode));
 
                 // 1. Status (ALWAYS First)
                 using var multi = await connection.QueryMultipleAsync("sp_device_std", p, commandType: CommandType.StoredProcedure);
@@ -667,6 +668,19 @@ namespace SignageUnicorn.Api.Repositories.Implementations
                   AND (@excludeUuid IS NULL OR device_uuid <> @excludeUuid)",
                 new { mac = macAddress, excludeUuid })).ToList();
             return rows.Count == 1 ? rows[0] : null;
+        }
+
+        // Audio player: remembers the last SET_VOLUME level so the console shows it and the player
+        // can restore it after a restart (DeviceDto.Volume).
+        public async Task SetDeviceVolumeAsync(string deviceId, int volume)
+        {
+            using var connection = new SqlConnection(_connectionString);
+            long? devId = null; string? devUuid = null;
+            if (long.TryParse(deviceId, out var parsed)) devId = parsed; else devUuid = deviceId;
+            await connection.ExecuteAsync(
+                @"UPDATE sn_devices SET volume = @volume
+                  WHERE is_deleted = 0 AND (device_id = @devId OR device_uuid = @devUuid)",
+                new { volume, devId, devUuid });
         }
 
         public async Task SetScheduleModeAsync(string deviceId, string mode)
