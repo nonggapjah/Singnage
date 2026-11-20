@@ -142,3 +142,6 @@ id_ed25519
 # of truth. Proof: production serves 2.7.4 while the newest file ever committed here was 2.5.9.
 # A fresh clone therefore has no /setup/*.exe until a release is published; that is expected.
 src/signage-unicorn-client/dist-audio/
+
+# Workspace operations folder (release bundles, reviews, the real .env): NEVER committed - the GitHub repo is public
+_ops/

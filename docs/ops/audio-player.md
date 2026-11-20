@@ -8,7 +8,7 @@ client 2.8.0 are never touched.
 
 | | Screen (kiosk client) | Audio player |
 |---|---|---|
-| Installer | `Signage Unicorn Setup 2.8.0.exe` (unchanged) | `Signage Unicorn Audio Setup 2.8.4.exe` (`npm run build:audio`) |
+| Installer | `Signage Unicorn Setup 2.8.0.exe` (unchanged; bundle `client\video-player\`) | `Signage Unicorn Audio Setup 2.8.4.exe` (`npm run build:audio`; bundle `client\music-player\`) |
 | appId / install folder / userData | `com.signage.unicorn`, `Signage Unicorn` | `com.signage.unicorn.audio`, `Signage Unicorn Audio` (can sit beside a screen client on one PC) |
 | Window | kiosk, fullscreen, always on top | 480×420 window, minimise, close = hide to tray, tray menu (Open / Mute / Volume / Skip / Restart player / Exit) |
 | Device row | `playback_mode = 'screen'` (every existing row), `device_uuid` = hardware uuid | `playback_mode = 'audio'` (sent at register), `device_uuid` = a second key derived from the hardware uuid (SHA-256), so a PC with both products has two rows |
@@ -81,7 +81,7 @@ config.json); a device that disappears falls back to the Windows default.
 ## Publishing an audio update
 
 ```powershell
-cd C:\Singnage\_release_2.8.0
+cd C:\Singnage\Singnage\_ops\_release_2.8.0
 .\run-on-server.ps1 publish-client -NoSession -ScriptArgs '-Audio -CanaryCount 1'
 ```
 
