@@ -44,6 +44,8 @@ Audio mode is decided at run time from the packaged product name (`/audio/i.test
 
 - Devices: `AUDIO` badge; the card shows a volume slider + Mute (sends `SET_VOLUME` 400 ms after
   the last move, no confirm) instead of View screen, and "Restart player" instead of "Reboot".
+- Sidebar `Audio Players` (`/admin/audio`, web 2.4.18): the Devices page scoped to audio devices; `Devices`
+  itself lists screens only. Same cards, schedule dialogs and batch actions on both.
 - Media: audio upload with preview and length; audio icon on cards. Playlists: audio items carry an
   `Audio` tag.
 

@@ -24,7 +24,8 @@ import {
     Users,
     Menu,
     X,
-    LogOut
+    LogOut,
+    Volume2,
 } from 'lucide-react';
 
 export default function AdminLayout({
@@ -66,6 +67,7 @@ export default function AdminLayout({
         { name: 'Media Library', href: '/admin/media', icon: FolderOpen },
         { name: 'Playlists', href: '/admin/playlists', icon: ListVideo },
         { name: 'Devices', href: '/admin/devices', icon: Monitor },
+        { name: 'Audio Players', href: '/admin/audio', icon: Volume2 },
         { name: 'Playback Stats', href: '/admin/statistics', icon: BarChart2 },
         { name: 'System Logs', href: '/admin/system-logs', icon: ScrollText },
         { name: 'User Management', href: '/admin/users', icon: Users },

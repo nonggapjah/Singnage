@@ -116,9 +116,16 @@ const VolumeControl: React.FC<{ deviceId: string; initial: number | null | undef
     );
 };
 
-export default function DevicesPage() {
+// mode (web 2.4.18): 'screen' = /admin/devices (screens only), 'audio' = /admin/audio (audio players
+// only). Everything else - cards, dialogs, batch actions - is shared.
+export default function DevicesPage({ mode = 'screen' }: { mode?: 'screen' | 'audio' }) {
+    const isAudioPage = mode === 'audio';
+    const kind = isAudioPage ? 'audio player' : 'screen';
+    const kindPlural = isAudioPage ? 'audio players' : 'screens';
     const { showModal } = useUI();
-    const [devices, setDevices] = useState<Device[]>([]);
+    const [allDevices, setDevices] = useState<Device[]>([]);
+    // Only the devices of this page's kind reach the stats, filters, selection and batch actions.
+    const devices = useMemo(() => allDevices.filter(d => isAudioDevice(d) === isAudioPage), [allDevices, isAudioPage]);
     const [playlists, setPlaylists] = useState<Playlist[]>([]);
 
     // UI State
@@ -624,15 +631,15 @@ export default function DevicesPage() {
             {/* Header & Stats */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
                 <div>
-                    <h1 className="text-4xl font-black uppercase tracking-tighter neon-text mb-2">Devices</h1>
+                    <h1 className="text-4xl font-black uppercase tracking-tighter neon-text mb-2">{isAudioPage ? 'Audio players' : 'Devices'}</h1>
                     <p className="text-sm font-bold text-muted-foreground">
-                        Screens, schedules and remote commands
+                        {isAudioPage ? 'Sound-only players: schedules, announcements and volume' : 'Screens, schedules and remote commands'}
                     </p>
                 </div>
                 <dl className="flex gap-4">
                     <div className="glass-panel px-6 py-3 rounded-xl flex flex-col items-center min-w-[100px]">
                         <dd className="text-2xl font-black text-foreground">{stats.total}</dd>
-                        <dt className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Screens</dt>
+                        <dt className="text-xs font-bold text-muted-foreground uppercase tracking-widest">{isAudioPage ? 'Players' : 'Screens'}</dt>
                     </div>
                     <div className="glass-panel px-6 py-3 rounded-xl flex flex-col items-center min-w-[100px] bg-green-500/5">
                         <dd className="text-2xl font-black text-green-600 dark:text-green-400">{stats.online}</dd>
@@ -644,7 +651,7 @@ export default function DevicesPage() {
                     </div>
                     <div
                         className={`glass-panel px-6 py-3 rounded-xl flex flex-col items-center min-w-[100px] ${stats.total > 0 && stats.tokenised === stats.total ? 'bg-green-500/5' : 'bg-amber-500/5'}`}
-                        title="Screens that hold a device token. Security:DeviceAuth may be switched to Required only when this equals the screen count."
+                        title={`${isAudioPage ? 'Audio players' : 'Screens'} that hold a device token. Security:DeviceAuth may be switched to Required only when this equals the ${kind} count.`}
                     >
                         <dd className={`text-2xl font-black ${stats.total > 0 && stats.tokenised === stats.total ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>
                             {stats.tokenised}<span className="text-sm font-bold text-muted-foreground">/{stats.total}</span>
@@ -967,7 +974,10 @@ export default function DevicesPage() {
                     })}
                     {filteredDevices.length === 0 && (
                         <div className="py-20 text-center">
-                            <h3 className="text-xl font-bold uppercase tracking-widest text-muted-foreground">No screens match the current filters</h3>
+                            <h3 className="text-xl font-bold uppercase tracking-widest text-muted-foreground">{devices.length === 0 && isAudioPage ? 'No audio player registered yet' : `No ${kindPlural} match the current filters`}</h3>
+                            {devices.length === 0 && isAudioPage && (
+                                <p className="mt-3 text-sm text-muted-foreground max-w-xl mx-auto">Install <span className="font-mono text-foreground">Signage Unicorn Audio</span> on a PC with speakers and register it; the player then appears here with an AUDIO badge and a volume slider. Screens stay on the Devices page.</p>
+                            )}
                         </div>
                     )}
                 </div>
@@ -1180,7 +1190,10 @@ export default function DevicesPage() {
                     })}
                     {filteredDevices.length === 0 && (
                         <div className="py-20 text-center">
-                            <h3 className="text-xl font-bold uppercase tracking-widest text-muted-foreground">No screens match the current filters</h3>
+                            <h3 className="text-xl font-bold uppercase tracking-widest text-muted-foreground">{devices.length === 0 && isAudioPage ? 'No audio player registered yet' : `No ${kindPlural} match the current filters`}</h3>
+                            {devices.length === 0 && isAudioPage && (
+                                <p className="mt-3 text-sm text-muted-foreground max-w-xl mx-auto">Install <span className="font-mono text-foreground">Signage Unicorn Audio</span> on a PC with speakers and register it; the player then appears here with an AUDIO badge and a volume slider. Screens stay on the Devices page.</p>
+                            )}
                         </div>
                     )}
                 </div>
