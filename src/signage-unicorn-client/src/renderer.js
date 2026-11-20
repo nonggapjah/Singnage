@@ -15,6 +15,11 @@ const { checkUpdateUrl } = SignageLib.updateUrl;
 const { classifyClaimResponse, claimRetryDelay, raceRetryDelay } = SignageLib.claim;
 
 const CLIENT_PROTOCOL = '2';                 // contract T5: server leases every command as POLLING for us
+// Audio player (Signage Unicorn Audio build): set from main's get-app-info at init. Everything it
+// gates is additive; a screen build behaves exactly as before.
+let AUDIO_MODE = false;
+let appInfo = null;
+let lastGoodSyncAt = 0;
 const TOKEN_RECLAIM_MIN_MS = 10 * 60 * 1000; // contract T3: one re-claim per 10 minutes at most
 const HEALTH_REPORT_MS = 15000;              // Codex 22: renderer liveness report cadence
 const EMPTY_RETRY_MIN_MS = 5 * 60 * 1000;    // Codex 7: do not re-ask for an empty schedule every heartbeat
@@ -263,7 +268,15 @@ function mediaFileUrl(media) {
 
 function isVideoMedia(media) {
     const name = (media && (media.cacheName || media.fileName)) || '';
-    return /\.(mp4|webm|mov)$/i.test(name) || /\.(mp4|webm|mov)$/i.test(String(media && media.fileName || ''));
+    if (/\.(mp4|webm|mov)$/i.test(name) || /\.(mp4|webm|mov)$/i.test(String(media && media.fileName || ''))) return true;
+    // Audio player only: sound files go through the same <video> element (it plays them; nothing
+    // is drawn). A screen build keeps treating them exactly as it always did.
+    return AUDIO_MODE && isAudioMedia(media);
+}
+
+function isAudioMedia(media) {
+    const names = [media && media.cacheName, media && media.fileName].filter(Boolean).map(String);
+    return names.some(n => /\.(mp3|wav|m4a|aac)$/i.test(n));
 }
 
 function reportPlaybackState() {
@@ -276,6 +289,8 @@ function setStatus(text, color) {
     dashStatus.textContent = text;
     dashStatus.style.color = color;
     statusDot.style.background = color;
+    const pill = document.getElementById('audio-status');
+    if (pill) { pill.textContent = text; pill.style.color = color; pill.style.borderColor = color; }
 }
 
 // =============================================================================================
@@ -283,8 +298,13 @@ function setStatus(text, color) {
 // =============================================================================================
 async function init() {
     config = await ipcRenderer.invoke('get-config');
-    volume = config.volume ?? 50;
-    isMuted = config.isMuted ?? true;
+    try { appInfo = await ipcRenderer.invoke('get-app-info'); } catch (e) { appInfo = null; }
+    AUDIO_MODE = !!(appInfo && appInfo.audioMode);
+    if (AUDIO_MODE) enterAudioMode();
+    // Audio player: sound is the whole point, so it starts unmuted at 70 %. Screens keep their
+    // muted-by-default behaviour.
+    volume = config.volume ?? (AUDIO_MODE ? 70 : 50);
+    isMuted = config.isMuted ?? !AUDIO_MODE;
     videoEl.muted = isMuted;
     videoEl.volume = isMuted ? 0 : volume / 100;
 
@@ -416,6 +436,7 @@ function showHUD(msg, duration = 3000) {
 }
 
 function updateCursorVisibility() {
+    if (AUDIO_MODE) { document.body.classList.add('show-cursor'); return; }
     const shouldShow = !dashboardScreen.classList.contains('hidden') ||
         !setupScreen.classList.contains('hidden') ||
         !playlistSelectScreen.classList.contains('hidden') ||
@@ -927,6 +948,7 @@ async function sync() {
         const data = await readJsonSafe(res);
         commands = data && Array.isArray(data.data) ? data.data : [];
         ok = true;
+        lastGoodSyncAt = Date.now();
         smokeEvent('heartbeats');
 
         setStatus('ONLINE', '#00f2ff');
@@ -1080,6 +1102,19 @@ async function executeCommand(cmd, type) {
                 setTimeout(() => window.location.reload(), 1000);
             }
         }
+        return;
+    }
+
+    if (type.startsWith('SET_VOLUME:') || type === 'MUTE' || type === 'UNMUTE') {
+        // Audio player: the console's volume slider and mute (API 2.8.6 SET_VOLUME:<0-100>).
+        if (type === 'MUTE') await setMuted(true);
+        else if (type === 'UNMUTE') await setMuted(false);
+        else {
+            const level = parseInt(type.split(':')[1], 10);
+            if (isNaN(level)) { await ackCommand(cmd, 'FAILED', 'bad volume level'); return; }
+            await setVolumeAbsolute(level);
+        }
+        await ackCommand(cmd, 'EXECUTED');
         return;
     }
 
@@ -1579,6 +1614,7 @@ function formatTime(ms) {
 }
 
 function updatePlaybackHUD() {
+    if (AUDIO_MODE) updateAudioPanel();
     if (!isPlaying) return;
     const elapsed = Date.now() - mediaStartTime;
     const progress = Math.min(100, (elapsed / mediaDuration) * 100);
@@ -1715,6 +1751,15 @@ async function playNext() {
         playNext();
     };
 
+    if (AUDIO_MODE && !isVideoMedia(media)) {
+        // Audio player: an image has nothing to hear. The server already keeps images out of an
+        // audio device's schedule; this covers a manually picked playlist. Half a second per skipped
+        // item, so a list of nothing but images cannot spin.
+        addLog(`Skipping ${media.displayName || media.cacheName}: no sound on an audio device.`, 'info', true);
+        currentItemTimer = setTimeout(() => onComplete(true), 500);
+        return;
+    }
+
     if (isVideoMedia(media)) {
         // If same file (1-item loop), reset and play explicitly
         if (videoEl.src === localFile) {
@@ -1811,13 +1856,18 @@ function showSetup() {
                     location: loc,
                     ipAddress: '127.0.0.1',
                     appVersion: appVer,
-                    tokenCapable: true // contract T1: only a client that stores the token asks for one
+                    tokenCapable: true, // contract T1: only a client that stores the token asks for one
+                    playbackMode: AUDIO_MODE ? 'audio' : undefined // audio player registers as an audio device; screens send nothing
                 })
             }, TIMEOUTS.settings);
             const result = await readJsonSafe(res);
             if (result && result.success && result.data) {
                 config.serverIp = ip; config.deviceName = name; config.branchCode = branch; config.location = loc; config.deviceId = result.data.deviceId;
                 config.deviceToken = result.data.deviceToken ? String(result.data.deviceToken) : null;
+                if (AUDIO_MODE) {
+                    const sh = document.getElementById('start-hidden');
+                    config.startHidden = !!(sh && sh.checked);
+                }
                 if (result.data.currentPlaylistId) config.lastPlaylistId = result.data.currentPlaylistId;
                 await ipcRenderer.invoke('save-config', config);
                 setupScreen.classList.add('hidden');
@@ -1918,7 +1968,8 @@ document.getElementById('update-settings').onclick = async () => {
                 location: newLocation,
                 ipAddress: '127.0.0.1', // Server should detect real IP. We send placeholder.
                 appVersion: appVer,
-                tokenCapable: true // contract T1
+                tokenCapable: true, // contract T1
+                playbackMode: AUDIO_MODE ? 'audio' : undefined
             })
         }, TIMEOUTS.settings);
 
@@ -2061,6 +2112,120 @@ document.getElementById('btn-esc').onclick = () => {
     updateCursorVisibility();
 };
 
+// --- Audio player helpers (also used by SET_VOLUME / MUTE commands on any build) ---------------
+async function applyVolume() {
+    videoEl.muted = isMuted;
+    videoEl.volume = isMuted ? 0 : volume / 100;
+    config.volume = volume;
+    config.isMuted = isMuted;
+    await ipcRenderer.invoke('save-config', config);
+    pushAudioStatus(true);
+}
+
+async function setVolumeAbsolute(level) {
+    volume = Math.max(0, Math.min(100, Math.round(Number(level) || 0)));
+    if (volume > 0 && isMuted) isMuted = false;
+    await applyVolume();
+    addLog(`Vol: ${volume}%`);
+    showHUD(`VOLUME: ${volume}%`);
+}
+
+async function setMuted(flag) {
+    isMuted = !!flag;
+    await applyVolume();
+    showHUD(isMuted ? 'MUTED' : 'UNMUTED');
+}
+
+function skipToNextTrack() {
+    if (!playlist.length) return;
+    currentIndex = (currentIndex + 1) % playlist.length;
+    playNext();
+}
+
+// The audio window: a compact panel instead of the full-screen player. The <video> element keeps
+// playing (sound) parked off-screen by CSS; everything here only reads state the player already keeps.
+function enterAudioMode() {
+    document.body.classList.add('audio-mode', 'show-cursor');
+    const panel = document.getElementById('audio-panel');
+    if (panel) panel.classList.remove('hidden');
+    const h1 = document.querySelector('#setup-screen h1');
+    if (h1) h1.textContent = 'SIGNAGE UNICORN AUDIO';
+    const sh = document.getElementById('start-hidden-row');
+    if (sh) sh.classList.remove('hidden');
+
+    const vol = document.getElementById('audio-volume');
+    if (vol) {
+        // Live while dragging (no disk write), saved once on release.
+        vol.oninput = (e) => {
+            volume = parseInt(e.target.value, 10) || 0;
+            if (volume > 0) isMuted = false;
+            videoEl.muted = isMuted;
+            videoEl.volume = isMuted ? 0 : volume / 100;
+            const lbl = document.getElementById('audio-volume-label');
+            if (lbl) lbl.textContent = `${volume}%`;
+        };
+        vol.onchange = (e) => setVolumeAbsolute(parseInt(e.target.value, 10));
+    }
+    const bind = (id, fn) => { const el = document.getElementById(id); if (el) el.onclick = fn; };
+    bind('audio-mute', () => setMuted(!isMuted));
+    bind('audio-skip', skipToNextTrack);
+    bind('audio-playlists', () => document.getElementById('show-playlists').onclick());
+    bind('audio-settings', () => document.getElementById('show-config').onclick());
+    bind('audio-dashboard', () => toggleDashboard());
+    bind('audio-hide', () => ipcRenderer.invoke('hide-to-tray').catch(() => { }));
+
+    if (window.signage && typeof window.signage.onAudioControl === 'function') {
+        window.signage.onAudioControl((msg) => {
+            if (!msg) return;
+            if (msg.action === 'toggle-mute') setMuted(!isMuted);
+            else if (msg.action === 'set-volume') setVolumeAbsolute(Number(msg.value));
+            else if (msg.action === 'skip') skipToNextTrack();
+        });
+    }
+}
+
+let lastAudioStatusKey = '';
+function pushAudioStatus(force) {
+    if (!AUDIO_MODE) return;
+    const item = playlist[currentIndex];
+    const title = item && item.media ? (item.media.displayName || item.media.fileName || '') : '';
+    const key = `${title}|${isPlaying}|${volume}|${isMuted}`;
+    if (!force && key === lastAudioStatusKey) return;
+    lastAudioStatusKey = key;
+    ipcRenderer.invoke('audio-status', { title, playing: isPlaying, volume, muted: isMuted }).catch(() => { });
+}
+
+function updateAudioPanel() {
+    const el = (id) => document.getElementById(id);
+    if (!el('audio-panel')) return;
+    const item = playlist[currentIndex];
+    const media = item && item.media;
+    const name = media ? (media.displayName || media.fileName || '') : '';
+    const next = playlist.length > 1 ? playlist[(currentIndex + 1) % playlist.length] : null;
+    const nextName = next && next.media ? (next.media.displayName || next.media.fileName || '') : '';
+    const fmt = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+
+    el('audio-now').textContent = isPlaying && name ? name : (playlist.length ? 'Starting…' : 'No playlist assigned');
+    el('audio-count').textContent = playlist.length ? `${currentIndex + 1} / ${playlist.length}` : '';
+    el('audio-next').textContent = nextName ? `NEXT  ${nextName}` : '';
+    const dur = isPlaying ? ((videoEl.duration && isFinite(videoEl.duration)) ? videoEl.duration * 1000 : mediaDuration) : 0;
+    const pos = isPlaying ? (videoEl.currentTime ? videoEl.currentTime * 1000 : Date.now() - mediaStartTime) : 0;
+    el('audio-pos').textContent = fmt(pos);
+    el('audio-dur').textContent = fmt(dur);
+    el('audio-bar').style.width = dur > 0 ? `${Math.min(100, (pos / dur) * 100)}%` : '0%';
+    const vol = el('audio-volume');
+    if (vol && document.activeElement !== vol) vol.value = isMuted ? 0 : volume;
+    el('audio-volume-label').textContent = isMuted ? 'MUTED' : `${volume}%`;
+    el('audio-mute').textContent = isMuted ? 'UNMUTE' : 'MUTE';
+    el('audio-device').textContent = `${(config && config.deviceName) || 'Not registered'} · Audio`;
+    el('audio-meta').textContent = `Branch ${(config && config.branchCode) || '-'} · ID ${(config && config.deviceId) || '-'}`;
+    const api = (apiCapabilities && apiCapabilities.apiVersion) ? `API ${apiCapabilities.apiVersion}` : 'API ---';
+    const tok = (config && config.deviceToken) ? 'TOKEN OK' : 'NO TOKEN';
+    const sync = lastGoodSyncAt ? `sync ${new Date(lastGoodSyncAt).toTimeString().slice(0, 5)}` : 'sync --:--';
+    el('audio-footer').textContent = `${api} · ${tok} · cache ${cacheProgress}% · ${sync} · v${(appInfo && appInfo.version) || '?'}`;
+    pushAudioStatus(false);
+}
+
 async function adjustVolume(delta) {
     volume = Math.max(0, Math.min(100, volume + delta));
     if (isMuted && delta > 0) {
@@ -2115,7 +2280,7 @@ document.getElementById('check-update-btn').onclick = async () => {
     msg.textContent = "Checking...";
     try {
         const cur = await ipcRenderer.invoke('get-app-version');
-        const latest = await fetchSetting('LatestClientVersion');
+        const latest = await fetchSetting(AUDIO_MODE ? 'LatestAudioClientVersion' : 'LatestClientVersion');
         if (latest && latest !== cur) {
             msg.textContent = `New: ${latest}`;
             if (confirm(`Download v${latest}?`)) {

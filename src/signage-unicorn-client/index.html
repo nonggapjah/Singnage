@@ -431,6 +431,31 @@
             color: #9a9a9a;
             font-weight: 800;
         }
+
+        /* Audio player (Signage Unicorn Audio build): a small window instead of a kiosk screen. The
+           video element keeps playing (sound) parked off-screen; #audio-panel is the UI. */
+        body.audio-mode { background: #0b0f14; cursor: default !important; }
+        body.audio-mode #player-container { position: fixed; width: 1px; height: 1px; left: -10px; top: -10px; overflow: hidden; opacity: 0; pointer-events: none; }
+        body.audio-mode #hud-overlay { display: none !important; }
+        body.audio-mode #setup-screen, body.audio-mode #dashboard-screen, body.audio-mode #playlist-select-screen,
+        body.audio-mode #help-screen, body.audio-mode #patch-history-screen { z-index: 20; overflow-y: auto; }
+        #audio-panel { position: fixed; inset: 0; display: flex; flex-direction: column; gap: 12px; padding: 14px 16px 12px; box-sizing: border-box; background: #0b0f14; color: #e6edf3; z-index: 5; }
+        #audio-panel.hidden { display: none !important; }
+        .ap-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; }
+        .ap-title { font-size: 15px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .ap-meta { font-size: 11px; font-family: monospace; color: #9aa7b4; white-space: nowrap; }
+        .ap-pill { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; padding: 4px 10px; border: 1px solid #555; border-radius: 999px; white-space: nowrap; }
+        .ap-card { background: #111820; border: 1px solid #1f2a36; border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+        .ap-label { font-size: 10px; font-family: monospace; letter-spacing: 0.14em; color: #22d3ee; }
+        .ap-now { font-size: 15px; font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .ap-track { flex: 1; height: 6px; border-radius: 3px; background: #1f2a36; overflow: hidden; }
+        .ap-bar { height: 100%; width: 0; background: #22d3ee; }
+        .ap-time { font-size: 11px; font-family: monospace; color: #c9d4de; }
+        .ap-next { font-size: 11px; color: #9aa7b4; min-height: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        #audio-panel button { height: 32px; padding: 0 12px; border: 1px solid #2a3542; border-radius: 8px; background: #111820; color: #e6edf3; font: 600 12px 'Segoe UI', Tahoma, sans-serif; cursor: pointer; }
+        #audio-panel button.primary { background: #22d3ee; color: #06252b; border: 0; font-weight: 700; }
+        #audio-panel input[type=range] { flex: 1; min-width: 0; accent-color: #22d3ee; height: 24px; }
+        .ap-footer { font-size: 10px; font-family: monospace; color: #9aa7b4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     </style>
 </head>
 
@@ -452,6 +477,37 @@
         <div id="hud-overlay"></div>
     </div>
 
+    <!-- Audio player window (Signage Unicorn Audio build only; stays hidden on screens) -->
+    <div id="audio-panel" class="hidden">
+        <div class="ap-row">
+            <div style="min-width: 0;">
+                <div id="audio-device" class="ap-title">Audio player</div>
+                <div id="audio-meta" class="ap-meta"></div>
+            </div>
+            <span id="audio-status" class="ap-pill">STARTING</span>
+        </div>
+        <div class="ap-card">
+            <div class="ap-row"><span class="ap-label">NOW PLAYING</span><span id="audio-count" class="ap-meta"></span></div>
+            <div id="audio-now" class="ap-now">—</div>
+            <div class="ap-row"><span id="audio-pos" class="ap-time">0:00</span><div class="ap-track"><div id="audio-bar" class="ap-bar"></div></div><span id="audio-dur" class="ap-time">0:00</span></div>
+            <div id="audio-next" class="ap-next"></div>
+        </div>
+        <div class="ap-row">
+            <label for="audio-volume" class="ap-meta">VOL</label>
+            <input id="audio-volume" type="range" min="0" max="100" value="70">
+            <span id="audio-volume-label" class="ap-time" style="width: 48px; text-align: right;">70%</span>
+            <button id="audio-mute" type="button">MUTE</button>
+        </div>
+        <div class="ap-row" style="margin-top: auto; flex-wrap: wrap; justify-content: flex-start;">
+            <button id="audio-skip" type="button">Skip</button>
+            <button id="audio-playlists" type="button">Playlists</button>
+            <button id="audio-settings" type="button">Settings</button>
+            <button id="audio-dashboard" type="button">Status</button>
+            <button id="audio-hide" type="button" class="primary" style="margin-left: auto;">Hide to tray</button>
+        </div>
+        <div id="audio-footer" class="ap-footer"></div>
+    </div>
+
     <!-- First Time Setup -->
     <div id="setup-screen" class="hidden">
         <h1 style="font-weight: 900; letter-spacing: -1px; color: #00f2ff;">SIGNAGE UNICORN</h1>
@@ -471,6 +527,9 @@
         <div class="input-group">
             <label>LOCATION (Optional)</label><br>
             <input type="text" id="location" placeholder="e.g. 1st Floor Lobby">
+        </div>
+        <div id="start-hidden-row" class="input-group hidden">
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;"><input type="checkbox" id="start-hidden" checked> START HIDDEN IN TRAY (audio player)</label>
         </div>
         <button id="save-settings" style="margin-top: 20px; width: 100%;">CONNECT & REGISTER</button>
     </div>

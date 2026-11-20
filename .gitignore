@@ -141,3 +141,4 @@ id_ed25519
 # Publish-ClientUpdate.ps1 copies in directly at release time -- the repo was never the source
 # of truth. Proof: production serves 2.7.4 while the newest file ever committed here was 2.5.9.
 # A fresh clone therefore has no /setup/*.exe until a release is published; that is expected.
+src/signage-unicorn-client/dist-audio/

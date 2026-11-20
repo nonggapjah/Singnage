@@ -3,6 +3,22 @@
 รายการอัปเดตและประวัติการแก้ไขระบบ (Patch Version History)
 
 ---
+## 2.8.1 — Signage Unicorn Audio (separate product; screens stay on 2.8.0)
+
+- New build target `npm run build:audio` → `Signage Unicorn Audio Setup 2.8.1.exe` (appId
+  `com.signage.unicorn.audio`, own install folder and userData). The screen installer is NOT
+  republished and `LatestClientVersion` stays 2.8.0; the audio app reads
+  `LatestAudioClientVersion` / `AudioClientDownloadUrl` / `AudioClientDownloadSha256`.
+- Audio mode (detected from the product name, `SIGNAGE_AUDIO=1` in development): a 480×420
+  window with now-playing, progress, next track, volume + mute and Hide to tray; a tray icon
+  with Open / Mute / Volume / Skip / Restart player / Exit; closing the window hides it; "Start
+  hidden in tray" at setup; starts unmuted at 70 %. Sound files (mp3, wav, m4a, aac) play
+  through the existing video element; images are skipped. Registers with `playbackMode: audio`.
+- Audio mode leaves the PC alone: no kiosk/fullscreen/always-on-top, no screensaver or power-plan
+  changes (display may sleep), REBOOT restarts the app only, CAPTURE_SCREEN is refused, no
+  identity migration from the screen client, own watchdog task and diagnostics port 8089.
+- Commands `SET_VOLUME:<0-100>`, `MUTE`, `UNMUTE` (API 2.8.6) are handled on every build.
+
 ## [2.8.0] - 2026-10-27 (protocol 2 client; requires API 2.8.0 for device tokens, works against older APIs without them)
 
 #### Round 3 (same day, after the second review)

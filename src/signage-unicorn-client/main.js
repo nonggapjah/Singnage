@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, screen, powerSaveBlocker, desktopCapturer } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, powerSaveBlocker, desktopCapturer, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs-extra');
 const fsp = require('fs/promises');
@@ -19,6 +19,13 @@ const { checkUpdateUrl, checkRedirectHop } = require('./src/lib/update-url');
 // a report written after SIGNAGE_SMOKE_MS followed by a clean exit.
 const SMOKE = process.env.SIGNAGE_SMOKE === '1';
 if (process.env.SIGNAGE_USER_DATA) app.setPath('userData', process.env.SIGNAGE_USER_DATA);
+
+// Audio player (20-11-2026): this same code base built as a separate product, "Signage Unicorn
+// Audio" (scripts/build-audio.js: appId com.signage.unicorn.audio, its own install folder and
+// userData). It plays sound only, lives in a small window or the tray instead of taking over a
+// screen, registers as an 'audio' device and reads its own update keys. Detected from the packaged
+// product name; SIGNAGE_AUDIO=1 forces it in development. A screen build never enters this mode.
+const AUDIO = process.env.SIGNAGE_AUDIO === '1' || /audio/i.test(app.getName());
 
 // The former `ignore-certificate-errors` switch is gone. It was added for kiosks whose clock had
 // drifted far enough to break TLS, but it also disabled validation for installer downloads, which
@@ -147,6 +154,7 @@ if (!gotTheLock) {
 
 app.on('second-instance', () => {
     if (mainWindow) {
+        if (AUDIO) mainWindow.show();
         if (mainWindow.isMinimized()) mainWindow.restore();
         mainWindow.focus();
     }
@@ -281,6 +289,9 @@ function mediaDirFor(isFallback) {
 // Identity migration across user profiles (unchanged behaviour)
 // ---------------------------------------------------------------------------------------------
 async function migrateData() {
+    // Audio player: never. The candidate folders are the SCREEN client's; on a PC that runs both,
+    // adopting that config would make the audio app impersonate the screen.
+    if (AUDIO) return;
     const parentRoaming = app.getPath('appData');
     const newUserData = app.getPath('userData');
     const systemUsersDir = 'C:\\Users';
@@ -443,6 +454,10 @@ function initDb() {
 async function createWindow() {
     const primaryDisplay = screen.getPrimaryDisplay();
     const { width, height } = primaryDisplay.size;
+    // Audio player: start hidden in the tray when the operator asked for it at setup (and only once
+    // the device is registered, so a first run always shows its setup screen).
+    const audioCfg = AUDIO ? await readConfigSafe() : null;
+    const startHidden = !!(AUDIO && audioCfg && audioCfg.startHidden === true && audioCfg.deviceId);
 
     mainWindow = new BrowserWindow(SMOKE ? {
         width: 480,
@@ -464,6 +479,32 @@ async function createWindow() {
             backgroundThrottling: false,
         },
         backgroundColor: '#000000'
+    } : AUDIO ? {
+        // Audio player: an ordinary window the operator can minimise or hide to the tray. Nothing
+        // kiosk-like: no fullscreen, not on top, cursor visible, taskbar entry.
+        width: 480,
+        height: 420,
+        minWidth: 420,
+        minHeight: 380,
+        fullscreen: false,
+        kiosk: false,
+        frame: true,
+        alwaysOnTop: false,
+        skipTaskbar: false,
+        autoHideMenuBar: true,
+        show: false,
+        title: 'Signage Unicorn Audio',
+        icon: trayIconPath(),
+        webPreferences: {
+            preload: path.join(__dirname, 'preload.js'),
+            contextIsolation: true,
+            nodeIntegration: false,
+            sandbox: true,
+            webSecurity: true,
+            allowRunningInsecureContent: false,
+            backgroundThrottling: false, // sound keeps time while minimised or hidden
+        },
+        backgroundColor: '#0b0f14'
     } : {
         width,
         height,
@@ -505,7 +546,17 @@ async function createWindow() {
     mainWindow.setMenu(null);
     mainWindow.setMenuBarVisibility(false);
 
-    if (!SMOKE) {
+    if (AUDIO) {
+        // Audio player: show when ready (unless hidden was requested); closing the window hides it to
+        // the tray so the sound keeps playing. Exit lives in the tray menu.
+        mainWindow.once('ready-to-show', () => { if (!startHidden) mainWindow.show(); });
+        mainWindow.on('close', (e) => {
+            if (app.isQuitting) return;
+            e.preventDefault();
+            mainWindow.hide();
+        });
+        createAudioTray();
+    } else if (!SMOKE) {
         // Force top-most level even above system dialogs and taskbars
         mainWindow.setAlwaysOnTop(true, 'screen-saver');
 
@@ -529,7 +580,9 @@ async function createWindow() {
     if (SMOKE) return; // no power/autostart/registry changes on a developer machine
 
     // Prevent Sleep & Force Disable Windows Screensaver via Registry
-    sleepBlockerId = powerSaveBlocker.start('prevent-display-sleep');
+    // Audio player: only keep the app from being suspended; the display may sleep, and the PC's
+    // screensaver and power plan are left alone (it may be somebody's desk machine).
+    sleepBlockerId = powerSaveBlocker.start(AUDIO ? 'prevent-app-suspension' : 'prevent-display-sleep');
     try {
         // Use Official Electron API for Auto-Start (more reliable, less likely to be blocked by AV)
         app.setLoginItemSettings({
@@ -537,6 +590,12 @@ async function createWindow() {
             path: process.execPath,
             args: []
         });
+
+        if (AUDIO) {
+            exec(`reg add "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v "SignageUnicornAudio" /d "\\"${process.execPath}\\"" /f`);
+            console.log('Audio player: auto-start registered; screensaver and power plan untouched. Power save blocker:', sleepBlockerId);
+            return;
+        }
 
         exec('reg add "HKEY_CURRENT_USER\\Control Panel\\Desktop" /v ScreenSaveActive /t REG_SZ /d 0 /f');
         // Fallback Force Auto-Start on Boot (Keep this as requested just in case)
@@ -667,7 +726,7 @@ function startHealthWriter() {
 // cannot run them, so a plain copy is kept under userData and a per-user ONLOGON task points at
 // it. config.watchdogAutoRegister = false disables this.
 // ---------------------------------------------------------------------------------------------
-const WATCHDOG_TASK = 'SignageUnicornWatchdog';
+const WATCHDOG_TASK = AUDIO ? 'SignageUnicornAudioWatchdog' : 'SignageUnicornWatchdog';
 
 function runTool(file, args, timeoutMs = 20000) {
     return new Promise((resolve) => {
@@ -685,7 +744,16 @@ async function registerWatchdogTask(config) {
         const src = path.join(app.getAppPath(), 'Watchdog.ps1');
         const destDir = path.join(USER_DATA, 'watchdog');
         const dest = path.join(destDir, 'Watchdog.ps1');
-        const content = await fs.readFile(src, 'utf8'); // readable through asar
+        let content = await fs.readFile(src, 'utf8'); // readable through asar
+        if (AUDIO) {
+            // Different product: different exe, install folder and userData than the script assumes.
+            const exeName = path.basename(process.execPath, '.exe');
+            content = content
+                .replace(/\$ProcessName = "[^"]*"/, `$ProcessName = "${exeName}"`)
+                .replace(/\$AppPaths = @\([\s\S]*?\)/, `$AppPaths = @(\n    "${process.execPath}"\n)`)
+                .replace(/\$UserDataDirs = @\([\s\S]*?\)/, `$UserDataDirs = @(\n    "${USER_DATA}"\n)`)
+                .replace('signage-watchdog.log', 'signage-audio-watchdog.log');
+        }
         await fs.ensureDir(destDir);
         let current = null;
         try { current = await fs.readFile(dest, 'utf8'); } catch (e) { /* first run */ }
@@ -821,7 +889,7 @@ ipcMain.handle('get-diagnostics-info', () => {
     const bind = (lastKnownConfig && typeof lastKnownConfig.diagnosticsBind === 'string' && lastKnownConfig.diagnosticsBind) || '127.0.0.1';
     return {
         diagToken,
-        portalUrl: `http://${bind === '0.0.0.0' ? '127.0.0.1' : bind}:8088`,
+        portalUrl: `http://${bind === '0.0.0.0' ? '127.0.0.1' : bind}:${DIAG_PORT}`,
         bind,
         clockSkewSeconds,
         clockSkewDetected,
@@ -862,6 +930,81 @@ ipcMain.handle('smoke-event', (event, name, value) => {
     if (n in smokeReport) {
         if (typeof smokeReport[n] === 'number') smokeReport[n] += (typeof value === 'number' ? value : 1);
         else if (typeof smokeReport[n] === 'boolean') smokeReport[n] = value === undefined ? true : !!value;
+    }
+    return { success: true };
+});
+
+// ---------------------------------------------------------------------------------------------
+// Audio player: tray icon, tray menu and the small set of IPC calls the audio window needs.
+// ---------------------------------------------------------------------------------------------
+let tray = null;
+let audioStatus = { title: '', playing: false, volume: 70, muted: false };
+
+function trayIconPath() { return path.join(__dirname, 'assets', 'tray-audio.png'); }
+
+function showAudioWindow() {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+}
+
+// main -> renderer: the tray's mute / volume / skip actions.
+function audioControl(action, value) {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('audio-control', { action, value });
+}
+
+function rebuildTrayMenu() {
+    if (!tray) return;
+    const vol = audioStatus.volume;
+    const nearest = Math.round(vol / 25) * 25;
+    const menu = Menu.buildFromTemplate([
+        { label: 'Signage Unicorn Audio', enabled: false },
+        { label: audioStatus.title ? `${audioStatus.playing ? 'Playing' : 'Stopped'} · ${audioStatus.title}` : 'Idle', enabled: false },
+        { type: 'separator' },
+        { label: 'Open window', click: showAudioWindow },
+        { label: audioStatus.muted ? 'Unmute' : 'Mute', click: () => audioControl('toggle-mute') },
+        {
+            label: `Volume (${audioStatus.muted ? 'muted' : vol + '%'})`,
+            submenu: [0, 25, 50, 75, 100].map(v => ({ label: `${v}%`, type: 'radio', checked: nearest === v, click: () => audioControl('set-volume', v) })),
+        },
+        { label: 'Skip to next track', click: () => audioControl('skip') },
+        { label: 'Restart player', click: () => { app.isQuitting = true; app.relaunch(); app.exit(0); } },
+        { type: 'separator' },
+        { label: 'Exit (stops audio)', click: () => { app.isQuitting = true; app.quit(); } },
+    ]);
+    tray.setContextMenu(menu);
+    tray.setToolTip('Signage Unicorn Audio' + (audioStatus.title ? ` · ${audioStatus.title}` : ''));
+}
+
+function createAudioTray() {
+    try {
+        tray = new Tray(nativeImage.createFromPath(trayIconPath()));
+        tray.on('click', showAudioWindow);
+        tray.on('double-click', showAudioWindow);
+        rebuildTrayMenu();
+    } catch (e) {
+        console.warn(`[AUDIO] Tray icon not available: ${e.message}`);
+    }
+}
+
+ipcMain.handle('get-app-info', () => ({ version: app.getVersion(), audioMode: AUDIO, productName: app.getName(), platform: process.platform }));
+
+ipcMain.handle('hide-to-tray', () => {
+    if (AUDIO && mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
+    return { success: true, hidden: AUDIO };
+});
+
+// renderer -> main: what the tray shows (sent only when something changed).
+ipcMain.handle('audio-status', (event, s) => {
+    if (s && typeof s === 'object') {
+        audioStatus = {
+            title: String(s.title || '').slice(0, 80),
+            playing: !!s.playing,
+            volume: Math.max(0, Math.min(100, Number(s.volume) || 0)),
+            muted: !!s.muted,
+        };
+        rebuildTrayMenu();
     }
     return { success: true };
 });
@@ -1018,6 +1161,7 @@ ipcMain.handle('delete-cached-file', async (event, arg) => {
 });
 
 ipcMain.handle('capture-screen', async () => {
+    if (AUDIO) return { success: false, error: 'not available on audio devices' };
     try {
         const sources = await desktopCapturer.getSources({
             types: ['screen'],
@@ -1436,7 +1580,12 @@ ipcMain.handle('fetch-update-metadata', async () => {
         return { success: false, code: rule.code, error: `${rule.code}: settings server ${rule.reason}` };
     }
     const out = {};
-    for (const key of ['ClientDownloadUrl', 'ClientDownloadSha256', 'LatestClientVersion']) {
+    // Audio player: its own keys, so publishing a screen update never reaches an audio box and
+    // vice versa.
+    const keys = AUDIO
+        ? ['AudioClientDownloadUrl', 'AudioClientDownloadSha256', 'LatestAudioClientVersion']
+        : ['ClientDownloadUrl', 'ClientDownloadSha256', 'LatestClientVersion'];
+    for (const key of keys) {
         try {
             const res = await httpGetStream(`${serverIp}/api/v1/system/settings/${key}`, mainDeviceHeaders(), 15000, { updatePolicy: { allowInsecure } });
             const body = await readStreamJson(res.stream, 64 * 1024);
@@ -1450,7 +1599,7 @@ ipcMain.handle('fetch-update-metadata', async () => {
             out[key] = null;
         }
     }
-    return { success: true, url: out.ClientDownloadUrl || null, sha256: out.ClientDownloadSha256 || null, version: out.LatestClientVersion || null };
+    return { success: true, url: out[keys[0]] || null, sha256: out[keys[1]] || null, version: out[keys[2]] || null };
 });
 
 ipcMain.handle('launch-installer', async (event, filePath, meta) => {
@@ -1543,6 +1692,13 @@ ipcMain.handle('toggle-fullscreen', () => {
 });
 
 ipcMain.handle('reboot-device', async () => {
+    if (AUDIO) {
+        // Audio player: REBOOT restarts the app, never the PC it runs on (it may be somebody's desk).
+        app.isQuitting = true;
+        app.relaunch();
+        app.exit(0);
+        return { success: true, restartedAppOnly: true };
+    }
     try {
         exec('shutdown /r /t 0', (err) => {
             if (err) console.error('Reboot command failed', err);
@@ -1653,7 +1809,7 @@ ipcMain.handle('db-get-playlist', (event, id) => {
 // Local diagnostics portal (F09): loopback only, no wildcard CORS, bounded bodies, redacted
 // config, and a per-device token for anything that changes state.
 // ---------------------------------------------------------------------------------------------
-const DIAG_PORT = 8088;
+const DIAG_PORT = AUDIO ? 8089 : 8088;
 const DIAG_MAX_BODY = 64 * 1024;
 
 function redactConfig(conf) {
