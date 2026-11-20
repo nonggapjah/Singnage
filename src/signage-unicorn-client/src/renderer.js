@@ -26,7 +26,6 @@ let lastGoodSyncAt = 0;
 // not replay every announcement at once.
 let scheduleInterjections = [];
 let interjectionQueue = [];
-let audioLabelProbeDone = false;
 const TOKEN_RECLAIM_MIN_MS = 10 * 60 * 1000; // contract T3: one re-claim per 10 minutes at most
 const HEALTH_REPORT_MS = 15000;              // Codex 22: renderer liveness report cadence
 const EMPTY_RETRY_MIN_MS = 5 * 60 * 1000;    // Codex 7: do not re-ask for an empty schedule every heartbeat
@@ -937,6 +936,8 @@ async function sync() {
             macAddress: cachedMacAddress
         };
         if (config.deviceToken) heartbeatData.deviceToken = config.deviceToken;
+        // Audio player: report the real level so the console slider follows tray/F2/F3/F4 changes.
+        if (AUDIO_MODE) heartbeatData.volume = isMuted ? 0 : volume;
 
         // Boot Report: enrich first heartbeat with device metadata
         if (!isBootReportSent) {
@@ -2197,17 +2198,9 @@ async function populateAudioOutputs() {
     const sel = document.getElementById('audio-output');
     if (!sel || !navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
     try {
-        let outputs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'audiooutput');
-        // Chromium reveals device labels only after the page once held a media permission; without
-        // them the list would read "Output 1, Output 2". Probe once (no mic = labels stay generic).
-        if (!audioLabelProbeDone && outputs.length && outputs.every(d => !d.label) && navigator.mediaDevices.getUserMedia) {
-            audioLabelProbeDone = true;
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                stream.getTracks().forEach(t => t.stop());
-                outputs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'audiooutput');
-            } catch (e) { /* no microphone or permission: generic names below */ }
-        }
+        // Electron exposes output labels without any media permission (verified 20-11-2026 with a
+        // sandboxed file:// window), so no getUserMedia probe is needed here.
+        const outputs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'audiooutput');
         const current = (config && config.audioSinkId) || '';
         sel.replaceChildren();
         const def = document.createElement('option');

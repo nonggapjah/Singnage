@@ -7,7 +7,7 @@ import { useUI } from '@/features/ui/context/UIContext';
 import { Playlist } from '@/features/playlists/types/playlist';
 import { DateTimePicker24h } from '@/components/ui/DateTimePicker24h';
 import { DaypartFields } from './DaypartFields';
-import { Daypart, isWithinDaypart } from '@/lib/daypart';
+import { Daypart, isWithinDaypart, storeNow } from '@/lib/daypart';
 import { Modal } from '@/components/ui/Modal';
 
 interface DevicePlaylistModalProps {
@@ -40,7 +40,8 @@ function assignmentStatus(assignment: Assignment, isAudio: boolean) {
     if (isAudio && assignment.repeatEveryMinutes && assignment.repeatEveryMinutes > 0) {
         return { label: `EVERY ${assignment.repeatEveryMinutes} MIN`, className: 'text-accent-cyan bg-accent-cyan/10 border-accent-cyan/30' };
     }
-    if (!isWithinDaypart(now, assignment)) {
+    // Daily windows are judged in store time (the API's Schedule:TimeZoneId), not the admin's clock.
+    if (!isWithinDaypart(storeNow(), assignment)) {
         return { label: 'OFF HOURS', className: 'text-amber-600 dark:text-amber-400 bg-amber-500/10 border-amber-500/30' };
     }
     return { label: 'ACTIVE', className: 'text-green-600 dark:text-green-400 bg-green-500/10 border-green-500/30' };

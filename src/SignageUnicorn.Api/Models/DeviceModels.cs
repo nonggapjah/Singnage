@@ -146,6 +146,11 @@ namespace SignageUnicorn.Api.Models
         [JsonPropertyName("branchCode")]
         public string? BranchCode { get; set; }
 
+        // Audio player 2.8.4: the box reports its real level (0 = muted) so the console slider follows
+        // tray/F-key changes; screens send nothing and the stored value is kept (ISNULL in the procedure).
+        [JsonPropertyName("volume")]
+        public int? Volume { get; set; }
+
         [JsonPropertyName("status")]
         public string Status { get; set; } = string.Empty;
 

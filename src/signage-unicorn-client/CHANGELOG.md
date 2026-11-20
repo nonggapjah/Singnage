@@ -3,6 +3,11 @@
 รายการอัปเดตและประวัติการแก้ไขระบบ (Patch Version History)
 
 ---
+## 2.8.4 — Signage Unicorn Audio: heartbeat reports the real volume (screens still on 2.8.0)
+
+- The heartbeat carries `volume` (0 when muted) so the console slider follows changes made from the
+  tray menu or F2/F3/F4; API 2.8.9 stores it (`@p_volume` in sp_device_std).
+
 ## 2.8.3 — Signage Unicorn Audio: review fixes (Codex + Impeccable; screens still on 2.8.0)
 
 - The audio product registers under its own device key derived from the hardware uuid, so a PC
@@ -11,7 +16,7 @@
 - An empty schedule also stops announcements; moving a playlist between the loop and
   "repeat every N min" is a content change (Smart Sync re-applies it); a failed announcement
   no longer skips the next regular track.
-- Output picker: labels are requested once when Chromium hides them; 11 px minimum text.
+- Output picker labels verified to be exposed by Electron without a permission probe; 11 px minimum text.
 
 ## 2.8.2 — Signage Unicorn Audio: announcements and output device (screens still on 2.8.0)
 

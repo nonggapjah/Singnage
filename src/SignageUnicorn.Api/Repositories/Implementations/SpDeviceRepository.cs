@@ -98,6 +98,7 @@ namespace SignageUnicorn.Api.Repositories.Implementations
 
                 p.Add("@p_device_name", request.DeviceName);
                 p.Add("@p_branch_code", request.BranchCode);
+                p.Add("@p_volume", request.Volume.HasValue ? Math.Clamp(request.Volume.Value, 0, 100) : (int?)null);
 
                 if (long.TryParse(request.CurrentPlaylistId, out var plId))
                 {

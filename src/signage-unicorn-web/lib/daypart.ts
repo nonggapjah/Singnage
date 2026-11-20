@@ -46,14 +46,30 @@ const toMinutes = (hhmm?: string): number | null => {
     return h * 60 + min;
 };
 
-/** Same rule as the API: no times = all day; start > end = overnight; days apply to the calendar day. */
+/** The store's clock (the API evaluates windows in Schedule:TimeZoneId, Thailand): a Date whose local
+ *  fields equal the wall-clock time in that zone, so getHours()/getDay() read store time anywhere. */
+export const STORE_TIME_ZONE = 'Asia/Bangkok';
+export const storeNow = (timeZone: string = STORE_TIME_ZONE, now: Date = new Date()): Date => {
+    try {
+        const parts = new Intl.DateTimeFormat('en-US', { timeZone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).formatToParts(now);
+        const get = (type: string) => Number(parts.find(p => p.type === type)?.value);
+        return new Date(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'), get('second'));
+    } catch {
+        return now;
+    }
+};
+
+/** Same rule as the API: no times = all day; start > end = overnight; days apply to the day the window
+ *  STARTED on (after midnight inside an overnight window the previous day is checked). */
 export const isWithinDaypart = (now: Date, dp: Daypart | undefined): boolean => {
     if (!dp) return true;
-    const days = parseDays(dp.daysOfWeek);
-    if (days.size > 0 && !days.has(isoDay(now))) return false;
     const s = toMinutes(dp.startTime);
     const e = toMinutes(dp.endTime);
     const t = now.getHours() * 60 + now.getMinutes();
+    const overnight = s !== null && e !== null && s > e;
+    const dayOf = overnight && t < (e as number) ? new Date(now.getTime() - 24 * 60 * 60 * 1000) : now;
+    const days = parseDays(dp.daysOfWeek);
+    if (days.size > 0 && !days.has(isoDay(dayOf))) return false;
     if (s === null && e === null) return true;
     if (s !== null && e === null) return t >= s;
     if (s === null) return t < (e as number);

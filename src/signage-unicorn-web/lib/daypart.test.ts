@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseDays, formatDays, toggleDay, isWithinDaypart, describeDaypart, hasDaypart } from './daypart';
+import { parseDays, formatDays, toggleDay, isWithinDaypart, describeDaypart, hasDaypart, storeNow } from './daypart';
 
 const at = (iso: string) => new Date(iso); // local time of the test machine, like the console
 
@@ -39,6 +39,27 @@ describe('isWithinDaypart', () => {
     it('days of week', () => {
         expect(isWithinDaypart(at('2026-11-20T12:00:00'), { daysOfWeek: '1,2,3,4,5' })).toBe(true);  // Friday
         expect(isWithinDaypart(at('2026-11-22T12:00:00'), { daysOfWeek: '1,2,3,4,5' })).toBe(false); // Sunday
+    });
+    it('overnight window belongs to the day it started on', () => {
+        const fri = { startTime: '22:00', endTime: '02:00', daysOfWeek: '5' };
+        expect(isWithinDaypart(at('2026-11-20T23:30:00'), fri)).toBe(true);   // Friday night
+        expect(isWithinDaypart(at('2026-11-21T01:30:00'), fri)).toBe(true);   // Saturday 01:30 is still Friday's night
+        expect(isWithinDaypart(at('2026-11-21T02:00:00'), fri)).toBe(false);
+        expect(isWithinDaypart(at('2026-11-21T23:30:00'), fri)).toBe(false);  // Saturday night not allowed
+        expect(isWithinDaypart(at('2026-11-21T01:30:00'), { ...fri, daysOfWeek: '6' })).toBe(false);
+    });
+});
+
+describe('storeNow', () => {
+    it('returns Bangkok wall-clock fields for a UTC instant', () => {
+        const d = storeNow('Asia/Bangkok', new Date(Date.UTC(2026, 10, 20, 17, 30, 0))); // 17:30 UTC = 00:30 next day in Bangkok
+        expect(d.getHours()).toBe(0);
+        expect(d.getMinutes()).toBe(30);
+        expect(d.getDate()).toBe(21);
+    });
+    it('falls back to the given date on an unknown zone', () => {
+        const now = new Date();
+        expect(storeNow('Not/AZone', now)).toBe(now);
     });
 });
 

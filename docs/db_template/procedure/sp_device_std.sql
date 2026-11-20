@@ -60,7 +60,10 @@ CREATE OR ALTER PROCEDURE [dbo].[sp_device_std]
     -- Audio player (20-11-2026): 'screen' (the kiosk client, default) or 'audio' (the separate
     -- Signage Unicorn Audio app). Sent by REGISTER_OR_LOGIN only; NULL keeps the stored value, so
     -- every existing screen stays 'screen' without sending anything.
-    @p_playback_mode       NVARCHAR(10)  = NULL
+    @p_playback_mode       NVARCHAR(10)  = NULL,
+
+    -- Audio player 2.8.4: HEARTBEAT carries the box's real level (0 = muted); NULL keeps the row's value.
+    @p_volume              INT           = NULL
 )
 AS
 BEGIN
@@ -190,6 +193,7 @@ BEGIN
             current_media_id = ISNULL(@p_current_media_id, current_media_id),
             current_position_sec = ISNULL(@p_position_sec, current_position_sec),
             cache_progress = ISNULL(@p_cache_progress, cache_progress),
+            volume = ISNULL(@p_volume, volume),
             last_playback_at = CASE WHEN @p_position_sec IS NOT NULL THEN SYSUTCDATETIME() ELSE last_playback_at END
         -- BUG-01 defect A: this predicate previously read
         --     WHERE device_id = @p_device_id

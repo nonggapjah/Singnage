@@ -68,6 +68,13 @@ namespace SignageUnicorn.Api.Tests
         [InlineData("2026-11-22 12:00", null, null, "1,2,3,4,5", false)]
         [InlineData("2026-11-22 12:00", "09:00", "18:00", "6,7", true)]
         [InlineData("2026-11-22 19:00", "09:00", "18:00", "6,7", false)]
+        // overnight + days: the night belongs to the day it started on (2026-11-20 is a Friday = 5)
+        [InlineData("2026-11-20 23:30", "22:00", "02:00", "5", true)]
+        [InlineData("2026-11-21 01:30", "22:00", "02:00", "5", true)]   // Saturday 01:30 = Friday's night
+        [InlineData("2026-11-21 02:00", "22:00", "02:00", "5", false)]
+        [InlineData("2026-11-21 23:30", "22:00", "02:00", "5", false)]  // Saturday night not allowed
+        [InlineData("2026-11-22 01:30", "22:00", "02:00", "5", false)]
+        [InlineData("2026-11-21 01:30", "22:00", "02:00", "6", false)]  // Saturday allowed, but this is Friday's night
         public void IsWithin(string localNow, string? start, string? end, string? days, bool expected)
             => Assert.Equal(expected, ScheduleWindow.IsWithin(L(localNow), start, end, days));
 

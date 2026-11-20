@@ -72,16 +72,20 @@ namespace SignageUnicorn.Api.Services
             => TryParseTime(startTime, out _) || TryParseTime(endTime, out _) || ParseDays(days).Count > 0;
 
         // True when the local moment falls inside the daily window and on an allowed day. No start and
-        // no end = all day. start > end = an overnight window (22:00-02:00). Days apply to the calendar
-        // day of the moment.
+        // no end = all day. start > end = an overnight window (22:00-02:00). Days apply to the day the
+        // window STARTED on: inside the after-midnight half of an overnight window the previous
+        // calendar day is checked, so "Fri 22:00-02:00" keeps playing until 02:00 Saturday.
         public static bool IsWithin(DateTime localNow, string? startTime, string? endTime, string? days)
         {
-            var allowed = ParseDays(days);
-            if (allowed.Count > 0 && !allowed.Contains(IsoDay(localNow))) return false;
-
             var hasStart = TryParseTime(startTime, out var start);
             var hasEnd = TryParseTime(endTime, out var end);
             var t = localNow.TimeOfDay;
+            var overnight = hasStart && hasEnd && start > end;
+            var dayOf = overnight && t < end ? localNow.AddDays(-1) : localNow;
+
+            var allowed = ParseDays(days);
+            if (allowed.Count > 0 && !allowed.Contains(IsoDay(dayOf))) return false;
+
             if (!hasStart && !hasEnd) return true;
             if (hasStart && !hasEnd) return t >= start;
             if (!hasStart) return t < end;
