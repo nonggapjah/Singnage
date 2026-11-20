@@ -70,12 +70,14 @@ times are stored and how the admin console signs in. Everything is staged so tha
   the way out; **Reset device token** on the card remains the manual path, and the blanket
   `DeviceTokenReclaimOnRegister` switch is unchanged (still off).
 
-## 6. Audio player (API 2.8.6 / web 2.4.14 / client source 2.8.1)
+## 6. Audio player (API 2.8.6-2.8.7 / web 2.4.14-2.4.15 / audio client 2.8.2)
 
 See `docs/ops/audio-player.md`. In short: the audio-only player is a separate product built from the
 same client source (`npm run build:audio`); screens stay on client 2.8.0 and `LatestClientVersion`
 is not touched. Deploy order: `deploy-api` (migration 010 + procedure), then `rebuild-web`; install
 the audio app on one box first and check the row shows `AUDIO` and plays the assigned audio playlist.
+API 2.8.7 adds migration 011 (dayparts: daily window, days of week, repeat) and `Schedule:TimeZoneId`;
+screens keep working unchanged because the server evaluates the windows.
 
 ## New files and keys on a kiosk
 

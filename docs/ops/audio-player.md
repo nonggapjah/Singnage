@@ -1,6 +1,6 @@
 # Signage Unicorn Audio — the audio-only player
 
-Added 20-11-2026 (API 2.8.6, web 2.4.14, client source 2.8.1). An in-store sound player built from
+Added 20-11-2026 (API 2.8.6 -> 2.8.7, web 2.4.14 -> 2.4.15, audio client 2.8.2). An in-store sound player built from
 the kiosk client's code base but shipped as a **separate product**, so the screens and their
 client 2.8.0 are never touched.
 
@@ -8,7 +8,7 @@ client 2.8.0 are never touched.
 
 | | Screen (kiosk client) | Audio player |
 |---|---|---|
-| Installer | `Signage Unicorn Setup 2.8.0.exe` (unchanged) | `Signage Unicorn Audio Setup 2.8.1.exe` (`npm run build:audio`) |
+| Installer | `Signage Unicorn Setup 2.8.0.exe` (unchanged) | `Signage Unicorn Audio Setup 2.8.2.exe` (`npm run build:audio`) |
 | appId / install folder / userData | `com.signage.unicorn`, `Signage Unicorn` | `com.signage.unicorn.audio`, `Signage Unicorn Audio` (can sit beside a screen client on one PC) |
 | Window | kiosk, fullscreen, always on top | 480×420 window, minimise, close = hide to tray, tray menu (Open / Mute / Volume / Skip / Restart player / Exit) |
 | Device row | `playback_mode = 'screen'` (every existing row) | `playback_mode = 'audio'` (sent at register) |
@@ -47,9 +47,51 @@ Audio mode is decided at run time from the packaged product name (`/audio/i.test
 - Media: audio upload with preview and length; audio icon on cards. Playlists: audio items carry an
   `Audio` tag.
 
+## Dayparts and announcements (API 2.8.7 / web 2.4.15)
+
+Every assignment (per-device schedule, both batch-assign dialogs) now also has:
+
+- **Daily window** `From HH:mm – To HH:mm` in the store's local time (`Schedule:TimeZoneId`,
+  default `SE Asia Standard Time`). Start inclusive, end exclusive; `22:00–02:00` is an overnight
+  window. Empty = all day.
+- **Days of week** toggles Mo–Su; none selected = every day.
+- **Repeat every N min** (audio players only): the playlist becomes an *announcement*. The
+  audio player plays its items once every N minutes between the regular tracks (the first time
+  right away), never as part of the loop; an announcements-only schedule plays them from idle.
+  A screen ignores the flag and plays the playlist in its loop as before.
+
+The server evaluates all of it (`ScheduleWindow.cs`): `GET /devices/{id}/schedule` returns only
+the items active right now, `scheduleVersion` changes with these fields, `nextTransitionAtUtc`
+points at the next daily boundary, and the transition worker queues `SYNC_SCHEDULE` at daily
+start/end times and at midnight when days are restricted. The kiosk client is unchanged: it
+already re-reads the schedule on `SYNC_SCHEDULE` and every 15 minutes. Announcements travel as
+`schedule.interjections` (ignored by the kiosk) and are consumed by audio client 2.8.2.
+
+Status badges in the per-device dialog: `ACTIVE`, `WAITING` (start date ahead), `EXPIRED`,
+`OFF HOURS` (outside the daily window today), `EVERY N MIN` (announcement).
+
+## Output device (audio client 2.8.2)
+
+The audio window has an `OUT` selector listing the PC's playback devices (Windows default +
+each output). The choice is applied with `setSinkId` and remembered (`audioSinkId` in
+config.json); a device that disappears falls back to the Windows default.
+
+## Publishing an audio update
+
+```powershell
+cd C:\Singnage\_release_2.8.0
+.\run-on-server.ps1 publish-client -NoSession -ScriptArgs '-Audio -CanaryCount 1'
+```
+
+`Publish-ClientUpdate.ps1 -Audio` copies `Signage Unicorn Audio Setup <ver>.exe` to
+`/setup/Signage_Unicorn_Audio_Setup_<ver>.exe`, writes `LatestAudioClientVersion`,
+`AudioClientDownloadUrl`, `AudioClientDownloadSha256` in one transaction and queues
+`UPDATE_CLIENT` for audio devices only (`playback_mode = 'audio'`). The screen path
+(no `-Audio`) now excludes audio devices from its canary pick.
+
 ## Installing an audio box
 
-1. Install `Signage Unicorn Audio Setup 2.8.1.exe` (per user, one click). Set the Windows default
+1. Install `Signage Unicorn Audio Setup 2.8.2.exe` (per user, one click). Set the Windows default
    output device to the amplifier/speakers first; the app plays through the default device.
 2. On the setup screen: server, device name, branch, location; leave **Start hidden in tray**
    ticked for an unattended box, untick it on a desk PC. CONNECT & REGISTER.
@@ -60,10 +102,7 @@ Audio mode is decided at run time from the packaged product name (`/audio/i.test
 
 ## Updating audio boxes
 
-Publish the installer and set `LatestAudioClientVersion`, `AudioClientDownloadUrl`,
-`AudioClientDownloadSha256` (system settings), then send `UPDATE_CLIENT` to the audio devices.
-`Publish-ClientUpdate.ps1` writes the screen keys; for audio boxes set the three audio keys by hand
-until the script grows an `-Audio` switch. Screens ignore the audio keys entirely.
+See "Publishing an audio update" above. Screens ignore the audio keys entirely.
 
 ## Troubleshooting
 
