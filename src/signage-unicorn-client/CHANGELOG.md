@@ -3,6 +3,14 @@
 รายการอัปเดตและประวัติการแก้ไขระบบ (Patch Version History)
 
 ---
+## 2.8.5 — Signage Unicorn Audio: Windows 7 / 32-bit build (screens still on 2.8.0)
+
+- `npm run build:audio:win7` packages the same source with Electron 22.3.27 (last release for
+  Windows 7, ia32) from `legacy-win7/` -> `Signage Unicorn Audio Win7 Setup <version>.exe`.
+- A 32-bit build reads `AudioClientDownloadUrlWin7` / `AudioClientDownloadSha256Win7` (version key
+  shared), so Win7 boxes are never offered the x64 installer. `Publish-ClientUpdate.ps1 -Audio`
+  publishes both installers when the Win7 one is present.
+
 ## 2.8.4 — Signage Unicorn Audio: heartbeat reports the real volume (screens still on 2.8.0)
 
 - The heartbeat carries `volume` (0 when muted) so the console slider follows changes made from the

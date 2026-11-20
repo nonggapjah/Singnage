@@ -1,6 +1,6 @@
 # Signage Unicorn Audio — the audio-only player
 
-Added 20-11-2026 (API 2.8.6 -> 2.8.9, web 2.4.14 -> 2.4.17, audio client 2.8.4). An in-store sound player built from
+Added 20-11-2026 (API 2.8.6 -> 2.8.9, web 2.4.14 -> 2.4.18, audio client 2.8.5). An in-store sound player built from
 the kiosk client's code base but shipped as a **separate product**, so the screens and their
 client 2.8.0 are never touched.
 
@@ -8,7 +8,7 @@ client 2.8.0 are never touched.
 
 | | Screen (kiosk client) | Audio player |
 |---|---|---|
-| Installer | `Signage Unicorn Setup 2.8.0.exe` (unchanged; bundle `client\video-player\`) | `Signage Unicorn Audio Setup 2.8.4.exe` (`npm run build:audio`; bundle `client\music-player\`) |
+| Installer | `Signage Unicorn Setup 2.8.0.exe` (unchanged; bundle `client\video-player\`) | `Signage Unicorn Audio Setup 2.8.5.exe` (`npm run build:audio`; bundle `client\music-player\`) + `Signage Unicorn Audio Win7 Setup 2.8.5.exe` for Windows 7 / 32-bit |
 | appId / install folder / userData | `com.signage.unicorn`, `Signage Unicorn` | `com.signage.unicorn.audio`, `Signage Unicorn Audio` (can sit beside a screen client on one PC) |
 | Window | kiosk, fullscreen, always on top | 480×420 window, minimise, close = hide to tray, tray menu (Open / Mute / Volume / Skip / Restart player / Exit) |
 | Device row | `playback_mode = 'screen'` (every existing row), `device_uuid` = hardware uuid | `playback_mode = 'audio'` (sent at register), `device_uuid` = a second key derived from the hardware uuid (SHA-256), so a PC with both products has two rows |
@@ -125,9 +125,27 @@ Clean-up after the review (API 2.8.9 / web 2.4.17 / audio 2.8.4):
 - The `OFF HOURS` badge is judged in store time (`Asia/Bangkok` in `lib/daypart.ts`), not the
   admin browser's clock.
 
+## Windows 7 / 32-bit boxes (audio 2.8.5)
+
+Some music boxes are Windows 7 Pro 32-bit (Pentium G645, 2 GB). The normal build (Electron 40) needs
+Windows 10 x64, so `legacy-win7/` is a second package root that packages the SAME source with
+Electron 22.3.27 (the last release for Windows 7, ia32) and better-sqlite3 9.x:
+
+- `npm run build:audio:win7` -> `dist-audio-win7\Signage Unicorn Audio Win7 Setup <version>.exe`;
+  `npm run smoke:win7` runs the smoke harness on Electron 22 (x64) first.
+- Same product name, appId, userData and version as the x64 audio build; at run time
+  `process.arch === 'ia32'` makes it read `AudioClientDownloadUrlWin7` / `AudioClientDownloadSha256Win7`
+  (version key shared), so a Win7 box is never offered the x64 installer. When those keys are absent
+  the box simply stays on its version.
+- `Publish-ClientUpdate.ps1 -Audio` publishes the Win7 installer alongside the x64 one when it finds
+  it next to it (bundle `client\music-player\`), to `/setup/Signage_Unicorn_Audio_Win7_Setup_<v>.exe`.
+- Windows XP is impossible (no Chromium, no TLS 1.2 to Cloudflare). Windows 7 and Electron 22 are both
+  end-of-life: our fixes still ship, Chromium security fixes do not. Replace the boxes when you can;
+  a G645 runs Windows 10 x64 with 4 GB RAM and then uses the normal build.
+
 ## Installing an audio box
 
-1. Install `Signage Unicorn Audio Setup 2.8.4.exe` (per user, one click). Set the Windows default
+1. Install `Signage Unicorn Audio Setup 2.8.5.exe` (Windows 10/11 x64) or `Signage Unicorn Audio Win7 Setup 2.8.5.exe` (Windows 7 / any 32-bit Windows) (per user, one click). Set the Windows default
    output device to the amplifier/speakers first; the app plays through the default device.
 2. On the setup screen: server, device name, branch, location; leave **Start hidden in tray**
    ticked for an unattended box, untick it on a desk PC. CONNECT & REGISTER.

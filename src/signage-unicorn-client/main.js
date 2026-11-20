@@ -26,6 +26,9 @@ if (process.env.SIGNAGE_USER_DATA) app.setPath('userData', process.env.SIGNAGE_U
 // screen, registers as an 'audio' device and reads its own update keys. Detected from the packaged
 // product name; SIGNAGE_AUDIO=1 forces it in development. A screen build never enters this mode.
 const AUDIO = process.env.SIGNAGE_AUDIO === '1' || /audio/i.test(app.getName());
+// Windows 7 / 32-bit audio boxes run the Electron 22 ia32 build (legacy-win7/, 2.8.5). Same code and
+// version, but they must never be offered the x64 installer, so they read the *Win7 download keys.
+const LEGACY_WIN7 = AUDIO && process.arch === 'ia32';
 
 // The former `ignore-certificate-errors` switch is gone. It was added for kiosks whose clock had
 // drifted far enough to break TLS, but it also disabled validation for installer downloads, which
@@ -1597,7 +1600,9 @@ ipcMain.handle('fetch-update-metadata', async () => {
     // Audio player: its own keys, so publishing a screen update never reaches an audio box and
     // vice versa.
     const keys = AUDIO
-        ? ['AudioClientDownloadUrl', 'AudioClientDownloadSha256', 'LatestAudioClientVersion']
+        ? (LEGACY_WIN7
+            ? ['AudioClientDownloadUrlWin7', 'AudioClientDownloadSha256Win7', 'LatestAudioClientVersion']
+            : ['AudioClientDownloadUrl', 'AudioClientDownloadSha256', 'LatestAudioClientVersion'])
         : ['ClientDownloadUrl', 'ClientDownloadSha256', 'LatestClientVersion'];
     for (const key of keys) {
         try {

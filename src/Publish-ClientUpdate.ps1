@@ -77,12 +77,40 @@ foreach ($copy in @($TargetPath, $WebTargetPath)) {
 }
 Write-Host "   -> OK: both copies verified ($TargetPath, $WebTargetPath)" -ForegroundColor Green
 
+# 2b. Audio only: the Windows 7 / 32-bit build (Electron 22 ia32) travels with the x64 one when it sits
+# next to it. Its boxes read the *Win7 keys, so without this file they simply keep their version.
+$Win7Source = $null; $Win7Hash = $null; $Win7DownloadUrl = $null
+if ($Audio) {
+    $Win7Source = Join-Path (Split-Path -Parent $SourceFile) "Signage Unicorn Audio Win7 Setup $Version.exe"
+    if (Test-Path -LiteralPath $Win7Source) {
+        $Win7FileName = "Signage_Unicorn_Audio_Win7_Setup_$Version.exe"
+        $Win7DownloadUrl = "$($ServerUrl.TrimEnd('/'))/setup/$Win7FileName"
+        $Win7Hash = (Get-FileHash -LiteralPath $Win7Source -Algorithm SHA256).Hash.ToLowerInvariant()
+        Write-Host "2b. Win7/32-bit installer SHA-256: $Win7Hash"
+        foreach ($dir in @($TargetDir, $WebPublicDir)) {
+            $dest = Join-Path $dir $Win7FileName
+            Copy-Item -LiteralPath $Win7Source -Destination $dest -Force -ErrorAction Stop
+            $h = (Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($h -ne $Win7Hash) { throw "Copy verification FAILED for $dest (hash $h != $Win7Hash). Nothing was published." }
+        }
+        Write-Host "   -> OK: Win7 copies verified ($Win7FileName)" -ForegroundColor Green
+    } else {
+        Write-Host "2b. No Win7/32-bit installer next to the x64 one ($Win7Source): Win7 boxes keep their current version." -ForegroundColor Yellow
+        $Win7Source = $null
+    }
+}
+
 # 3. Make sure the fleet can actually reach the file before advertising it
 Write-Host "3. Checking download URL..."
 try {
     $head = Invoke-WebRequest -Uri $DownloadUrl -Method Head -UseBasicParsing -TimeoutSec 60
     if ($head.StatusCode -lt 200 -or $head.StatusCode -ge 300) { throw "HTTP $($head.StatusCode)" }
     Write-Host "   -> OK: $DownloadUrl responds $($head.StatusCode)" -ForegroundColor Green
+    if ($Win7DownloadUrl) {
+        $head7 = Invoke-WebRequest -Uri $Win7DownloadUrl -Method Head -UseBasicParsing -TimeoutSec 60
+        if ($head7.StatusCode -lt 200 -or $head7.StatusCode -ge 300) { throw "HTTP $($head7.StatusCode) for $Win7DownloadUrl" }
+        Write-Host "   -> OK: $Win7DownloadUrl responds $($head7.StatusCode)" -ForegroundColor Green
+    }
 }
 catch {
     throw "Download URL is not reachable ($($_.Exception.Message)). Database NOT updated, no command queued."
@@ -105,6 +133,10 @@ IF @@ROWCOUNT = 0
         @{ key = "${KeyPrefix}ClientDownloadUrl";   value = $DownloadUrl;  description = "Installer download URL for the latest $PlaybackMode client" },
         @{ key = "${KeyPrefix}ClientDownloadSha256"; value = $SourceHash;  description = "SHA-256 (lowercase hex) of the installer at ${KeyPrefix}ClientDownloadUrl" }
     )
+    if ($Win7DownloadUrl) {
+        $settings += @{ key = "AudioClientDownloadUrlWin7";    value = $Win7DownloadUrl; description = "Installer download URL for audio players on Windows 7 / 32-bit (Electron 22 ia32 build)" }
+        $settings += @{ key = "AudioClientDownloadSha256Win7"; value = $Win7Hash;        description = "SHA-256 (lowercase hex) of the installer at AudioClientDownloadUrlWin7" }
+    }
     foreach ($s in $settings) {
         $cmd = New-Object System.Data.SqlClient.SqlCommand($upsert, $conn, $tx)
         [void]$cmd.Parameters.AddWithValue('@key', $s.key)
@@ -113,7 +145,7 @@ IF @@ROWCOUNT = 0
         [void]$cmd.ExecuteNonQuery()
     }
     $tx.Commit()
-    Write-Host "   -> OK: Latest${KeyPrefix}ClientVersion=$Version, ${KeyPrefix}ClientDownloadUrl, ${KeyPrefix}ClientDownloadSha256 published together" -ForegroundColor Green
+    Write-Host "   -> OK: Latest${KeyPrefix}ClientVersion=$Version, ${KeyPrefix}ClientDownloadUrl, ${KeyPrefix}ClientDownloadSha256$(if ($Win7DownloadUrl) { ', AudioClientDownloadUrlWin7, AudioClientDownloadSha256Win7' }) published together" -ForegroundColor Green
 }
 catch {
     try { $tx.Rollback() } catch { }

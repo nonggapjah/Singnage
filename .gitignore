@@ -145,3 +145,9 @@ src/signage-unicorn-client/dist-audio/
 
 # Workspace operations folder (release bundles, reviews, the real .env): NEVER committed - the GitHub repo is public
 _ops/
+
+# Windows 7 / 32-bit audio build: a second package root; only its package.json + README are source
+src/signage-unicorn-client/dist-audio-win7/
+src/signage-unicorn-client/legacy-win7/*
+!src/signage-unicorn-client/legacy-win7/package.json
+!src/signage-unicorn-client/legacy-win7/README.md
