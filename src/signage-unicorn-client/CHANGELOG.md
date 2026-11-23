@@ -9,6 +9,9 @@
   the next heartbeat reports it, so a whole branch of music boxes can be re-homed from the Audio
   Players page (web 2.4.19 batch bar, "Change branch") instead of opening each player's settings.
   The branch code was only editable on the device until now because every heartbeat re-sends it.
+  A failed config write acks FAILED and keeps the old branch; a redelivered older SET_BRANCH cannot
+  undo a newer one (issue time kept as `branchSetAt`); the schedule is reloaded right after the first
+  heartbeat that carries the new branch, so sibling inheritance switches at once (Codex review).
 
 ## 2.8.5 — Signage Unicorn Audio: Windows 7 / 32-bit build (screens still on 2.8.0)
 

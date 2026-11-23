@@ -46,6 +46,7 @@ let volume = 50;
 let isMuted = true;
 let isUpdating = false;
 let isHeartbeating = false;  // Guard: prevent concurrent heartbeat calls
+let branchRefreshPending = false; // SET_BRANCH applied: reload the schedule once a heartbeat has carried the new branch
 let isBootReportSent = false; // Boot Report: send full device info once
 let cachedMachineUuid = null;
 let cachedMacAddress = null;  // BUG-03: stable hardware id so the server can merge identities on upgrade
@@ -986,6 +987,14 @@ async function sync() {
         heartbeatRetryTimer = null;
     }
 
+    if (branchRefreshPending) {
+        // SET_BRANCH: the heartbeat that just succeeded carried the new branch, so sibling inheritance
+        // now resolves there; without this a player kept the old branch's schedule until the periodic refresh.
+        branchRefreshPending = false;
+        addLog('Branch changed: reloading the schedule for the new branch.', 'info', true);
+        await loadPlaylist('SCHEDULE');
+    }
+
     if (commands.length > 0) {
         await processCommands(commands);
     }
@@ -1138,20 +1147,33 @@ async function executeCommand(cmd, type) {
         // change it on its own; it asks us, we save it, and the next heartbeat carries it back.
         const newBranch = type.slice('SET_BRANCH:'.length).trim();
         if (!newBranch || newBranch.length > 39) { await ackCommand(cmd, 'FAILED', 'bad branch code'); return; }
+        // Commands whose ack was lost are redelivered after the server lease; an older SET_BRANCH must
+        // not undo a newer one, so the issue time of the last applied change is kept in the config.
+        const issuedAt = Date.parse(cmd.createdAt || '');
+        const lastAppliedAt = Date.parse(config.branchSetAt || '');
+        if (!isNaN(issuedAt) && !isNaN(lastAppliedAt) && issuedAt < lastAppliedAt) {
+            addLog(`Ignoring stale branch command ${newBranch} (issued before the current branch ${config.branchCode || '-'} was set).`, 'warn', true);
+            await ackCommand(cmd, 'EXECUTED', 'superseded');
+            return;
+        }
         if (newBranch !== String(config.branchCode || '')) {
             const prevBranch = config.branchCode;
+            const prevSetAt = config.branchSetAt;
             config.branchCode = newBranch;
+            config.branchSetAt = new Date(isNaN(issuedAt) ? Date.now() : issuedAt).toISOString();
             // save-config reports write failures as { success: false }; ack FAILED and keep the old
             // value in memory too, otherwise heartbeats would carry a branch that a restart reverts.
             const saved = await ipcRenderer.invoke('save-config', config);
             if (!saved || saved.success === false) {
                 config.branchCode = prevBranch;
+                config.branchSetAt = prevSetAt;
                 const reason = (saved && saved.error) || 'config save failed';
                 addLog(`Branch change to ${newBranch} not saved: ${reason}`, 'error', true);
                 await ackCommand(cmd, 'FAILED', reason);
                 return;
             }
             addLog(`Branch changed by console: ${prevBranch || '-'} -> ${newBranch}`, 'info', true);
+            branchRefreshPending = true; // sync() reloads the schedule after the next successful heartbeat
             const field = document.getElementById('dash-branch-code');
             if (field) field.value = newBranch;
             if (AUDIO_MODE) updateAudioPanel();
