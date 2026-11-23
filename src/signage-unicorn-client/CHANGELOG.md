@@ -3,6 +3,13 @@
 รายการอัปเดตและประวัติการแก้ไขระบบ (Patch Version History)
 
 ---
+## 2.8.6 — Signage Unicorn Audio: branch change from the console (screens still on 2.8.0)
+
+- New command `SET_BRANCH:<code>`: the player saves the branch code in its config, acknowledges, and
+  the next heartbeat reports it, so a whole branch of music boxes can be re-homed from the Audio
+  Players page (web 2.4.19 batch bar, "Change branch") instead of opening each player's settings.
+  The branch code was only editable on the device until now because every heartbeat re-sends it.
+
 ## 2.8.5 — Signage Unicorn Audio: Windows 7 / 32-bit build (screens still on 2.8.0)
 
 - `npm run build:audio:win7` packages the same source with Electron 22.3.27 (last release for

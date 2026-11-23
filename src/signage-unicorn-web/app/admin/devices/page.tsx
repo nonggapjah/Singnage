@@ -145,6 +145,12 @@ export default function DevicesPage({ mode = 'screen' }: { mode?: 'screen' | 'au
     // Modal State
     const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
     const [isBatchRemoveModalOpen, setIsBatchRemoveModalOpen] = useState(false);
+    // web 2.4.19: Change branch (audio players 2.8.6+; the player owns its branch code and re-sends it
+    // on every heartbeat, so the console asks the player to change it instead of editing the row).
+    const [isBranchModalOpen, setIsBranchModalOpen] = useState(false);
+    const [branchInput, setBranchInput] = useState('');
+    const [branchBusy, setBranchBusy] = useState(false);
+    const branchInputRef = useRef<HTMLInputElement | null>(null);
     const [isBatchAssignModalOpen, setIsBatchAssignModalOpen] = useState(false);
     const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
     const [activeScreenshotDeviceId, setActiveScreenshotDeviceId] = useState<string | null>(null);
@@ -286,6 +292,27 @@ export default function DevicesPage({ mode = 'screen' }: { mode?: 'screen' | 'au
                 }
             }
         );
+    }
+
+    async function handleBatchSetBranch() {
+        const code = branchInput.trim();
+        if (selectedIds.length === 0 || !code || branchBusy) return;
+        setBranchBusy(true);
+        try {
+            const res = await deviceApi.batchSendCommand(selectedIds, `SET_BRANCH:${code}`);
+            if (res.success) {
+                showNotify('Branch change queued', `${selectedIds.length} ${selectedIds.length === 1 ? 'player' : 'players'} will move to branch ${code} on their next check-in (players 2.8.6 or newer).`, 'SUCCESS');
+                setIsBranchModalOpen(false);
+                setBranchInput('');
+                setSelectedIds([]);
+            } else {
+                showNotify('Branch change failed', res.message || 'Unknown error', 'ERROR');
+            }
+        } catch {
+            showNotify('Error', 'A critical error occurred while sending the branch change.', 'ERROR');
+        } finally {
+            setBranchBusy(false);
+        }
     }
 
     async function handleClearSchedule(deviceIds: string[]) {
@@ -1225,6 +1252,58 @@ export default function DevicesPage({ mode = 'screen' }: { mode?: 'screen' | 'au
                 />
             )}
 
+            <Modal
+                isOpen={isBranchModalOpen}
+                onClose={() => { if (!branchBusy) setIsBranchModalOpen(false); }}
+                size="md"
+                labelledBy="branch-modal-title"
+                describedBy="branch-modal-desc"
+                showClose
+                closeDisabled={branchBusy}
+                initialFocusRef={branchInputRef}
+                className="p-6 space-y-5 bg-card-solid"
+            >
+                <form
+                    onSubmit={(e) => { e.preventDefault(); void handleBatchSetBranch(); }}
+                    className="space-y-5"
+                >
+                    <div className="pr-10">
+                        <h3 id="branch-modal-title" className="text-xl font-bold uppercase tracking-wider text-accent-purple">Change branch</h3>
+                        <p id="branch-modal-desc" className="text-sm text-muted-foreground mt-2">
+                            {selectedIds.length} selected {selectedIds.length === 1 ? 'player' : 'players'}
+                            {(() => {
+                                const current = Array.from(new Set(devices.filter(d => selectedIds.includes(d.deviceId)).map(d => d.branchCode || 'UNASSIGNED')));
+                                return current.length > 0 ? ` currently in ${current.length === 1 ? 'branch' : 'branches'} ${current.join(', ')}` : '';
+                            })()}.
+                            Each player saves the new code and reports it on its next check-in, usually within a minute.
+                            Players older than 2.8.6 ignore this command.
+                        </p>
+                    </div>
+                    <div className="space-y-2">
+                        <label htmlFor="branch-new-code" className="block text-xs font-bold text-muted-foreground uppercase tracking-widest">New branch code</label>
+                        <input
+                            id="branch-new-code"
+                            ref={branchInputRef}
+                            type="text"
+                            value={branchInput}
+                            onChange={(e) => setBranchInput(e.target.value)}
+                            maxLength={30}
+                            autoComplete="off"
+                            spellCheck={false}
+                            placeholder="e.g. MUSIC"
+                            className="w-full px-4 py-3 bg-muted/20 border border-border rounded-lg text-base font-mono tracking-wide text-foreground focus:border-accent-purple focus:ring-1 focus:ring-accent-purple/30 outline-none transition-colors placeholder:text-muted-foreground"
+                        />
+                        <p className="text-xs text-muted-foreground">Up to 30 characters. Playlists assigned directly to a player stay with it; a player without its own playlist follows a same-named sibling in the new branch.</p>
+                    </div>
+                    <div className="flex items-center justify-end gap-3 pt-1">
+                        <button type="button" onClick={() => setIsBranchModalOpen(false)} disabled={branchBusy} className="px-5 py-2 rounded-xl bg-muted/30 text-foreground font-bold uppercase tracking-widest text-xs hover:bg-muted/50 transition-colors disabled:opacity-50">Cancel</button>
+                        <button type="submit" disabled={branchBusy || branchInput.trim().length === 0} className="px-5 py-2 rounded-xl bg-accent-purple text-white font-black uppercase tracking-widest text-xs hover:brightness-110 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                            {branchBusy ? 'Sending…' : `Move ${selectedIds.length} ${selectedIds.length === 1 ? 'player' : 'players'}`}
+                        </button>
+                    </div>
+                </form>
+            </Modal>
+
             {isBatchAssignModalOpen && (
                 <BatchAssignPlaylistModal
                     isOpen={isBatchAssignModalOpen}
@@ -1306,6 +1385,15 @@ export default function DevicesPage({ mode = 'screen' }: { mode?: 'screen' | 'au
                         >
                             Update client
                         </button>
+                        {isAudioPage && (
+                            <button
+                                type="button"
+                                onClick={() => { setBranchInput(''); setIsBranchModalOpen(true); }}
+                                className="px-5 py-2 rounded-xl bg-accent-purple/15 text-accent-purple border border-accent-purple/40 font-black uppercase tracking-widest text-xs hover:bg-accent-purple hover:text-white transition-colors"
+                            >
+                                Change branch
+                            </button>
+                        )}
                     </div>
 
                     <div className="border-l border-border pl-6">

@@ -1132,6 +1132,25 @@ async function executeCommand(cmd, type) {
         return;
     }
 
+    if (type.startsWith('SET_BRANCH:')) {
+        // Console "Change branch" (web 2.4.19, batch bar on the Audio Players page). The branch code
+        // lives in this device's config and is re-sent on every heartbeat, so the server cannot
+        // change it on its own; it asks us, we save it, and the next heartbeat carries it back.
+        const newBranch = type.slice('SET_BRANCH:'.length).trim();
+        if (!newBranch || newBranch.length > 39) { await ackCommand(cmd, 'FAILED', 'bad branch code'); return; }
+        if (newBranch !== String(config.branchCode || '')) {
+            addLog(`Branch changed by console: ${config.branchCode || '-'} -> ${newBranch}`, 'info', true);
+            config.branchCode = newBranch;
+            await ipcRenderer.invoke('save-config', config);
+            const field = document.getElementById('dash-branch-code');
+            if (field) field.value = newBranch;
+            if (AUDIO_MODE) updateAudioPanel();
+            showHUD(`BRANCH ${newBranch}`);
+        }
+        await ackCommand(cmd, 'EXECUTED');
+        return;
+    }
+
     if (type === 'UPDATE_CLIENT') {
         await runClientUpdate(cmd);
         return;
