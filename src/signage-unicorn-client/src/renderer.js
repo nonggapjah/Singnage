@@ -1139,9 +1139,19 @@ async function executeCommand(cmd, type) {
         const newBranch = type.slice('SET_BRANCH:'.length).trim();
         if (!newBranch || newBranch.length > 39) { await ackCommand(cmd, 'FAILED', 'bad branch code'); return; }
         if (newBranch !== String(config.branchCode || '')) {
-            addLog(`Branch changed by console: ${config.branchCode || '-'} -> ${newBranch}`, 'info', true);
+            const prevBranch = config.branchCode;
             config.branchCode = newBranch;
-            await ipcRenderer.invoke('save-config', config);
+            // save-config reports write failures as { success: false }; ack FAILED and keep the old
+            // value in memory too, otherwise heartbeats would carry a branch that a restart reverts.
+            const saved = await ipcRenderer.invoke('save-config', config);
+            if (!saved || saved.success === false) {
+                config.branchCode = prevBranch;
+                const reason = (saved && saved.error) || 'config save failed';
+                addLog(`Branch change to ${newBranch} not saved: ${reason}`, 'error', true);
+                await ackCommand(cmd, 'FAILED', reason);
+                return;
+            }
+            addLog(`Branch changed by console: ${prevBranch || '-'} -> ${newBranch}`, 'info', true);
             const field = document.getElementById('dash-branch-code');
             if (field) field.value = newBranch;
             if (AUDIO_MODE) updateAudioPanel();
