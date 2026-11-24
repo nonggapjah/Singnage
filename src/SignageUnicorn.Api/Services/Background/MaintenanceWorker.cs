@@ -70,12 +70,18 @@ namespace SignageUnicorn.Api.Services.Background
         }
 
         // Automatically retires the old device record left behind when a screen is upgraded and
-        // re-registers under a new hardware identity. A "ghost" is an old-identity device
-        // (device_uuid like 'WIN-<computername>') that has gone offline and is superseded by a LIVE
-        // new-identity device of the same branch + device name. Only already-upgraded branches are
-        // touched; the 1-hour offline grace ignores brief reboots/network blips. Soft-delete is
-        // self-healing: a real screen merely powered off re-registers (and auto-plays via sibling
-        // schedule inheritance) on its next boot.
+        // comes back as a new row: a row that has gone silent for an hour and is superseded by a LIVE
+        // row of the same branch + device name + playback mode that APPEARED after it went silent
+        // (within 24 h). API 2.8.11: the uuid prefix no longer takes part - a 2.8.8 client on a box
+        // where wmic fails still reports the WIN-<computername> fallback uuid yet registers a new row
+        // (its device key changed), so 'WIN- ghost / non-WIN twin' missed four of the first six
+        // upgraded screens (Kamala 625/626/628, homepro 627) and left their old rows live forever.
+        // Superseded-ness needs upgrade evidence (Codex P1 on 2.8.11): either the classic
+        // old-identity -> new-identity uuid change, or an UPDATE_CLIENT the old row acknowledged in
+        // the two hours before the new row registered. The created_at window on top keeps same-name
+        // screens that are switched off overnight safe. Soft-delete is self-healing: a real screen
+        // merely powered off re-registers (and auto-plays via sibling schedule inheritance) on its
+        // next boot.
         private async Task RetireSupersededDevicesAsync()
         {
             using var scope = _serviceProvider.CreateScope();
@@ -96,12 +102,11 @@ namespace SignageUnicorn.Api.Services.Background
                 var carryOver = @"
                     DECLARE @copied TABLE (twin_id BIGINT);
                     ;WITH ghosts AS (
-                        SELECT g.device_id, g.branch_code, g.device_name,
+                        SELECT g.device_id, g.device_uuid, g.branch_code, g.device_name,
                                ISNULL(g.playback_mode, 'screen') AS mode,
                                ISNULL(g.last_check_in, g.created_at) AS silent_since
                         FROM sn_devices g
-                        WHERE g.device_uuid LIKE 'WIN-%'
-                          AND ((g.is_deleted = 0 AND (g.last_check_in IS NULL OR g.last_check_in < DATEADD(HOUR, -1, SYSUTCDATETIME())))
+                        WHERE ((g.is_deleted = 0 AND (g.last_check_in IS NULL OR g.last_check_in < DATEADD(HOUR, -1, SYSUTCDATETIME())))
                                OR (g.is_deleted = 1 AND g.deleted_at > DATEADD(DAY, -7, SYSUTCDATETIME())))
                           AND EXISTS (SELECT 1 FROM sn_device_playlists gp WHERE gp.device_id = g.device_id AND gp.is_active = 1)
                     ), pairs AS (
@@ -110,7 +115,7 @@ namespace SignageUnicorn.Api.Services.Background
                         FROM ghosts gh
                         JOIN sn_devices n
                           ON n.is_deleted = 0
-                         AND n.device_uuid NOT LIKE 'WIN-%'
+                         AND n.device_id <> gh.device_id
                          AND LTRIM(RTRIM(n.branch_code)) = LTRIM(RTRIM(gh.branch_code))
                          AND LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(n.device_name, ' ', CHAR(1)+CHAR(2)), CHAR(2)+CHAR(1), ''), CHAR(1)+CHAR(2), ' ')))
                              COLLATE SQL_Latin1_General_CP1_CI_AS
@@ -120,6 +125,16 @@ namespace SignageUnicorn.Api.Services.Background
                          AND n.last_check_in > DATEADD(MINUTE, -5, SYSUTCDATETIME())
                          AND n.created_at > gh.silent_since
                          AND n.created_at < DATEADD(HOUR, 24, gh.silent_since)
+                         -- Review 2.8.11 (Codex P1): same name + timing alone would also pair a real
+                         -- powered-off screen with an unrelated extra screen installed the same day.
+                         -- Require upgrade evidence: the classic old-identity -> new-identity change,
+                         -- or an UPDATE_CLIENT the ghost acknowledged shortly before the twin appeared.
+                         AND ((gh.device_uuid LIKE 'WIN-%' AND n.device_uuid NOT LIKE 'WIN-%')
+                              OR EXISTS (SELECT 1 FROM sn_device_commands uc
+                                         WHERE uc.device_id = gh.device_id AND uc.command_type = 'UPDATE_CLIENT'
+                                           AND uc.status = 'EXECUTED' AND uc.is_deleted = 0
+                                           AND uc.updated_at > DATEADD(HOUR, -2, n.created_at)
+                                           AND uc.updated_at <= DATEADD(MINUTE, 5, n.created_at)))
                         WHERE ISNULL(n.schedule_mode, '') <> 'explicit'
                           AND NOT EXISTS (SELECT 1 FROM sn_device_playlists tp WHERE tp.device_id = n.device_id AND tp.is_active = 1)
                     )
@@ -144,14 +159,17 @@ namespace SignageUnicorn.Api.Services.Background
                     UPDATE sn_devices
                     SET is_deleted = 1, status = 'OFFLINE', deleted_at = SYSUTCDATETIME()
                     WHERE is_deleted = 0
-                      AND device_uuid LIKE 'WIN-%'
                       AND (last_check_in IS NULL OR last_check_in < DATEADD(HOUR, -1, SYSUTCDATETIME()))
                       AND EXISTS (
                             SELECT 1 FROM sn_devices n
                             WHERE n.is_deleted = 0
-                              AND n.device_uuid NOT LIKE 'WIN-%'
-                              AND n.branch_code = sn_devices.branch_code
-                              AND n.device_name = sn_devices.device_name
+                              AND n.device_id <> sn_devices.device_id
+                              AND ISNULL(n.playback_mode, 'screen') = ISNULL(sn_devices.playback_mode, 'screen')
+                              AND LTRIM(RTRIM(n.branch_code)) = LTRIM(RTRIM(sn_devices.branch_code))
+                              AND LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(n.device_name, ' ', CHAR(1)+CHAR(2)), CHAR(2)+CHAR(1), ''), CHAR(1)+CHAR(2), ' ')))
+                                  COLLATE SQL_Latin1_General_CP1_CI_AS
+                                  = LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(sn_devices.device_name, ' ', CHAR(1)+CHAR(2)), CHAR(2)+CHAR(1), ''), CHAR(1)+CHAR(2), ' ')))
+                                  COLLATE SQL_Latin1_General_CP1_CI_AS
                               AND n.last_check_in > DATEADD(MINUTE, -5, SYSUTCDATETIME())
                               -- The twin must have APPEARED after this row went silent, and within a day
                               -- of it (an upgrade re-registers within hours). A WIN- row that kept
@@ -161,7 +179,14 @@ namespace SignageUnicorn.Api.Services.Background
                               -- retired them every night and the morning heartbeat re-created them as
                               -- new rows, which also dropped their playlist assignments.
                               AND n.created_at > ISNULL(sn_devices.last_check_in, sn_devices.created_at)
-                              AND n.created_at < DATEADD(HOUR, 24, ISNULL(sn_devices.last_check_in, sn_devices.created_at)));";
+                              AND n.created_at < DATEADD(HOUR, 24, ISNULL(sn_devices.last_check_in, sn_devices.created_at))
+                              -- Review 2.8.11 (Codex P1): upgrade evidence, same as the carry-over above.
+                              AND ((sn_devices.device_uuid LIKE 'WIN-%' AND n.device_uuid NOT LIKE 'WIN-%')
+                                   OR EXISTS (SELECT 1 FROM sn_device_commands uc
+                                              WHERE uc.device_id = sn_devices.device_id AND uc.command_type = 'UPDATE_CLIENT'
+                                                AND uc.status = 'EXECUTED' AND uc.is_deleted = 0
+                                                AND uc.updated_at > DATEADD(HOUR, -2, n.created_at)
+                                                AND uc.updated_at <= DATEADD(MINUTE, 5, n.created_at))));";
                 await deviceRepo.ExecuteSqlAsync(sql);
                 _logger.LogInformation("[Maintenance] Ghost assignments carried over to their upgraded twins and superseded ghost devices retired (if any).");
             }
@@ -271,7 +296,7 @@ namespace SignageUnicorn.Api.Services.Background
                         DECLARE @Deleted INT = 1;
                         WHILE @Deleted > 0
                         BEGIN
-                            DELETE TOP (5000) FROM sn_device_commands WHERE created_at < DATEADD(day, -7, SYSUTCDATETIME()) AND status <> 'PENDING';
+                            DELETE TOP (5000) FROM sn_device_commands WHERE created_at < DATEADD(day, -7, SYSUTCDATETIME()) AND ISNULL(updated_at, created_at) < DATEADD(day, -7, SYSUTCDATETIME()) AND status <> 'PENDING'; -- 2.8.11: a recently acknowledged UPDATE_CLIENT is upgrade evidence for the ghost retire
                             SET @Deleted = @@ROWCOUNT;
                         END";
                     await deviceRepo.ExecuteSqlAsync(sql2);
