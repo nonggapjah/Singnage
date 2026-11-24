@@ -85,6 +85,12 @@ cd C:\Singnage\Singnage\_ops\_release_2.8.0
 .\run-on-server.ps1 publish-client -NoSession -ScriptArgs '-Audio -CanaryCount 1'
 ```
 
+A new installer version needs the web app restarted between two publish runs: the first
+`publish-client` copies the exe into `public/setup` and then fails its URL check with 404 (Next
+lists `public/` only at startup), so run `restart-web` and `publish-client` again. The second run
+queues the canary. Running `restart-web` before the first publish does not help, because the file
+is not in `public/setup` yet.
+
 `Publish-ClientUpdate.ps1 -Audio` copies `Signage Unicorn Audio Setup <ver>.exe` to
 `/setup/Signage_Unicorn_Audio_Setup_<ver>.exe`, writes `LatestAudioClientVersion`,
 `AudioClientDownloadUrl`, `AudioClientDownloadSha256` in one transaction and queues
