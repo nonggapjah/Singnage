@@ -3,6 +3,20 @@
 รายการอัปเดตและประวัติการแก้ไขระบบ (Patch Version History)
 
 ---
+## 2.8.7 — Signage Unicorn Audio: update launcher retries and reports (screens still on 2.8.0)
+
+- The update launcher writes every installer attempt (exit code, duration, retry) to
+  `<userData>\update-result.log`; the player uploads it to the server log at the next boot as
+  "Update launcher result: ...", so a slow or failed update is explained instead of guessed.
+- A failed installer is retried once after 60 s before the previous version is restarted
+  (23-11-2026: two of fifteen players failed the first run and passed the re-queue 15 min later).
+- Startup jingle: `/api/v1/media/{id}` returns a relative blobUrl, which the downloader rejected
+  ("Jingle download failed: Invalid URL"); it is now resolved against the server.
+- "Branch changed by console" is uploaded to the server log as WARN (audit trail for Change branch;
+  the API keeps only WARN/ERROR lines).
+- Codex review: a `%` in the install/user-data path no longer breaks the launcher batch (escaped as
+  `%%`); the update log is handed to the renderer once per boot, not again after every reload.
+
 ## 2.8.6 — Signage Unicorn Audio: branch change from the console (screens still on 2.8.0)
 
 - New command `SET_BRANCH:<code>`: the player saves the branch code in its config, acknowledges, and

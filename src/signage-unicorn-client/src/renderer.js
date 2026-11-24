@@ -313,6 +313,11 @@ async function init() {
     config = await ipcRenderer.invoke('get-config');
     try { appInfo = await ipcRenderer.invoke('get-app-info'); } catch (e) { appInfo = null; }
     AUDIO_MODE = !!(appInfo && appInfo.audioMode);
+    // 2.8.7: what the update launcher recorded about the last installer run (exit codes, retry),
+    // uploaded to the server log (config is loaded, so addLog queues it for the device).
+    if (appInfo && appInfo.updateResult) {
+        addLog(`Update launcher result: ${String(appInfo.updateResult).replace(/\s*\r?\n\s*/g, ' | ')}`, 'warn');
+    }
     if (AUDIO_MODE) enterAudioMode();
     // Audio player: sound is the whole point, so it starts unmuted at 70 %. Screens keep their
     // muted-by-default behaviour.
@@ -385,7 +390,10 @@ async function syncJingle() {
             if (mediaData && mediaData.success && mediaData.data && mediaData.data.blobUrl) {
                 const m = mediaData.data;
                 const cacheName = 'jingle_' + cacheNameFor(m);
-                const dl = await ipcRenderer.invoke('download-media', { url: m.blobUrl, cacheName, fileHash: m.fileHash });
+                // 2.8.7: /api/v1/media/{id} returns a relative blobUrl ("/media/..."); the downloader
+                // only accepts absolute URLs, so the jingle never downloaded ("Invalid URL" on Bukis).
+                const jingleUrl = /^https?:\/\//i.test(String(m.blobUrl)) ? m.blobUrl : serverUrl(String(m.blobUrl).startsWith('/') ? m.blobUrl : '/' + m.blobUrl);
+                const dl = await ipcRenderer.invoke('download-media', { url: jingleUrl, cacheName, fileHash: m.fileHash });
                 if (dl && dl.success) {
                     jingleEl.src = await ipcRenderer.invoke('resolve-media-url', { cacheName });
                     localStorage.setItem('safety_jingle_cache', cacheName);
@@ -1172,7 +1180,7 @@ async function executeCommand(cmd, type) {
                 await ackCommand(cmd, 'FAILED', reason);
                 return;
             }
-            addLog(`Branch changed by console: ${prevBranch || '-'} -> ${newBranch}`, 'info', true);
+            addLog(`Branch changed by console: ${prevBranch || '-'} -> ${newBranch}`, 'warn'); // uploaded as WARN: the API keeps only WARN/ERROR (SystemLogController.IsKeptLevel)
             branchRefreshPending = true; // sync() reloads the schedule after the next successful heartbeat
             const field = document.getElementById('dash-branch-code');
             if (field) field.value = newBranch;

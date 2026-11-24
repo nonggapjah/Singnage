@@ -172,6 +172,9 @@ const DB_PATH = path.join(USER_DATA, 'player_offline.db');
 const HEALTH_PATH = path.join(USER_DATA, 'health.json');
 const UPDATE_LOCK_PATH = path.join(USER_DATA, 'update.lock');
 const UPDATE_LOCK_MAX_AGE_MS = 30 * 60 * 1000;
+// 2.8.7: the update launcher appends every installer attempt (exit code, retry) here; the renderer
+// uploads it once at the next boot so a slow or failed update can be explained from the console.
+const UPDATE_RESULT_PATH = path.join(USER_DATA, 'update-result.log');
 const DEFAULT_CONFIG = { serverIp: 'https://signage.aith123.com', deviceId: null, deviceName: null, branchCode: '1000' };
 const LOG_DIR = path.join(USER_DATA, 'logs');
 
@@ -991,7 +994,26 @@ function createAudioTray() {
     }
 }
 
-ipcMain.handle('get-app-info', () => ({ version: app.getVersion(), audioMode: AUDIO, productName: app.getName(), platform: process.platform }));
+// Hands the launcher's update-result.log to the renderer exactly once per boot (then keeps it as
+// update-result.log.last for a technician), so the lines reach the server log via addLog().
+// Review 2.8.7 (Codex #3): later calls (F5, remote reload, renderer self-recovery re-running init())
+// get '' so the same lines are not uploaded again.
+let updateResultTaken = false;
+async function takeUpdateResult() {
+    if (updateResultTaken) return '';
+    updateResultTaken = true;
+    try {
+        if (await fs.pathExists(UPDATE_RESULT_PATH)) {
+            const text = String(await fs.readFile(UPDATE_RESULT_PATH, 'utf8')).trim();
+            await fs.move(UPDATE_RESULT_PATH, `${UPDATE_RESULT_PATH}.last`, { overwrite: true });
+            return text.slice(-1500);
+        }
+    } catch (e) {
+        console.warn(`[UPDATE] Could not read update-result.log: ${e.message}`);
+    }
+    return '';
+}
+ipcMain.handle('get-app-info', async () => ({ version: app.getVersion(), audioMode: AUDIO, productName: app.getName(), platform: process.platform, updateResult: await takeUpdateResult() }));
 
 ipcMain.handle('hide-to-tray', () => {
     if (AUDIO && mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
@@ -1654,24 +1676,45 @@ ipcMain.handle('launch-installer', async (event, filePath, meta) => {
             'Programs', productDir, `${productDir}.exe`
         );
 
+        const targetVersion = meta && meta.version ? String(meta.version) : 'unknown';
+        // 2.8.7: every attempt is written to update-result.log (uploaded at the next boot) and a
+        // failed installer is retried once after 60 s before the previous version is restarted:
+        // on 23-11-2026 two players failed the first run (fresh unsigned 90 MB exe, antivirus
+        // first-execution scan) and succeeded on the manual re-queue 15 minutes later.
+        // Review 2.8.7 (Codex #2): a literal % in a path (e.g. SIGNAGE_USER_DATA=C:\Player%SITE%\data) would be
+        // expanded by cmd when the launcher runs; %% is a literal % inside a batch file.
+        const bat = (v) => String(v).replace(/%/g, '%%');
         const batContent = `@echo off
+set "LOGF=${bat(UPDATE_RESULT_PATH)}"
+set "ATTEMPT=1"
 echo Waiting for app to close...
 ping -n 6 127.0.0.1 >nul
-echo Running Installer: "${resolved}"
-start /wait "" "${resolved}" /S
-if %ERRORLEVEL% NEQ 0 (
-    echo Installer failed with code %ERRORLEVEL%. Restarting old version...
-    del "${UPDATE_LOCK_PATH}" >nul 2>&1
-    start "" "${appExePath}"
-    ping -n 6 127.0.0.1 >nul
-    exit /b %ERRORLEVEL%
-)
+:run
+>>"%LOGF%" echo [%DATE% %TIME%] attempt %ATTEMPT%: start installer ${bat(targetVersion)} from "${bat(resolved)}"
+start /wait "" "${bat(resolved)}" /S
+set "RC=%ERRORLEVEL%"
+>>"%LOGF%" echo [%DATE% %TIME%] attempt %ATTEMPT%: installer exit code %RC%
+if "%RC%"=="0" goto ok
+if "%ATTEMPT%"=="2" goto fail
+set "ATTEMPT=2"
+>>"%LOGF%" echo [%DATE% %TIME%] retrying once in 60 s
+ping -n 61 127.0.0.1 >nul
+goto run
+:fail
+>>"%LOGF%" echo [%DATE% %TIME%] giving up, restarting the previous version
+echo Installer failed with code %RC%. Restarting old version...
+del "${bat(UPDATE_LOCK_PATH)}" >nul 2>&1
+start "" "${bat(appExePath)}"
+ping -n 6 127.0.0.1 >nul
+exit /b %RC%
+:ok
+>>"%LOGF%" echo [%DATE% %TIME%] installed ${bat(targetVersion)}, starting the app
 echo Installer finished. Starting app again...
 ping -n 6 127.0.0.1 >nul
-if exist "${defaultInstallExe}" (
-    start "" "${defaultInstallExe}"
+if exist "${bat(defaultInstallExe)}" (
+    start "" "${bat(defaultInstallExe)}"
 ) else (
-    start "" "${appExePath}"
+    start "" "${bat(appExePath)}"
 )
 del "%~f0"
 `;

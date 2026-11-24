@@ -1,6 +1,6 @@
 # Signage Unicorn Audio — the audio-only player
 
-Added 20-11-2026 (API 2.8.6 -> 2.8.9, web 2.4.14 -> 2.4.19, audio client 2.8.6). An in-store sound player built from
+Added 20-11-2026 (API 2.8.6 -> 2.8.9, web 2.4.14 -> 2.4.19, audio client 2.8.7). An in-store sound player built from
 the kiosk client's code base but shipped as a **separate product**, so the screens and their
 client 2.8.0 are never touched.
 
@@ -8,7 +8,7 @@ client 2.8.0 are never touched.
 
 | | Screen (kiosk client) | Audio player |
 |---|---|---|
-| Installer | `Signage Unicorn Setup 2.8.0.exe` (unchanged; bundle `client\video-player\`) | `Signage Unicorn Audio Setup 2.8.6.exe` (`npm run build:audio`; bundle `client\music-player\`) + `Signage Unicorn Audio Win7 Setup 2.8.6.exe` for Windows 7 / 32-bit |
+| Installer | `Signage Unicorn Setup 2.8.0.exe` (unchanged; bundle `client\video-player\`) | `Signage Unicorn Audio Setup 2.8.7.exe` (`npm run build:audio`; bundle `client\music-player\`) + `Signage Unicorn Audio Win7 Setup 2.8.7.exe` for Windows 7 / 32-bit |
 | appId / install folder / userData | `com.signage.unicorn`, `Signage Unicorn` | `com.signage.unicorn.audio`, `Signage Unicorn Audio` (can sit beside a screen client on one PC) |
 | Window | kiosk, fullscreen, always on top | 480×420 window, minimise, close = hide to tray, tray menu (Open / Mute / Volume / Skip / Restart player / Exit) |
 | Device row | `playback_mode = 'screen'` (every existing row), `device_uuid` = hardware uuid | `playback_mode = 'audio'` (sent at register), `device_uuid` = a second key derived from the hardware uuid (SHA-256), so a PC with both products has two rows |
@@ -125,6 +125,25 @@ Clean-up after the review (API 2.8.9 / web 2.4.17 / audio 2.8.4):
 - The `OFF HOURS` badge is judged in store time (`Asia/Bangkok` in `lib/daypart.ts`), not the
   admin browser's clock.
 
+## Rollout pacing and update diagnostics (audio 2.8.7)
+
+23-11-2026, 2.8.6 rollout to 15 players: 13 updated in 1-4 min; King Square (611) and Bukis (619)
+downloaded and SHA-verified fine but their first installer run exited non-zero (fast on Bukis,
+7.5 min on the slow King Square box) and the launcher restarted the old version as designed; the
+manual re-queue 15 min later installed in 30-50 s. Downloads were also 2-3x slower because three
+batches were queued within two minutes (nine simultaneous 90 MB downloads from one server link).
+
+- Pace the rollout: `publish-client -Audio -CanaryCount 1`, watch it, then `-CanaryCount 5` per
+  run (the wrapper caps at 5) and wait for each batch to report the new version before the next.
+- 2.8.7 launcher: every attempt goes to `<userData>\update-result.log`, one automatic retry after
+  60 s, and the player uploads the log at the next boot ("Update launcher result: ..." in the
+  system log).
+- `run-on-server.ps1 update-why -NoSession -ScriptArgs '-DeviceIds 611,619 -Hours 3'` (read-only
+  bundle step) prints the UPDATE_CLIENT history with fail_reason and the players' own update log
+  lines; `canary-watch -DeviceIds a,b,c` accepts a list.
+- Still open: the installer is unsigned, so a fresh 90 MB exe gets an antivirus first-execution
+  scan on every box; a code-signing certificate is the durable fix.
+
 ## Changing a player's branch from the console (audio 2.8.6 / web 2.4.19)
 
 The branch code is owned by the player: it sits in the device's config file and is sent on every
@@ -158,7 +177,7 @@ Electron 22.3.27 (the last release for Windows 7, ia32) and better-sqlite3 9.x:
 
 ## Installing an audio box
 
-1. Install `Signage Unicorn Audio Setup 2.8.6.exe` (Windows 10/11 x64) or `Signage Unicorn Audio Win7 Setup 2.8.6.exe` (Windows 7 / any 32-bit Windows) (per user, one click). Set the Windows default
+1. Install `Signage Unicorn Audio Setup 2.8.7.exe` (Windows 10/11 x64) or `Signage Unicorn Audio Win7 Setup 2.8.7.exe` (Windows 7 / any 32-bit Windows) (per user, one click). Set the Windows default
    output device to the amplifier/speakers first; the app plays through the default device.
 2. On the setup screen: server, device name, branch, location; leave **Start hidden in tray**
    ticked for an unattended box, untick it on a desk PC. CONNECT & REGISTER.

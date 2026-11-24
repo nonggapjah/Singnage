@@ -1,6 +1,6 @@
 {
   "name": "signage-unicorn-audio",
-  "version": "2.8.6",
+  "version": "2.8.7",
   "description": "Audio-only player for Signage Unicorn - Windows 7 / 32-bit build (Electron 22)",
   "main": "main.js",
   "author": "Signage Unicorn Team",
