@@ -1164,11 +1164,24 @@ async function executeCommand(cmd, type) {
             await ackCommand(cmd, 'EXECUTED', 'superseded');
             return;
         }
-        if (newBranch !== String(config.branchCode || '')) {
+        const appliedAt = new Date(isNaN(issuedAt) ? Date.now() : issuedAt).toISOString();
+        if (newBranch === String(config.branchCode || '')) {
+            // Review 2.8.8 (Codex): a same-branch command still has to advance branchSetAt, or an older
+            // delayed SET_BRANCH for another branch would pass the stale check above and apply later.
+            if (config.branchSetAt !== appliedAt) {
+                const prevSetAt = config.branchSetAt;
+                config.branchSetAt = appliedAt;
+                const saved = await ipcRenderer.invoke('save-config', config);
+                if (!saved || saved.success === false) config.branchSetAt = prevSetAt; // branch itself is already right
+            }
+            await ackCommand(cmd, 'EXECUTED');
+            return;
+        }
+        {
             const prevBranch = config.branchCode;
             const prevSetAt = config.branchSetAt;
             config.branchCode = newBranch;
-            config.branchSetAt = new Date(isNaN(issuedAt) ? Date.now() : issuedAt).toISOString();
+            config.branchSetAt = appliedAt;
             // save-config reports write failures as { success: false }; ack FAILED and keep the old
             // value in memory too, otherwise heartbeats would carry a branch that a restart reverts.
             const saved = await ipcRenderer.invoke('save-config', config);

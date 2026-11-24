@@ -3,6 +3,14 @@
 รายการอัปเดตและประวัติการแก้ไขระบบ (Patch Version History)
 
 ---
+## 2.8.8 — rolled to the video screens as well (first screen update since 2.8.0)
+
+- SET_BRANCH: a command for the branch the device is already on now records its issue time too,
+  so an older, delayed SET_BRANCH for another branch cannot apply after it (Codex review of the
+  2.8.0 -> 2.8.7 diff for the kiosk product; no other screen-side regression was found).
+- Screens move from 2.8.0 to this version by the normal UPDATE_CLIENT canary rollout
+  (publish-client without -Audio, 1 then 5 per batch); the audio players follow.
+
 ## 2.8.7 — Signage Unicorn Audio: update launcher retries and reports (screens still on 2.8.0)
 
 - The update launcher writes every installer attempt (exit code, duration, retry) to
