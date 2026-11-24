@@ -82,6 +82,64 @@ namespace SignageUnicorn.Api.Services.Background
             var deviceRepo = scope.ServiceProvider.GetRequiredService<IDeviceRepository>();
             try
             {
+                // API 2.8.10 (24-11-2026, screen rollout 2.7.2 -> 2.8.8): the upgraded screen comes back as a
+                // NEW row (real hardware uuid instead of WIN-<computername>) with no assignments of its own
+                // and plays only by inheriting from this ghost. Sibling inheritance requires a live donor,
+                // so the retire below used to leave such a screen idle an hour after the upgrade ("Laguna
+                // All" 556, 02-11-2026). Before retiring, copy the ghost's active assignments onto every
+                // twin that has none (same branch + name + playback mode, created after the ghost went
+                // silent, not set to explicit by an admin) and queue SYNC_SCHEDULE so the twin reloads.
+                // One ghost per twin (the most recently seen) so two ghosts never both donate. Ghosts
+                // retired in the last 7 days are included, which also repairs a twin that already went idle.
+                // Recipients are matched with the same space/case normalisation as the inheritance query
+                // (Codex: "KAMALA  ALL" inherited from "KAMALA ALL" and would otherwise be skipped here).
+                var carryOver = @"
+                    DECLARE @copied TABLE (twin_id BIGINT);
+                    ;WITH ghosts AS (
+                        SELECT g.device_id, g.branch_code, g.device_name,
+                               ISNULL(g.playback_mode, 'screen') AS mode,
+                               ISNULL(g.last_check_in, g.created_at) AS silent_since
+                        FROM sn_devices g
+                        WHERE g.device_uuid LIKE 'WIN-%'
+                          AND ((g.is_deleted = 0 AND (g.last_check_in IS NULL OR g.last_check_in < DATEADD(HOUR, -1, SYSUTCDATETIME())))
+                               OR (g.is_deleted = 1 AND g.deleted_at > DATEADD(DAY, -7, SYSUTCDATETIME())))
+                          AND EXISTS (SELECT 1 FROM sn_device_playlists gp WHERE gp.device_id = g.device_id AND gp.is_active = 1)
+                    ), pairs AS (
+                        SELECT n.device_id AS twin_id, gh.device_id AS ghost_id,
+                               ROW_NUMBER() OVER (PARTITION BY n.device_id ORDER BY gh.silent_since DESC, gh.device_id DESC) AS rn
+                        FROM ghosts gh
+                        JOIN sn_devices n
+                          ON n.is_deleted = 0
+                         AND n.device_uuid NOT LIKE 'WIN-%'
+                         AND LTRIM(RTRIM(n.branch_code)) = LTRIM(RTRIM(gh.branch_code))
+                         AND LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(n.device_name, ' ', CHAR(1)+CHAR(2)), CHAR(2)+CHAR(1), ''), CHAR(1)+CHAR(2), ' ')))
+                             COLLATE SQL_Latin1_General_CP1_CI_AS
+                             = LTRIM(RTRIM(REPLACE(REPLACE(REPLACE(gh.device_name, ' ', CHAR(1)+CHAR(2)), CHAR(2)+CHAR(1), ''), CHAR(1)+CHAR(2), ' ')))
+                             COLLATE SQL_Latin1_General_CP1_CI_AS
+                         AND ISNULL(n.playback_mode, 'screen') = gh.mode
+                         AND n.last_check_in > DATEADD(MINUTE, -5, SYSUTCDATETIME())
+                         AND n.created_at > gh.silent_since
+                         AND n.created_at < DATEADD(HOUR, 24, gh.silent_since)
+                        WHERE ISNULL(n.schedule_mode, '') <> 'explicit'
+                          AND NOT EXISTS (SELECT 1 FROM sn_device_playlists tp WHERE tp.device_id = n.device_id AND tp.is_active = 1)
+                    )
+                    INSERT INTO sn_device_playlists (device_id, playlist_id, start_date, end_date, is_active,
+                                                     start_time, end_time, days_of_week, repeat_every_minutes)
+                    OUTPUT inserted.device_id INTO @copied (twin_id)
+                    SELECT p.twin_id, gp.playlist_id, gp.start_date, gp.end_date, 1,
+                           gp.start_time, gp.end_time, gp.days_of_week, gp.repeat_every_minutes
+                    FROM pairs p
+                    JOIN sn_device_playlists gp ON gp.device_id = p.ghost_id AND gp.is_active = 1
+                    WHERE p.rn = 1;
+
+                    INSERT INTO sn_device_commands (command_uuid, device_id, command_type, status, created_at, created_by, is_deleted)
+                    SELECT NEWID(), c.twin_id, 'SYNC_SCHEDULE', 'PENDING', SYSUTCDATETIME(), 1, 0
+                    FROM (SELECT DISTINCT twin_id FROM @copied) c
+                    WHERE NOT EXISTS (SELECT 1 FROM sn_device_commands x
+                                      WHERE x.device_id = c.twin_id AND x.command_type = 'SYNC_SCHEDULE'
+                                        AND x.status = 'PENDING' AND x.is_deleted = 0);";
+                await deviceRepo.ExecuteSqlAsync(carryOver);
+
                 var sql = @"
                     UPDATE sn_devices
                     SET is_deleted = 1, status = 'OFFLINE', deleted_at = SYSUTCDATETIME()
@@ -105,7 +163,7 @@ namespace SignageUnicorn.Api.Services.Background
                               AND n.created_at > ISNULL(sn_devices.last_check_in, sn_devices.created_at)
                               AND n.created_at < DATEADD(HOUR, 24, ISNULL(sn_devices.last_check_in, sn_devices.created_at)));";
                 await deviceRepo.ExecuteSqlAsync(sql);
-                _logger.LogInformation("[Maintenance] Superseded ghost devices retired (if any).");
+                _logger.LogInformation("[Maintenance] Ghost assignments carried over to their upgraded twins and superseded ghost devices retired (if any).");
             }
             catch (Exception ex)
             {
@@ -226,9 +284,11 @@ namespace SignageUnicorn.Api.Services.Background
 
                 // 4. Clear Stale Schedules (sn_device_playlists): rows for deleted devices, plus any
                 //    leftover inactive rows (e.g. from playlist deletion) so the table stays lean.
+                //    API 2.8.10: rows of a device deleted less than 7 days ago are kept, because the
+                //    ghost carry-over in RetireSupersededDevicesAsync may still need to donate them.
                 try
                 {
-                    await deviceRepo.ExecuteSqlAsync("SET QUOTED_IDENTIFIER ON; SET ANSI_NULLS ON; DELETE FROM sn_device_playlists WHERE device_id IN (SELECT device_id FROM sn_devices WHERE is_deleted = 1) OR is_active = 0;");
+                    await deviceRepo.ExecuteSqlAsync("SET QUOTED_IDENTIFIER ON; SET ANSI_NULLS ON; DELETE FROM sn_device_playlists WHERE device_id IN (SELECT device_id FROM sn_devices WHERE is_deleted = 1 AND (deleted_at IS NULL OR deleted_at < DATEADD(DAY, -7, SYSUTCDATETIME()))) OR is_active = 0;");
                     _logger.LogInformation("[Maintenance] Stale/inactive schedule rows cleared.");
                 }
                 catch (Exception ex)
