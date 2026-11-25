@@ -209,10 +209,13 @@ export const BatchAssignModal: React.FC<BatchAssignModalProps> = ({ playlistId, 
             if (res.success) {
                 onSuccess();
             } else {
-                showNotify('Deploy failed', `The server did not accept the schedule for ${ids.length} ${noun(selectedDevices)}. Some of them may still have received it: reopen this dialog to see which are marked assigned, then deploy to the rest.`, 'ERROR');
+                // The API updates screens in parallel without a transaction, so a failure can be
+                // partial; it also replaces the device's entry for THIS playlist rather than adding a
+                // second one, so retrying the same selection is safe (Codex, 2.4.20).
+                showNotify('Deploy failed', `The server did not accept the schedule for ${ids.length} ${noun(selectedDevices)}. Some of them may still have received it. Deploying again to the same selection is safe: each screen keeps one entry for this playlist, with the dates you set.`, 'ERROR');
             }
         } catch {
-            showNotify('Deploy failed', 'The server could not be reached, or the request timed out. Some screens may still have received the schedule: reopen this dialog to see which are marked assigned, then deploy to the rest.', 'ERROR');
+            showNotify('Deploy failed', 'The server could not be reached, or the request timed out. Some screens may still have received the schedule. Deploying again to the same selection is safe: each screen keeps one entry for this playlist, with the dates you set.', 'ERROR');
         } finally {
             setSubmitting(false);
         }
