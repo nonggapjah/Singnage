@@ -37,6 +37,33 @@ namespace SignageUnicorn.Api.Controllers
             // Dayparts (2.8.7): assignments carry startTime/endTime/daysOfWeek/repeatEveryMinutes;
             // schedules may carry interjections for audio players.
             public bool Dayparts { get; init; } = true;
+            // Media egress gate (2.8.12): /media and /setup downloads may answer 503 + Retry-After under load.
+            public bool EgressGate { get; init; } = true;
+        }
+
+        // Media egress gate (2.8.12): what the server is pushing out right now and the limits in force.
+        // Operators watch this while a campaign spreads; the bundle's egress.ps1 adjusts the limits.
+        [HttpGet("egress")]
+        [Authorize]
+        public IActionResult Egress([FromServices] SignageUnicorn.Api.Services.MediaEgressGate gate)
+        {
+            var s = gate.Snapshot();
+            return Ok(ApiResponse<object>.SuccessResponse(new
+            {
+                inFlight = s.InFlight,
+                waiting = s.Waiting,
+                admitted = s.Admitted,
+                rejected = s.Rejected,
+                throttleWaits = s.ThrottleWaits,
+                bytesSent = s.BytesSent,
+                sentMB = Math.Round(s.BytesSent / 1048576.0, 1),
+                maxConcurrentDownloads = s.Settings.MaxConcurrentDownloads,
+                queueWaitSeconds = s.Settings.QueueWaitSeconds,
+                maxEgressMbps = s.Settings.MaxEgressMbps,
+                settingsSource = s.SettingsSource,
+                settingsAppliedUtc = s.SettingsAppliedUtc,
+                overrideKeys = new[] { SignageUnicorn.Api.Middleware.MediaEgressMiddleware.SlotsKey, SignageUnicorn.Api.Middleware.MediaEgressMiddleware.MbpsKey, SignageUnicorn.Api.Middleware.MediaEgressMiddleware.WaitKey },
+            }));
         }
 
         [HttpGet("capabilities")]

@@ -324,6 +324,10 @@ builder.Services.AddHostedService<SignageUnicorn.Api.Services.Background.MediaCl
 builder.Services.AddHostedService<SignageUnicorn.Api.Services.Background.ScheduleTransitionWorker>();
 
 
+// Media egress gate (2.8.12): bounds concurrent /media and /setup downloads and the total upload
+// rate; settings in appsettings Media:* with runtime overrides in sn_system_settings.
+builder.Services.AddSingleton<SignageUnicorn.Api.Services.MediaEgressGate>();
+
 var app = builder.Build();
 
 // 4. Configure Pipeline
@@ -368,6 +372,9 @@ foreach (var blocked in new[] { ".html", ".htm", ".xhtml", ".shtml", ".svg", ".s
 {
     provider.Mappings.Remove(blocked);
 }
+
+// Gate the screens' downloads BEFORE the static file middleware serves them (see MediaEgressGate).
+app.UseMiddleware<SignageUnicorn.Api.Middleware.MediaEgressMiddleware>();
 
 app.UseStaticFiles(new StaticFileOptions
 {
