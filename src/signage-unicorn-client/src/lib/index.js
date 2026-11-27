@@ -13,4 +13,5 @@ module.exports = {
     logger: require('./logger'),
     claim: require('./claim'),
     mismatchPark: require('./mismatch-park'),
+    idleJingle: require('./idle-jingle'),
 };

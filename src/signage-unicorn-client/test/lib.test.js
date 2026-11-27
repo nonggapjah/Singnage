@@ -15,6 +15,7 @@ const { classifyClaimResponse, claimRetryDelay, raceRetryDelay, CLAIM_RETRY_MAX_
 const { classifyBatchResponse } = require('../src/lib/playback-batch');
 const { createRotatingLogger, logFileName, shouldRotate, selectFilesToPrune } = require('../src/lib/logger');
 const { createMismatchParking, isHashMismatchError, nextRefreshDecision } = require('../src/lib/mismatch-park');
+const { jingleKindFor, idleLayerPlan } = require('../src/lib/idle-jingle');
 
 // ---------------------------------------------------------------- hash-mismatch parking (2.8.9, 27-11-2026)
 test('a file is parked after three hash mismatches and forgotten after a success', () => {
@@ -308,4 +309,22 @@ test('round 5 #8: decideAfterVerify re-reads the active hash after the await', (
     // A swap already in flight finished during the await: A is still authoritative -> queue it again
     assert.equal(decideAfterVerify({ contentHash: 'hA', activeHashAfterAwait: 'hB', complete: true }), 'requeue');
     assert.equal(decideAfterVerify({ contentHash: 'hA', activeHashAfterAwait: '', complete: true }), 'requeue');
+});
+
+// BUG-JINGLE-01: the configured idle jingle was a video inside an <img> -> black panel with alt text.
+test('idle jingle: a video file is routed to the video element, an image to the image, audio/unknown to the bundled picture', () => {
+    assert.equal(jingleKindFor('jingle_14_183feb57-9e00-460d-b06c-7ff6ad61d297_v2.mp4', 'VDO Visual Villa.mp4'), 'video');
+    assert.equal(jingleKindFor('jingle_7_poster.PNG'), 'image');
+    assert.equal(jingleKindFor('jingle_9_file', 'safety.jpg?x=1'), 'image'); // first name has no extension, second decides
+    assert.equal(jingleKindFor('jingle_3_announce.mp3'), 'unsupported');
+    assert.equal(jingleKindFor('', null, undefined), 'unsupported');
+    assert.equal(jingleKindFor('jingle_5_clip.MOV'), 'video');
+});
+
+test('idle jingle: only shown while idle, never on the audio build, and the video is paused while content plays', () => {
+    assert.deepEqual(idleLayerPlan('video', true, false), { show: 'video', playVideo: true });
+    assert.deepEqual(idleLayerPlan('image', true, false), { show: 'image', playVideo: false });
+    assert.deepEqual(idleLayerPlan('unsupported', true, false), { show: 'image', playVideo: false }); // bundled picture
+    assert.deepEqual(idleLayerPlan('video', false, false), { show: 'none', playVideo: false });
+    assert.deepEqual(idleLayerPlan('video', true, true), { show: 'none', playVideo: false });
 });

@@ -14,6 +14,7 @@ const { classifyBatchResponse } = SignageLib.playbackBatch;
 const { checkUpdateUrl } = SignageLib.updateUrl;
 const { classifyClaimResponse, claimRetryDelay, raceRetryDelay } = SignageLib.claim;
 const { createMismatchParking, isHashMismatchError, nextRefreshDecision } = SignageLib.mismatchPark;
+const { jingleKindFor, idleLayerPlan } = SignageLib.idleJingle;
 // 2.8.9: a file whose bytes never match the hash the server sent is parked for an hour after three
 // failures instead of being fetched again every heartbeat (27-11-2026 incident, 336 screens x 42 MB).
 const mismatchParking = createMismatchParking();
@@ -104,6 +105,54 @@ let systemLogQueue = JSON.parse(localStorage.getItem('system_log_queue') || '[]'
 const hudOverlay = document.getElementById('hud-overlay');
 
 const jingleEl = document.getElementById('safety-jingle');
+const jingleVideoEl = document.getElementById('safety-jingle-video');
+const BUNDLED_JINGLE = 'assets/safety-jingle.png';
+// BUG-JINGLE-01: the configured jingle may be a video (production: "VDO Visual Villa.mp4"). It is shown
+// by the element that can render it; a load error falls back to the bundled picture, never to a black
+// panel with alt text. jingleKind is what the current source is; idleVisible mirrors "nothing to play".
+let jingleKind = 'image';
+let idleVisible = true;
+let jingleFallbackLogged = '';
+
+function applyIdleLayer() {
+    const plan = idleLayerPlan(jingleKind, idleVisible, AUDIO_MODE);
+    jingleEl.classList.toggle('hidden', plan.show !== 'image');
+    jingleVideoEl.classList.toggle('hidden', plan.show !== 'video');
+    if (plan.playVideo) {
+        if (jingleVideoEl.paused) jingleVideoEl.play().catch(() => { /* autoplay is muted; a failure lands in onerror or stays a still frame */ });
+    } else if (!jingleVideoEl.paused) {
+        jingleVideoEl.pause(); // no second decoder while real content plays (kiosk hardware budget)
+    }
+}
+function showIdleJingle() { idleVisible = true; applyIdleLayer(); }
+function hideIdleJingle() { idleVisible = false; applyIdleLayer(); }
+
+// Point the idle layer at a jingle source. `kind` comes from jingleKindFor(); anything the layer cannot
+// show (audio, unknown) uses the bundled picture.
+function setJingleSource(url, kind) {
+    if (kind === 'video') {
+        jingleKind = 'video';
+        if (jingleVideoEl.getAttribute('src') !== url) jingleVideoEl.src = url;
+        if (jingleEl.getAttribute('src') !== BUNDLED_JINGLE) jingleEl.src = BUNDLED_JINGLE;
+    } else {
+        jingleKind = 'image';
+        const src = kind === 'image' && url ? url : BUNDLED_JINGLE;
+        if (jingleEl.getAttribute('src') !== src) jingleEl.src = src;
+        try { jingleVideoEl.pause(); jingleVideoEl.removeAttribute('src'); jingleVideoEl.load(); } catch (e) { /* ignore */ }
+    }
+    applyIdleLayer();
+}
+function jingleLoadFailed(which) {
+    const current = which === 'video' ? jingleVideoEl.currentSrc || jingleVideoEl.getAttribute('src') : jingleEl.getAttribute('src');
+    if (!current || current === BUNDLED_JINGLE) return; // the bundled picture itself; nothing further to fall back to
+    if (jingleFallbackLogged !== current) {
+        jingleFallbackLogged = current;
+        addLog(`Idle jingle ${which} could not be shown (${current}); using the bundled picture`, 'warn');
+    }
+    setJingleSource(null, 'unsupported');
+}
+jingleEl.addEventListener('error', () => jingleLoadFailed('image'));
+jingleVideoEl.addEventListener('error', () => jingleLoadFailed('video'));
 const videoEl = document.getElementById('video-player');
 const imageEl = document.getElementById('image-player');
 const deviceInfoEl = document.getElementById('device-info');
@@ -369,7 +418,8 @@ async function restoreCachedJingle() {
     const cacheName = localStorage.getItem('safety_jingle_cache');
     if (cacheName) {
         try {
-            jingleEl.src = await ipcRenderer.invoke('resolve-media-url', { cacheName });
+            const url = await ipcRenderer.invoke('resolve-media-url', { cacheName });
+            setJingleSource(url, jingleKindFor(cacheName, localStorage.getItem('safety_jingle_name')));
             return;
         } catch (e) {
             localStorage.removeItem('safety_jingle_cache');
@@ -377,7 +427,8 @@ async function restoreCachedJingle() {
     }
     // Older clients cached the jingle as a base64 data URL; keep using it until the file copy exists.
     const legacy = localStorage.getItem('safety_jingle_data');
-    if (legacy && legacy.startsWith('data:')) jingleEl.src = legacy;
+    if (legacy && legacy.startsWith('data:')) setJingleSource(legacy, legacy.startsWith('data:video') ? 'video' : 'image');
+    else applyIdleLayer();
 }
 
 // --- Jingle Sync (downloaded by main, so no renderer fetch of media is needed) ---
@@ -403,7 +454,9 @@ async function syncJingle() {
                 const jingleUrl = /^https?:\/\//i.test(String(m.blobUrl)) ? m.blobUrl : serverUrl(String(m.blobUrl).startsWith('/') ? m.blobUrl : '/' + m.blobUrl);
                 const dl = await ipcRenderer.invoke('download-media', { url: jingleUrl, cacheName, fileHash: m.fileHash });
                 if (dl && dl.success) {
-                    jingleEl.src = await ipcRenderer.invoke('resolve-media-url', { cacheName });
+                    const url = await ipcRenderer.invoke('resolve-media-url', { cacheName });
+                    localStorage.setItem('safety_jingle_name', String(m.fileName || m.blobUrl || ''));
+                    setJingleSource(url, jingleKindFor(cacheName, m.fileName, m.blobUrl));
                     localStorage.setItem('safety_jingle_cache', cacheName);
                     localStorage.setItem('safety_jingle_id', serverJingleId);
                     localStorage.removeItem('safety_jingle_data');
@@ -1788,7 +1841,7 @@ function skipAfterDelay(delayMs, token, advance = true) {
         // Nothing in this playlist is on disk right now: show the idle jingle instead of a frozen frame.
         isPlaying = false;
         reportPlaybackState();
-        jingleEl.classList.remove('hidden');
+        showIdleJingle();
         dashCurrentMedia.textContent = '▶ WAITING FOR MEDIA';
     }
     currentIndex = (currentIndex + 1) % Math.max(1, playlist.length);
@@ -1824,7 +1877,7 @@ async function playNext() {
     if (playlist.length === 0 && !fromQueue) {
         isPlaying = false;
         reportPlaybackState();
-        jingleEl.classList.remove('hidden');
+        showIdleJingle();
         dashCurrentMedia.textContent = '▶ IDLE / WAITING';
         try {
             videoEl.pause();
@@ -1883,7 +1936,7 @@ async function playNext() {
     const rawDuration = override || media.durationSec || 10;
     mediaDuration = Math.max(1, parseInt(rawDuration, 10) || 10) * 1000;
     dashDur.textContent = formatTime(mediaDuration);
-    jingleEl.classList.add('hidden');
+    hideIdleJingle();
 
     addLog(`Playing: ${media.displayName || media.fileName || media.cacheName} (${currentIndex + 1}/${playlist.length})`);
 

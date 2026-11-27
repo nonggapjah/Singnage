@@ -48,7 +48,7 @@
             object-fit: contain;
         }
 
-        #safety-jingle {
+        #safety-jingle, #safety-jingle-video {
             position: absolute;
             inset: 0;
             width: 100%;
@@ -471,7 +471,10 @@
 <body>
     <div id="player-container">
         <!-- Safety Jingle (Embedded) -->
-        <img id="safety-jingle" src="assets/safety-jingle.png" alt="Safety Jingle">
+        <img id="safety-jingle" src="assets/safety-jingle.png" alt="">
+        <!-- BUG-JINGLE-01: a video configured as the jingle plays here (muted, looping); the <img> above
+             is the fallback and the home of an image jingle. Never both visible. -->
+        <video id="safety-jingle-video" class="hidden" muted loop playsinline preload="none"></video>
 
         <video id="video-player" class="media-element hidden" autoplay muted></video>
         <img id="image-player" class="media-element hidden">
@@ -845,6 +848,7 @@
     <script src="src/lib/cache-name.js"></script>
     <script src="src/lib/backoff.js"></script>
     <script src="src/lib/mismatch-park.js"></script>
+    <script src="src/lib/idle-jingle.js"></script>
     <script src="src/lib/job-queue.js"></script>
     <script src="src/lib/health.js"></script>
     <script src="src/lib/update-url.js"></script>
