@@ -68,7 +68,23 @@ export const MediaIntegrityBanner: React.FC = () => {
         return () => { clearInterval(t); seq.current++; };
     }, [supported, load]);
 
-    if (!supported || !report || report.quarantined === 0) return null;
+    if (!supported) return null;
+    if (!report) {
+        // The API advertises the feature but the report never loaded: say so (a quarantine must not be invisible
+        // just because the first poll failed). Nothing is shown while the first request is still in flight.
+        if (!staleSince) return null;
+        return (
+            <section role="region" aria-label="Media integrity status" className="mx-4 sm:mx-6 mt-4 rounded-xl border border-amber-500/50 bg-amber-500/10 text-foreground px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+                <ShieldAlert className="h-5 w-5 text-amber-500 shrink-0" aria-hidden="true" />
+                <p className="font-bold" aria-live="polite">Media integrity status could not be loaded</p>
+                <span className="text-xs text-muted-foreground">The server has not answered since {fmtTime(staleSince.toISOString())}. Files held back from the screens cannot be shown until it does; retrying every minute.</span>
+                <button type="button" onClick={() => { void load(); }} className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-border text-[11px] font-bold uppercase tracking-wider hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 ml-auto">
+                    <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />Retry
+                </button>
+            </section>
+        );
+    }
+    if (report.quarantined === 0) return null;
     const items: MediaIntegrityItem[] = report.items.filter(i => i.status !== 'ok' && i.status !== 'unknown');
 
     const accept = (it: MediaIntegrityItem) => showConfirm(
@@ -100,7 +116,7 @@ export const MediaIntegrityBanner: React.FC = () => {
         } finally { setBusy(null); }
     };
 
-    const btn = 'inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border text-[11px] font-bold uppercase tracking-wider transition-colors disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2';
+    const btn = 'inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border text-[11px] font-bold uppercase tracking-wider transition-colors disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2';
 
     // role="region" + a polite live heading: the count is announced when it changes, the whole block is not
     // re-read on every one-minute poll (role="alert" would do that).
