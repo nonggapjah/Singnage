@@ -59,12 +59,22 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             using var c = Open();
             await c.OpenAsync();
             using var tx = c.BeginTransaction();
-            var rolloutId = await c.ExecuteScalarAsync<long>(@"
-                INSERT INTO dbo.sn_playlist_rollouts
-                    (playlist_id, playlist_uuid, status, wave_minutes, start_date, end_date, start_time, end_time, days_of_week, repeat_every_minutes, created_by)
-                OUTPUT INSERTED.rollout_id
-                VALUES (@playlistId, @playlistUuid, 'active', @waveMinutes, @StartDate, @EndDate, @StartTime, @EndTime, @DaysOfWeek, @RepeatEveryMinutes, @createdBy)",
-                new { playlistId = playlist.playlist_id, playlistUuid = playlist.playlist_uuid, waveMinutes, s.StartDate, s.EndDate, s.StartTime, s.EndTime, s.DaysOfWeek, s.RepeatEveryMinutes, createdBy }, tx);
+            long rolloutId;
+            try
+            {
+                rolloutId = await c.ExecuteScalarAsync<long>(@"
+                    INSERT INTO dbo.sn_playlist_rollouts
+                        (playlist_id, playlist_uuid, status, wave_minutes, start_date, end_date, start_time, end_time, days_of_week, repeat_every_minutes, created_by)
+                    OUTPUT INSERTED.rollout_id
+                    VALUES (@playlistId, @playlistUuid, 'active', @waveMinutes, @StartDate, @EndDate, @StartTime, @EndTime, @DaysOfWeek, @RepeatEveryMinutes, @createdBy)",
+                    new { playlistId = playlist.playlist_id, playlistUuid = playlist.playlist_uuid, waveMinutes, s.StartDate, s.EndDate, s.StartTime, s.EndTime, s.DaysOfWeek, s.RepeatEveryMinutes, createdBy }, tx);
+            }
+            catch (SqlException ex) when (ex.Number == 2601 || ex.Number == 2627)
+            {
+                // UX_sn_playlist_rollouts_open_playlist: another request created the open rollout first.
+                tx.Rollback();
+                throw new InvalidOperationException("A rollout of this playlist was started by another request a moment ago. Watch it under Rollouts, or cancel it first.", ex);
+            }
 
             await c.ExecuteAsync(@"
                 INSERT INTO dbo.sn_playlist_rollout_items (rollout_id, device_id, branch_code, wave_no, not_before_utc)
@@ -202,6 +212,47 @@ namespace SignageUnicorn.Api.Repositories.Implementations
                 SELECT {HeaderColumns}
                 FROM dbo.sn_playlist_rollouts r LEFT JOIN dbo.sn_playlists p ON p.playlist_id = r.playlist_id
                 WHERE r.rollout_id = @rolloutId", new { rolloutId });
+        }
+
+        public async Task<RolloutHeaderRow?> GetOpenForPlaylistAsync(long playlistId)
+        {
+            using var c = Open();
+            return await c.QueryFirstOrDefaultAsync<RolloutHeaderRow>($@"
+                SELECT TOP 1 {HeaderColumns}
+                FROM dbo.sn_playlist_rollouts r LEFT JOIN dbo.sn_playlists p ON p.playlist_id = r.playlist_id
+                WHERE r.playlist_id = @playlistId AND r.status IN ('active', 'paused')
+                ORDER BY r.created_at DESC", new { playlistId });
+        }
+
+        public async Task<bool> RetimeWavesAfterAsync(long rolloutId, int startedWaveNo, DateTime nowUtc)
+        {
+            using var c = Open();
+            await c.OpenAsync();
+            using var tx = c.BeginTransaction();
+            // Lock the header row and prove the rollout is still active: a pause/resume that landed since the
+            // worker read its status waits for this commit (or has already re-timed, and we must not undo it).
+            var active = await c.ExecuteAsync(
+                "UPDATE dbo.sn_playlist_rollouts SET updated_at = SYSUTCDATETIME() WHERE rollout_id = @rolloutId AND status = 'active'",
+                new { rolloutId }, tx);
+            if (active != 1) { tx.Rollback(); return false; }
+            var waveMinutes = await c.ExecuteScalarAsync<int>("SELECT wave_minutes FROM dbo.sn_playlist_rollouts WHERE rollout_id = @rolloutId", new { rolloutId }, tx);
+            var unstarted = (await c.QueryAsync<int>(@"
+                SELECT i.wave_no FROM dbo.sn_playlist_rollout_items i
+                WHERE i.rollout_id = @rolloutId AND i.wave_no > @startedWaveNo
+                GROUP BY i.wave_no
+                HAVING MAX(CASE WHEN i.attempts > 0 OR i.applied_utc IS NOT NULL THEN 1 ELSE 0 END) = 0
+                ORDER BY i.wave_no", new { rolloutId, startedWaveNo }, tx)).ToList();
+            // Reschedule() puts the first wave at its base time; the base here is one interval after the wave
+            // that just started, so the next branch follows at the configured spacing.
+            foreach (var (waveNo, notBefore) in RolloutPlanner.Reschedule(unstarted, nowUtc.AddMinutes(waveMinutes), waveMinutes))
+            {
+                await c.ExecuteAsync(@"
+                    UPDATE dbo.sn_playlist_rollout_items SET not_before_utc = @notBefore
+                    WHERE rollout_id = @rolloutId AND wave_no = @waveNo AND applied_utc IS NULL",
+                    new { rolloutId, waveNo, notBefore }, tx);
+            }
+            tx.Commit();
+            return true;
         }
 
         public async Task<IReadOnlyList<RolloutWaveRow>> GetWavesAsync(IEnumerable<long> rolloutIds)

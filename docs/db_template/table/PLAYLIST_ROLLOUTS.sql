@@ -56,6 +56,18 @@ BEGIN
 END
 GO
 
+-- One active-or-paused rollout per playlist, enforced here and not only by the service's pre-check:
+-- two overlapping requests (or a retry after a timeout) cannot both create one. The loser gets a
+-- duplicate-key error that the API answers with 409.
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_sn_playlist_rollouts_open_playlist'
+               AND object_id = OBJECT_ID('dbo.sn_playlist_rollouts'))
+BEGIN
+    CREATE UNIQUE NONCLUSTERED INDEX [UX_sn_playlist_rollouts_open_playlist]
+    ON [dbo].[sn_playlist_rollouts] ([playlist_id] ASC)
+    WHERE [status] IN ('active', 'paused');
+END
+GO
+
 -- The worker asks "which items are due" every 30 s: pending rows of active rollouts, by time.
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_sn_playlist_rollout_items_due'
                AND object_id = OBJECT_ID('dbo.sn_playlist_rollout_items'))

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Pause, Play, X, Clock } from 'lucide-react';
 import { rolloutApi, Rollout } from '@/features/playlists/api/rollout-api';
 import { useUI } from '@/features/ui/context/UIContext';
@@ -44,17 +44,21 @@ export const RolloutsPanel: React.FC<{ refreshKey?: number }> = ({ refreshKey = 
     const [supported, setSupported] = useState(true);
     const [failed, setFailed] = useState(false);   // last load failed for a transient reason: keep polling
     const [busyId, setBusyId] = useState<number | null>(null);
+    const seq = useRef(0);   // the newest request wins; a slow older answer is dropped
 
     const load = useCallback(async () => {
+        const mine = ++seq.current;
         try {
             const res = await rolloutApi.list();
+            if (mine !== seq.current) return;                 // superseded by a later load (or unmounted)
             if (res.success && Array.isArray(res.data)) { setRollouts(res.data); setFailed(false); }
             else if (res.code === 404) setSupported(false);   // older API: no /rollouts route
             else setFailed(true);                             // 5xx / timeout: keep the last list, retry
         } catch {
-            setFailed(true);
+            if (mine === seq.current) setFailed(true);
         }
     }, []);
+    useEffect(() => () => { seq.current++; }, []);   // unmount: no state writes from in-flight loads
 
     useEffect(() => { void load(); }, [load, refreshKey]);
 

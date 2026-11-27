@@ -38,12 +38,20 @@ namespace SignageUnicorn.Api.Services.Rollout
         /// Plans the request by branch and, when it spans two or more branches, stores the rollout and
         /// applies wave 1 at once. Returns null when there is only one branch: the caller then assigns
         /// everything immediately as before. Throws <see cref="ArgumentException"/> for an unknown
-        /// playlist (400).
+        /// playlist (400) and <see cref="InvalidOperationException"/> when a rollout of the playlist is
+        /// already active or paused (409).
         /// </summary>
         public async Task<RolloutStartResult?> StartAsync(BatchAddScheduleRequest request, long? userId, CancellationToken ct)
         {
             var playlist = await _repo.ResolvePlaylistAsync(request.PlaylistId)
                 ?? throw new ArgumentException($"Playlist '{request.PlaylistId}' does not exist.");
+
+            // One rollout per playlist at a time. This is also what makes a retry after a request timeout
+            // safe: the first call's rollout is already running, so the retry is refused with its id
+            // instead of starting a second, independent one (Codex, full review).
+            var open = await _repo.GetOpenForPlaylistAsync(playlist.playlist_id);
+            if (open != null)
+                throw new InvalidOperationException($"A rollout of this playlist is already {open.status} (#{open.rollout_id}, started {open.created_at:HH:mm} UTC). Watch it under Rollouts, or cancel it first.");
 
             var resolved = await _repo.ResolveDevicesAsync(request.DeviceIds);
             var (known, unknown) = SplitKnown(request.DeviceIds, resolved);
@@ -142,6 +150,11 @@ namespace SignageUnicorn.Api.Services.Rollout
                             _logger.LogInformation("[Rollout] #{Id} {Note}", byRollout.Key, note);
                             break;   // later waves of this rollout wait too
                         }
+                        // Keep the configured spacing from THIS release: after a hold, a pause or a restart the
+                        // later waves would otherwise all be overdue and go out one per 30-second pass. Done
+                        // under the header lock with a fresh timestamp; false = paused/cancelled meanwhile, so
+                        // this rollout is left alone (its items would refuse the claim anyway).
+                        if (!await _repo.RetimeWavesAfterAsync(byRollout.Key, wave.Key, DateTime.UtcNow)) break;
                         startedNewWave = true;
                         await _repo.SetHoldNoteAsync(byRollout.Key, null);
                         _logger.LogInformation("[Rollout] #{Id} wave {Wave} branch {Branch}: releasing {Count} screen(s).", byRollout.Key, wave.Key, items[0].branch_code, items.Count);

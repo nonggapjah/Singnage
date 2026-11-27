@@ -132,6 +132,18 @@ namespace SignageUnicorn.Api.Tests
         }
 
         [Fact]
+        public void ToScheduleNormalisesTimesDaysAndRepeat()
+        {
+            var req = new BatchAddScheduleRequest { StartTime = "23:59:00", EndTime = "7:05", DaysOfWeek = " 1, 2,7 ", RepeatEveryMinutes = 0 };
+            var s = req.ToSchedule();
+            Assert.Equal("23:59", s.StartTime);
+            Assert.Equal("07:05", s.EndTime);
+            Assert.Equal(SignageUnicorn.Api.Services.ScheduleWindow.NormalizeDays(" 1, 2,7 "), s.DaysOfWeek);
+            Assert.Equal(SignageUnicorn.Api.Services.ScheduleWindow.NormalizeRepeat(0), s.RepeatEveryMinutes);
+            Assert.Null(new BatchAddScheduleRequest { StartTime = "nonsense" }.ToSchedule().StartTime);
+        }
+
+        [Fact]
         public void BatchRequestWithoutRolloutBlockIsUnchanged()
         {
             var req = System.Text.Json.JsonSerializer.Deserialize<BatchAddScheduleRequest>("{\"deviceIds\":[\"1\"],\"playlistId\":\"2\"}")!;

@@ -252,6 +252,10 @@ export const BatchAssignModal: React.FC<BatchAssignModalProps> = ({ playlistId, 
                 } else {
                     onSuccess();
                 }
+            } else if (res.code === 409) {
+                // A rollout of this playlist is already active or paused (also what a retry after a
+                // timed-out rollout request gets): the server refuses a second one.
+                showNotify('Rollout already running', res.message || 'A rollout of this playlist is already running. Watch it under Rollouts, or cancel it first.', 'ERROR');
             } else {
                 // The API updates screens in parallel without a transaction, so a failure can be
                 // partial; it also replaces the device's entry for THIS playlist rather than adding a

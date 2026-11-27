@@ -46,6 +46,11 @@ Bundle: `run-on-server.ps1 playlist-rollout -NoSession -SkipSync` prints the sam
   load only for a start of "Now"; for a dated campaign the egress gate is the brake.
 - Single-branch selections are deployed immediately even with the option ticked (there is nothing
   to stagger); the response says so.
+- One rollout per playlist at a time, enforced by a unique index on the open rollout: a second request
+  (including a retry after a timed-out request, or two operators at once) is refused with 409 and the
+  running rollout's id. Cancel it first if the selection was wrong.
+- Spacing is kept from each release: after a hold, a pause or an API restart the following branches
+  are re-timed from the branch that just went out, one per interval, never all at once.
 - The worker does not know what the screens are doing; "nothing waiting" means the gate's queue is
   empty, which is the best server-side signal that the previous branches have their files.
 - Device ids that were deleted between opening the dialog and deploying are left out of the rollout

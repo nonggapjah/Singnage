@@ -266,7 +266,13 @@ namespace SignageUnicorn.Api.Models
         [JsonPropertyName("rollout")]
         public RolloutOptions? Rollout { get; set; }
 
-        public PlaylistScheduleFields ToSchedule() => new(StartDate, EndDate, StartTime, EndTime, DaysOfWeek, RepeatEveryMinutes);
+        /// <summary>The schedule as the assignment store keeps it: "HH:mm" times, ISO day numbers, validated repeat
+        /// (the same normalisation UpdateAssignedPlaylists applies, so a rollout header never holds a longer string).</summary>
+        public PlaylistScheduleFields ToSchedule() => new(StartDate, EndDate,
+            SignageUnicorn.Api.Services.ScheduleWindow.NormalizeTime(StartTime),
+            SignageUnicorn.Api.Services.ScheduleWindow.NormalizeTime(EndTime),
+            SignageUnicorn.Api.Services.ScheduleWindow.NormalizeDays(DaysOfWeek),
+            SignageUnicorn.Api.Services.ScheduleWindow.NormalizeRepeat(RepeatEveryMinutes));
     }
 
     public class CommandAckRequest

@@ -441,6 +441,10 @@ namespace SignageUnicorn.Api.Controllers
                     {
                         return BadRequest(ApiResponse<object>.ErrorResponse(400, ex.Message));
                     }
+                    catch (InvalidOperationException ex)
+                    {
+                        return Conflict(ApiResponse<object>.ErrorResponse(409, ex.Message));
+                    }
                     if (started != null)
                     {
                         return Ok(ApiResponse<RolloutStartResult>.SuccessResponse(started,

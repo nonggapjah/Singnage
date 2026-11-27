@@ -14,6 +14,7 @@ namespace SignageUnicorn.Api.Repositories.Interfaces
         /// <summary>The live devices behind public ids (numeric id or uuid), with their branch. Ids that match nothing are simply absent.</summary>
         Task<IReadOnlyList<DeviceBranchRow>> ResolveDevicesAsync(IEnumerable<string> publicIds);
 
+        /// <exception cref="InvalidOperationException">An active or paused rollout of the playlist already exists (unique index).</exception>
         Task<long> CreateAsync(PlaylistRefRow playlist, int waveMinutes, PlaylistScheduleFields schedule, long? createdBy, IReadOnlyList<RolloutPlanItem> items);
 
         /// <summary>Pending items of active rollouts whose wave time has come, oldest wave first.</summary>
@@ -44,6 +45,17 @@ namespace SignageUnicorn.Api.Repositories.Interfaces
         /// <summary>Active/paused rollouts, plus finished ones updated since <paramref name="finishedSinceUtc"/>.</summary>
         Task<IReadOnlyList<RolloutHeaderRow>> ListAsync(long? playlistId, DateTime finishedSinceUtc);
         Task<RolloutHeaderRow?> GetAsync(long rolloutId);
+
+        /// <summary>The active or paused rollout of this playlist, if any (one at a time per playlist).</summary>
+        Task<RolloutHeaderRow?> GetOpenForPlaylistAsync(long playlistId);
+
+        /// <summary>
+        /// When wave <paramref name="startedWaveNo"/> is released at <paramref name="nowUtc"/>, the waves after it that
+        /// have not started are re-timed to now + k * wave_minutes (k = 1, 2, ...), so the configured spacing
+        /// holds after a hold, a pause or an API restart instead of all overdue waves going out one per pass.
+        /// </summary>
+        /// <returns>False when the rollout is no longer active (paused/cancelled meanwhile): nothing was changed.</returns>
+        Task<bool> RetimeWavesAfterAsync(long rolloutId, int startedWaveNo, DateTime nowUtc);
         Task<IReadOnlyList<RolloutWaveRow>> GetWavesAsync(IEnumerable<long> rolloutIds);
 
         /// <summary>Changes the status only when the current one is in <paramref name="fromStatuses"/>. Returns false otherwise.</summary>
