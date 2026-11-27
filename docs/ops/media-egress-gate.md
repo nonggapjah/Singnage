@@ -36,7 +36,7 @@ without a deploy or restart:
 
 Invalid or out-of-range values are ignored (the gate can never be switched off by a typo).
 From the deploy bundle: `run-on-server.ps1 egress -ScriptArgs '-Action show'`,
-`'-Action set -Mbps 100'`, `'-Action set -Mbps 0 -Slots 200'` (night), `'-Action clear'`.
+`'-Action set -Mbps 100'`, `'-Action set -Mbps 400 -Slots 200'` (night), `'-Action clear'`.
 
 ## Watching it
 
@@ -50,9 +50,17 @@ From the deploy bundle: `run-on-server.ps1 egress -ScriptArgs '-Action show'`,
 
 ## Sizing
 
-The Symphony uplink capacity was not known when the defaults were chosen; 150 Mbit/s is a guess.
-Measure with `run-on-server.ps1 net-now` (SEND Mbit/s on the server NIC) while a push runs and
-set `MediaMaxEgressMbps` to what the line tolerates with the office still usable.
+The Symphony line is 600 Mbit/s and is shared with several other servers (Commander, 27-11-2026).
+The 26-11 push (567 Mbit/s) was therefore the whole line. Budget for this server:
+
+| when | `MediaMaxEgressMbps` | why |
+|---|---|---|
+| office hours (default) | 150 | a quarter of the line; the rest stays with the other servers and the office |
+| night push | 300-400 | faster rollout while still leaving 200+ Mbit/s for everyone else |
+| never | 0 (unlimited) | it reproduces 26-11: one push can fill the line on its own |
+
+`net-now` shows only this server's NIC; what the other servers use at the same time is not visible
+from here, so if the office still degrades at 150, lower it rather than argue with the number.
 
 ## Not covered
 
