@@ -13,6 +13,14 @@ const { createLoadSequencer, decideAfterVerify } = SignageLib.jobQueue;
 const { classifyBatchResponse } = SignageLib.playbackBatch;
 const { checkUpdateUrl } = SignageLib.updateUrl;
 const { classifyClaimResponse, claimRetryDelay, raceRetryDelay } = SignageLib.claim;
+const { createMismatchParking, isHashMismatchError, nextRefreshDecision } = SignageLib.mismatchPark;
+// 2.8.9: a file whose bytes never match the hash the server sent is parked for an hour after three
+// failures instead of being fetched again every heartbeat (27-11-2026 incident, 336 screens x 42 MB).
+const mismatchParking = createMismatchParking();
+// Key = stored name + the hash the server expects: when the server corrects the hash the key changes
+// and the file is tried again at once (Codex: a park must not outlive the fix).
+const parkKeyFor = (media) => `${media.cacheName || ''}|${media.fileHash || ''}`;
+let scheduleRefreshSkips = 0;
 
 const CLIENT_PROTOCOL = '2';                 // contract T5: server leases every command as POLLING for us
 // Audio player (Signage Unicorn Audio build): set from main's get-app-info at init. Everything it
@@ -689,10 +697,14 @@ async function startSync() {
     // no-op when nothing changed.
     if (scheduleRefreshTimer) clearInterval(scheduleRefreshTimer);
     scheduleRefreshTimer = setInterval(() => {
-        if (config && config.lastPlaylistId === 'SCHEDULE' && !syncWorkerRunning) {
-            addLog('Periodic schedule refresh.', 'info', true);
-            loadPlaylist('SCHEDULE');
-        }
+        if (!config || config.lastPlaylistId !== 'SCHEDULE') return;
+        // 2.8.9: a running sync postpones the refresh at most twice (30 min). A sync that never ends
+        // (a file the screen cannot verify) used to keep the screen on a stale schedule forever.
+        const decision = nextRefreshDecision(syncWorkerRunning, scheduleRefreshSkips);
+        scheduleRefreshSkips = decision.skips;
+        if (!decision.run) return;
+        addLog(syncWorkerRunning ? 'Periodic schedule refresh (sync still running, refreshing anyway).' : 'Periodic schedule refresh.', 'info', true);
+        loadPlaylist('SCHEDULE');
     }, SCHEDULE_REFRESH_MS);
 
     if (pruneTimer) clearInterval(pruneTimer);
@@ -1027,7 +1039,9 @@ async function selfHealMissingFiles() {
     try {
         let hasMissing = false;
         for (const item of playlist) {
-            if (item.media && !item.media.isFallback && !(await mediaExists(item.media))) {
+            if (!item.media || item.media.isFallback) continue;
+            if (mismatchParking.isParked(parkKeyFor(item.media))) continue;   // 2.8.9: parked after repeated hash mismatches
+            if (!(await mediaExists(item.media))) {
                 hasMissing = true;
                 break;
             }
@@ -1649,6 +1663,12 @@ async function syncJobAssets(job) {
         dashReadyStatus.textContent = `SYNCING ${synced + 1}/${items.length}`;
         dashReadyStatus.style.color = '#f1c40f';
 
+        // 2.8.9: a file parked after repeated hash mismatches is not requested again this hour.
+        if (mismatchParking.isParked(parkKeyFor(media))) {
+            job.synced = synced;
+            continue;
+        }
+
         try {
             const res = await ipcRenderer.invoke('download-media', {
                 url: media.blobUrl,
@@ -1659,8 +1679,16 @@ async function syncJobAssets(job) {
 
             if (res && res.success) {
                 synced++;
+                mismatchParking.noteSuccess(parkKeyFor(media));
             } else {
                 addLog(`Download failed for ${media.displayName || media.cacheName}: ${res?.error || 'Unknown error'}`, 'warn');
+                if (isHashMismatchError(res?.error)) {
+                    const verdict = mismatchParking.noteFailure(parkKeyFor(media));
+                    if (verdict.parked) {
+                        // Uploaded to the server (not skipSync) so the operator sees which file is bad.
+                        addLog(`Parked ${media.displayName || media.cacheName} for 60 min: the downloaded file never matches the hash the server sent (${verdict.fails} times). The server must fix the file or its hash.`, 'error');
+                    }
+                }
             }
 
             job.synced = synced;

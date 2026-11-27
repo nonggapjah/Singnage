@@ -12,4 +12,5 @@ module.exports = {
     playbackBatch: require('./playback-batch'),
     logger: require('./logger'),
     claim: require('./claim'),
+    mismatchPark: require('./mismatch-park'),
 };

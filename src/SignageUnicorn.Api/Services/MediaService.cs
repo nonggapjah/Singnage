@@ -323,6 +323,28 @@ namespace SignageUnicorn.Api.Services
             // deployed v2.7.x cache (keyed by that name, existence-checked without the hash).
             bool bytesChanged = request.File != null
                 || (!string.IsNullOrEmpty(request.BlobUrl) && !string.Equals(request.BlobUrl, existing.BlobUrl, StringComparison.OrdinalIgnoreCase));
+
+            // Media integrity (2.8.15): a replacement that only points the row at another url used to
+            // keep the OLD hash - the exact state that sent 336 screens into a download loop on
+            // 27-11-2026. Hash the new local file, or store no hash at all (a screen skips the check
+            // for a missing hash; it never loops on one).
+            var hashCleared = false;
+            if (request.File == null && bytesChanged)
+            {
+                var storedName = SignageUnicorn.Api.Services.Media.MediaIntegrityVerdict.StoredName(finalUrl);
+                var localHosts = _configuration.GetSection("Media:LocalHosts").Get<string[]>() ?? Array.Empty<string>();
+                var localPath = storedName == null ? null : Path.Combine(UploadsFolder(), storedName);
+                if (localPath != null && SignageUnicorn.Api.Services.Media.MediaIntegrityVerdict.IsLocalMediaUrl(finalUrl, localHosts) && File.Exists(localPath))
+                {
+                    fileHash = ComputeMd5(localPath);
+                    request.FileSizeKb = (int)Math.Ceiling(new FileInfo(localPath).Length / 1024.0);
+                }
+                else
+                {
+                    fileHash = null;
+                    hashCleared = true;   // sp_media_std keeps the old hash for a NULL parameter: cleared explicitly below
+                }
+            }
             var logicalName = request.FileName ?? existing.FileName;
             if (bytesChanged)
             {
@@ -347,9 +369,24 @@ namespace SignageUnicorn.Api.Services
             };
 
             var result = await _repository.ReplaceAsync(media, userId);
+            if (result.Success && hashCleared)
+            {
+                // The procedure's ISNULL(@p_file_hash, file_hash) would have kept the hash of the previous
+                // bytes - exactly the mismatch that sent the screens into a download loop on 27-11-2026.
+                await _deviceRepository.ExecuteSqlAsync(
+                    "UPDATE dbo.sn_media_files SET file_hash = NULL, integrity_status = NULL, integrity_note = 'hash cleared: external or unknown bytes' WHERE (CAST(media_id AS nvarchar(50)) = @id OR media_uuid = @id) AND blob_url = @url",
+                    new { id, url = finalUrl });
+                await _systemLog.LogAsync(null, "WARNING", $"[MediaService] REPLACE_HASH_CLEARED | MediaID: {id} | {finalUrl} | no local file to hash; screens will skip the hash check for this media", "API", userId);
+            }
             if (result.Success)
             {
                 await _systemLog.LogAsync(null, "INFO", $"[MediaService] CONTENT_REPLACED | FileName: {media.FileName} | MediaID: {id}", "API", userId);
+                // Only genuinely new bytes release an old verdict: a stored upload, or a url that names a
+                // different stored file (not the same file with a query string) (Codex).
+                var newStoredFile = (request.File != null && request.File.Length > 0)
+                    || !string.Equals(SignageUnicorn.Api.Services.Media.MediaIntegrityVerdict.StoredName(finalUrl),
+                                      SignageUnicorn.Api.Services.Media.MediaIntegrityVerdict.StoredName(existing.BlobUrl), StringComparison.OrdinalIgnoreCase);
+                if (newStoredFile) await ResetIntegrityAfterWriteAsync(id, finalUrl, userId);
 
                 if (needsTranscoding && !string.IsNullOrEmpty(localFilePath))
                 {
@@ -679,6 +716,7 @@ namespace SignageUnicorn.Api.Services
             {
                 var createdMedia = TransformToAbsoluteUrl(result.Value);
                 await _systemLog.LogAsync(null, "INFO", $"[MediaService] UPLOAD_SUCCESS | FileName: {createdMedia.FileName} | MediaID: {createdMedia.MediaId}", "API", userId);
+                SignageUnicorn.Api.Services.Media.MediaIntegrityState.Current?.RequestCheck(createdMedia.MediaId);
 
                 // F22: transcode in the background and publish the result under a NEW file name
                 // with blob_url + hash + size updated in one step (see PublishTranscodedAsync).
@@ -1114,11 +1152,46 @@ namespace SignageUnicorn.Api.Services
                 try { if (File.Exists(sourcePath)) File.Delete(sourcePath); } catch { }
 
                 await _systemLog.LogAsync(null, "INFO", $"[MediaService] {logPrefix}_SUCCESS | MediaID: {mediaId} | {newName}", "SYSTEM", userId);
+                await ResetIntegrityAfterWriteAsync(mediaId, $"/media/{newName}", userId);
                 await NotifyDevicesForMediaAsync(mediaId);
             }
             catch (Exception ex)
             {
                 await _systemLog.LogAsync(null, "ERROR", $"[MediaService] {logPrefix}_FAILED | MediaID: {mediaId} | Error: {ex.Message}", "SYSTEM", userId);
+            }
+        }
+
+        // Media integrity (2.8.15): a row that just got new bytes is a new file as far as the verdict is
+        // concerned. The old status (a loop latch included) is dropped for THAT url and the worker checks
+        // the new file within a minute, so a bad hash is caught before the screens fetch it and a good
+        // replacement is released without an admin click.
+        private async Task ResetIntegrityAfterWriteAsync(string mediaId, string? blobUrl, long? userId)
+        {
+            var state = SignageUnicorn.Api.Services.Media.MediaIntegrityState.Current;
+            // Serialised with the checker's passes (same gate), so a pass that is half-way through cannot
+            // write the old file's verdict over the new file afterwards. A pass takes seconds; if the gate
+            // is not free within 30 s the reset still happens and the re-check fixes any overlap.
+            var held = state != null && await state.Gate.WaitAsync(TimeSpan.FromSeconds(30));
+            try
+            {
+                // The in-memory verdict is file-specific (it carries the stored name), so the new file is
+                // not blocked by the old file's entry and nothing has to be cleared here; the DB columns are
+                // reset for the new url so the operator report does not show a stale verdict.
+                if (!string.IsNullOrEmpty(blobUrl))
+                {
+                    await _deviceRepository.ExecuteSqlAsync(
+                        "UPDATE dbo.sn_media_files SET integrity_status = NULL, integrity_checked_at = NULL, integrity_note = 'new file written; re-check pending', integrity_file = NULL WHERE (CAST(media_id AS nvarchar(50)) = @id OR media_uuid = @id) AND blob_url = @url",
+                        new { id = mediaId, url = blobUrl });
+                }
+            }
+            catch (Exception ex)
+            {
+                await _systemLog.LogAsync(null, "WARNING", $"[MediaService] INTEGRITY_RESET_FAILED | MediaID: {mediaId} | {ex.Message} | the re-check still runs", "API", userId);
+            }
+            finally
+            {
+                if (held) state!.Gate.Release();
+                state?.RequestCheck(mediaId);   // always: the new file is checked within a minute whatever happened above
             }
         }
 

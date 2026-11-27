@@ -143,6 +143,17 @@ namespace SignageUnicorn.Api.Services
 
                 var playlist = await playlistService.GetPlaylistByIdAsync(assignment.PlaylistId);
                 
+                // Media integrity (2.8.15): an item whose file failed the integrity check (or is a loop
+                // suspect) is never handed to a screen. The screen could not verify it and would download
+                // it again and again (27-11-2026). Admins still see it in the playlist editor, flagged.
+                var integrity = SignageUnicorn.Api.Services.Media.MediaIntegrityState.Current;
+                if (playlist?.Items != null && integrity != null)
+                {
+                    var kept = playlist.Items.Where(i => !integrity.IsQuarantined(i.MediaId, i.BlobUrl)).ToList();
+                    if (kept.Count != playlist.Items.Count)
+                        playlist.Items = kept;
+                }
+
                 if (playlist != null && playlist.Active == "Y" && playlist.Items != null)
                 {
                     var repeat = ScheduleWindow.NormalizeRepeat(assignment.RepeatEveryMinutes);

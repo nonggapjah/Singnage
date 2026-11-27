@@ -196,6 +196,30 @@ namespace SignageUnicorn.Api.Tests
         }
 
         [Fact]
+        public async Task ThrottledStreamDeliversTheExactBytesAcrossChunkBoundaries()
+        {
+            // 27-11-2026: the live push stayed at the cap longer than the volume estimate; this pins down
+            // that pacing never reorders, repeats or drops bytes (writes larger and smaller than a chunk,
+            // odd sizes, a low cap so several waits happen inside one write).
+            using var gate = new MediaEgressGate(new MediaEgressSettings(10, 0, 8), "test");
+            var rnd = new Random(1234);
+            var payload = new byte[700_013];
+            rnd.NextBytes(payload);
+            using var sink = new MemoryStream();
+            var body = gate.Throttle(sink, CancellationToken.None);
+            var pos = 0;
+            foreach (var size in new[] { 1, 65_535, 65_536, 65_537, 200_000, 3, 131_072 })
+            {
+                var n = Math.Min(size, payload.Length - pos);
+                await body.WriteAsync(new ReadOnlyMemory<byte>(payload, pos, n), CancellationToken.None);
+                pos += n;
+            }
+            await body.WriteAsync(new ReadOnlyMemory<byte>(payload, pos, payload.Length - pos), CancellationToken.None);
+            Assert.Equal(payload.Length, sink.Length);
+            Assert.True(payload.AsSpan().SequenceEqual(sink.ToArray()), "throttled output differs from the input");
+        }
+
+        [Fact]
         public void SettingsOverridesAreValidatedAndFallBack()
         {
             var baseline = new MediaEgressSettings(40, 60, 150);

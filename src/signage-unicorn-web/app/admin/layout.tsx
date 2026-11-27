@@ -9,6 +9,7 @@ import { useUI } from '@/features/ui/context/UIContext';
 import { useAuth } from '@/features/auth/context/AuthContext';
 import { useVisibleInterval } from '@/features/ui/hooks/useVisibleInterval';
 import { dashboardApi, DashboardStats } from '@/features/dashboard/api/dashboard-api';
+import { MediaIntegrityBanner } from '@/features/system/components/MediaIntegrityBanner';
 import {
     LayoutDashboard,
     FolderOpen,
@@ -419,6 +420,7 @@ export default function AdminLayout({
                 {/* --- Scrollable Content --- */}
                 <main className="flex-1 overflow-y-auto custom-scrollbar relative page-transition scroll-smooth">
                     <div className="relative z-10 pb-20">
+                        <MediaIntegrityBanner />
                         {children}
                     </div>
                 </main>

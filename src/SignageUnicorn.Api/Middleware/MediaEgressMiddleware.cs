@@ -74,6 +74,10 @@ namespace SignageUnicorn.Api.Middleware
             var original = context.Response.Body;
             var throttled = _gate.Throttle(original, ct);
             context.Response.Headers["X-Egress-Gate"] = "admitted";
+            // Media integrity (2.8.15): count admitted downloads per file; a file fetched far more often
+            // than there are screens is a re-download loop and gets quarantined by the worker.
+            if (context.Request.Path.StartsWithSegments("/media"))
+                SignageUnicorn.Api.Services.Media.MediaIntegrityState.Current?.NoteDownload(context.Request.Path.Value);
             try
             {
                 context.Response.Body = throttled;

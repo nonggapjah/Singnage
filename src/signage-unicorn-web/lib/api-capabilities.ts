@@ -21,6 +21,8 @@ export interface ApiCapabilities {
     playbackBatchV2: boolean;
     /** POST /devices/batch-add-playlist accepts `rollout` and /rollouts exists (API 2.8.14). */
     playlistRollout: boolean;
+    /** GET/POST /system/media-integrity exist and bad media is held back from the screens (API 2.8.15). */
+    mediaIntegrity: boolean;
     /** True when the probe found no capabilities endpoint (API < 2.8) and these are the defaults. */
     legacy: boolean;
 }
@@ -34,6 +36,7 @@ export const LEGACY_CAPABILITIES: Readonly<ApiCapabilities> = Object.freeze({
     cookieSession: false,
     playbackBatchV2: false,
     playlistRollout: false,
+    mediaIntegrity: false,
     legacy: true,
 });
 
@@ -67,6 +70,7 @@ export function parseCapabilities(data: unknown): ApiCapabilities | null {
         cookieSession: flag('cookieSession'),
         playbackBatchV2: flag('playbackBatchV2'),
         playlistRollout: flag('playlistRollout'),
+        mediaIntegrity: flag('mediaIntegrity'),
         legacy: false,
     };
 }

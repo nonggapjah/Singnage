@@ -14,6 +14,43 @@ const { checkUpdateUrl, checkRedirectHop, isLoopbackHost } = require('../src/lib
 const { classifyClaimResponse, claimRetryDelay, raceRetryDelay, CLAIM_RETRY_MAX_MS } = require('../src/lib/claim');
 const { classifyBatchResponse } = require('../src/lib/playback-batch');
 const { createRotatingLogger, logFileName, shouldRotate, selectFilesToPrune } = require('../src/lib/logger');
+const { createMismatchParking, isHashMismatchError, nextRefreshDecision } = require('../src/lib/mismatch-park');
+
+// ---------------------------------------------------------------- hash-mismatch parking (2.8.9, 27-11-2026)
+test('a file is parked after three hash mismatches and forgotten after a success', () => {
+    const park = createMismatchParking({ maxFails: 3, parkMs: 60 * 60 * 1000 });
+    const t0 = 1_000_000;
+    assert.deepEqual(park.noteFailure('a.mp4', t0), { parked: false, fails: 1 });
+    assert.deepEqual(park.noteFailure('a.mp4', t0 + 15_000), { parked: false, fails: 2 });
+    const third = park.noteFailure('a.mp4', t0 + 30_000);
+    assert.equal(third.parked, true);
+    assert.equal(third.until, t0 + 30_000 + 60 * 60 * 1000);
+    assert.equal(park.isParked('a.mp4', t0 + 31_000), true);
+    assert.equal(park.isParked('a.mp4', t0 + 30_000 + 60 * 60 * 1000 + 1), false);   // hour over: one more try allowed
+    assert.equal(park.isParked('b.mp4', t0), false);                                    // other files unaffected
+    // a failure while parked does not extend the parking
+    assert.equal(park.noteFailure('a.mp4', t0 + 40_000).until, t0 + 30_000 + 60 * 60 * 1000);
+    park.noteSuccess('a.mp4');
+    assert.equal(park.isParked('a.mp4', t0 + 31_000), false);
+    assert.equal(park.size(), 0);
+});
+
+test('only the hash-mismatch error parks; other failures keep the normal retry', () => {
+    assert.equal(isHashMismatchError('Downloaded file is corrupted (MD5 hash mismatch).'), true);
+    assert.equal(isHashMismatchError('Server status 503'), false);
+    assert.equal(isHashMismatchError(undefined), false);
+});
+
+test('the periodic schedule refresh is postponed at most twice while a sync runs', () => {
+    let d = nextRefreshDecision(false, 0);
+    assert.deepEqual(d, { run: true, skips: 0 });
+    d = nextRefreshDecision(true, d.skips);  assert.deepEqual(d, { run: false, skips: 1 });
+    d = nextRefreshDecision(true, d.skips);  assert.deepEqual(d, { run: false, skips: 2 });
+    d = nextRefreshDecision(true, d.skips);  assert.deepEqual(d, { run: true, skips: 0 });   // third tick: refresh anyway
+    d = nextRefreshDecision(true, d.skips);  assert.deepEqual(d, { run: false, skips: 1 });
+    d = nextRefreshDecision(false, d.skips); assert.deepEqual(d, { run: true, skips: 0 });
+    assert.deepEqual(nextRefreshDecision(true, 'garbage'), { run: false, skips: 1 });
+});
 
 // ---------------------------------------------------------------- cache names (F05 / contract 3)
 test('cacheNameFor uses the stored basename and never the logical file name', () => {

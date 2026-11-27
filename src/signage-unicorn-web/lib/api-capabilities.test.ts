@@ -36,6 +36,9 @@ describe('api capabilities (mixed-version rollout)', () => {
         expect(parseCapabilities({ ...NEW_API, playlistRollout: 'yes' })?.playlistRollout).toBe(false);
         expect(parseCapabilities({ ...NEW_API, playlistRollout: true })?.playlistRollout).toBe(true);
         expect(LEGACY_CAPABILITIES.playlistRollout).toBe(false);
+        expect(parseCapabilities({ ...NEW_API, mediaIntegrity: true })?.mediaIntegrity).toBe(true);
+        expect(parseCapabilities(NEW_API)?.mediaIntegrity).toBe(false);
+        expect(LEGACY_CAPABILITIES.mediaIntegrity).toBe(false);
     });
 
     it('404 = the deployed 2.7.x API: legacy defaults, cached like a real answer', async () => {
