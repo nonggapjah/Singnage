@@ -66,9 +66,66 @@ const TokenBadges: React.FC<{ device: Device; compact?: boolean }> = ({ device, 
 };
 const isDeviceOnline = (d: Device) => ONLINE_STATES.includes((d.status || '').toUpperCase());
 
-export default function DevicesPage() {
+// Audio player (web 2.4.14 / API 2.8.6): a row registered by the Signage Unicorn Audio app. It has
+// no screen, so the card shows a volume control instead of "View screen" and "Restart player"
+// instead of "Reboot" (the same RESTART command: the app restarts, never the PC it runs on).
+const isAudioDevice = (d: Device) => (d.playbackMode || 'screen') === 'audio';
+const AudioBadge: React.FC<{ compact?: boolean }> = ({ compact }) => (
+    <span
+        className={`inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-wider border text-accent-cyan bg-accent-cyan/10 border-accent-cyan/30 ${compact ? '' : 'ml-1'}`}
+        title="Audio player (Signage Unicorn Audio): sound only, no screen"
+    >
+        Audio
+    </span>
+);
+
+/** Slider + mute for an audio device. Sends SET_VOLUME:<n> 400 ms after the last move, without the confirm dialog. */
+const VolumeControl: React.FC<{ deviceId: string; initial: number | null | undefined; onSend: (deviceId: string, level: number) => Promise<void> }> = ({ deviceId, initial, onSend }) => {
+    const start = typeof initial === 'number' ? Math.min(100, Math.max(0, initial)) : 70;
+    const [level, setLevel] = useState<number>(start);
+    const [lastAudible, setLastAudible] = useState<number>(start > 0 ? start : 70);
+    const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // A refreshed row (another admin or the tray menu changed the level) updates the slider unless a
+    // local change is still waiting to be sent.
+    useEffect(() => {
+        if (typeof initial !== 'number' || timer.current) return;
+        const v = Math.min(100, Math.max(0, initial));
+        setLevel(v);
+        if (v > 0) setLastAudible(v);
+    }, [initial]);
+    const change = (v: number) => {
+        setLevel(v);
+        if (v > 0) setLastAudible(v);
+        if (timer.current) clearTimeout(timer.current);
+        timer.current = setTimeout(() => { timer.current = null; void onSend(deviceId, v); }, 400);
+    };
+    const id = `volume-${deviceId}`;
+    return (
+        <div className="flex items-center gap-2 w-full">
+            <label htmlFor={id} className="text-xs font-bold uppercase tracking-wider text-muted-foreground shrink-0">Volume</label>
+            <input id={id} type="range" min={0} max={100} value={level} onChange={(e) => change(Number(e.target.value))} className="flex-1 min-w-0 h-6 accent-[var(--primary)]" />
+            <span className="w-10 text-right font-mono text-sm text-foreground">{level}%</span>
+            <button
+                type="button"
+                onClick={() => change(level === 0 ? lastAudible : 0)}
+                className="py-1 px-2 rounded-lg text-xs font-bold uppercase tracking-wider border border-border bg-muted/20 hover:bg-muted/40 text-foreground"
+            >
+                {level === 0 ? 'Unmute' : 'Mute'}
+            </button>
+        </div>
+    );
+};
+
+// mode (web 2.4.18): 'screen' = /admin/devices (screens only), 'audio' = /admin/audio (audio players
+// only). Everything else - cards, dialogs, batch actions - is shared.
+export default function DevicesPage({ mode = 'screen' }: { mode?: 'screen' | 'audio' }) {
+    const isAudioPage = mode === 'audio';
+    const kind = isAudioPage ? 'audio player' : 'screen';
+    const kindPlural = isAudioPage ? 'audio players' : 'screens';
     const { showModal } = useUI();
-    const [devices, setDevices] = useState<Device[]>([]);
+    const [allDevices, setDevices] = useState<Device[]>([]);
+    // Only the devices of this page's kind reach the stats, filters, selection and batch actions.
+    const devices = useMemo(() => allDevices.filter(d => isAudioDevice(d) === isAudioPage), [allDevices, isAudioPage]);
     const [playlists, setPlaylists] = useState<Playlist[]>([]);
 
     // UI State
@@ -88,6 +145,12 @@ export default function DevicesPage() {
     // Modal State
     const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
     const [isBatchRemoveModalOpen, setIsBatchRemoveModalOpen] = useState(false);
+    // web 2.4.19: Change branch (audio players 2.8.6+; the player owns its branch code and re-sends it
+    // on every heartbeat, so the console asks the player to change it instead of editing the row).
+    const [isBranchModalOpen, setIsBranchModalOpen] = useState(false);
+    const [branchInput, setBranchInput] = useState('');
+    const [branchBusy, setBranchBusy] = useState(false);
+    const branchInputRef = useRef<HTMLInputElement | null>(null);
     const [isBatchAssignModalOpen, setIsBatchAssignModalOpen] = useState(false);
     const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
     const [activeScreenshotDeviceId, setActiveScreenshotDeviceId] = useState<string | null>(null);
@@ -181,6 +244,16 @@ export default function DevicesPage() {
         fetchMediaNames();
     }
 
+    // Audio devices: the volume slider sends straight away (a confirm per nudge would be unusable).
+    async function sendVolume(deviceId: string, level: number) {
+        try {
+            const res = await deviceApi.sendCommand(deviceId, `SET_VOLUME:${level}`);
+            if (!res.success) showNotify('Volume not sent', res.message || 'Unknown error', 'ERROR');
+        } catch {
+            showNotify('Volume not sent', 'A critical error occurred while sending the command.', 'ERROR');
+        }
+    }
+
     async function handleCommand(deviceId: string, command: string) {
         showConfirm(
             'Send command',
@@ -219,6 +292,27 @@ export default function DevicesPage() {
                 }
             }
         );
+    }
+
+    async function handleBatchSetBranch() {
+        const code = branchInput.trim();
+        if (selectedIds.length === 0 || !code || branchBusy) return;
+        setBranchBusy(true);
+        try {
+            const res = await deviceApi.batchSendCommand(selectedIds, `SET_BRANCH:${code}`);
+            if (res.success) {
+                showNotify('Branch change queued', `${selectedIds.length} ${selectedIds.length === 1 ? 'player' : 'players'} will move to branch ${code} on their next check-in (players 2.8.6 or newer).`, 'SUCCESS');
+                setIsBranchModalOpen(false);
+                setBranchInput('');
+                setSelectedIds([]);
+            } else {
+                showNotify('Branch change failed', res.message || 'Unknown error', 'ERROR');
+            }
+        } catch {
+            showNotify('Error', 'A critical error occurred while sending the branch change.', 'ERROR');
+        } finally {
+            setBranchBusy(false);
+        }
     }
 
     async function handleClearSchedule(deviceIds: string[]) {
@@ -553,7 +647,7 @@ export default function DevicesPage() {
     const activeScreenshotDevice = activeScreenshotDeviceId ? devices.find(d => d.deviceId === activeScreenshotDeviceId) : undefined;
 
     const controlClass = 'bg-muted/20 border border-border rounded-lg px-4 py-2 text-xs font-bold uppercase outline-none focus:border-accent-cyan focus:ring-1 focus:ring-accent-cyan/30 text-foreground hover:bg-muted/40 cursor-pointer transition-colors';
-    const smallActionClass = 'py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors border';
+    const smallActionClass = 'py-2 rounded-lg text-sm font-bold uppercase tracking-wider transition-colors border';
 
     if (loading) {
         return <div className="p-10 text-center text-accent-cyan tracking-widest font-mono" role="status">Loading devices…</div>;
@@ -564,15 +658,15 @@ export default function DevicesPage() {
             {/* Header & Stats */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
                 <div>
-                    <h1 className="text-4xl font-black uppercase tracking-tighter neon-text mb-2">Devices</h1>
+                    <h1 className="text-4xl font-black uppercase tracking-tighter neon-text mb-2">{isAudioPage ? 'Audio players' : 'Devices'}</h1>
                     <p className="text-sm font-bold text-muted-foreground">
-                        Screens, schedules and remote commands
+                        {isAudioPage ? 'Sound-only players: schedules, announcements and volume' : 'Screens, schedules and remote commands'}
                     </p>
                 </div>
                 <dl className="flex gap-4">
                     <div className="glass-panel px-6 py-3 rounded-xl flex flex-col items-center min-w-[100px]">
                         <dd className="text-2xl font-black text-foreground">{stats.total}</dd>
-                        <dt className="text-xs font-bold text-muted-foreground uppercase tracking-widest">Screens</dt>
+                        <dt className="text-xs font-bold text-muted-foreground uppercase tracking-widest">{isAudioPage ? 'Players' : 'Screens'}</dt>
                     </div>
                     <div className="glass-panel px-6 py-3 rounded-xl flex flex-col items-center min-w-[100px] bg-green-500/5">
                         <dd className="text-2xl font-black text-green-600 dark:text-green-400">{stats.online}</dd>
@@ -584,7 +678,7 @@ export default function DevicesPage() {
                     </div>
                     <div
                         className={`glass-panel px-6 py-3 rounded-xl flex flex-col items-center min-w-[100px] ${stats.total > 0 && stats.tokenised === stats.total ? 'bg-green-500/5' : 'bg-amber-500/5'}`}
-                        title="Screens that hold a device token. Security:DeviceAuth may be switched to Required only when this equals the screen count."
+                        title={`${isAudioPage ? 'Audio players' : 'Screens'} that hold a device token. Security:DeviceAuth may be switched to Required only when this equals the ${kind} count.`}
                     >
                         <dd className={`text-2xl font-black ${stats.total > 0 && stats.tokenised === stats.total ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'}`}>
                             {stats.tokenised}<span className="text-sm font-bold text-muted-foreground">/{stats.total}</span>
@@ -697,7 +791,7 @@ export default function DevicesPage() {
                                 </button>
 
                                 {!isCollapsed && (
-                                    <div id={panelId} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                                    <div id={panelId} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 min-[2200px]:grid-cols-4 gap-6">
                                         {branchDevices.map((device, index) => {
                                             const isOnline = isDeviceOnline(device);
                                             const currentPlaylist = findCurrentPlaylist(device);
@@ -740,12 +834,13 @@ export default function DevicesPage() {
                                                                     {device.status}
                                                                 </span>
                                                             </div>
-                                                            <h3 className="text-base font-bold text-foreground truncate w-full" title={device.deviceName}>{device.deviceName}</h3>
-                                                            <p className="text-xs text-muted-foreground font-mono mt-0.5 flex items-center gap-2 truncate">
+                                                            <h3 className="text-lg font-bold text-foreground truncate w-full" title={device.deviceName}>{device.deviceName}</h3>
+                                                            <p className="text-sm text-muted-foreground font-mono mt-0.5 flex items-center gap-2 truncate">
                                                                 #{displayId.substring(0, 12)}…
                                                                 {device.appVersion && <span className="text-muted-foreground/70">[{device.appVersion}]</span>}
                                                                 {device.currentPlaylistId && <span className="text-accent-cyan font-bold">: Active</span>}
                                                                 <TokenBadges device={device} />
+                                                                {isAudioDevice(device) && <AudioBadge />}
                                                             </p>
                                                         </div>
                                                         <div className="text-right">
@@ -754,38 +849,38 @@ export default function DevicesPage() {
                                                     </div>
 
                                                     <dl className="space-y-3 mb-6 bg-muted/10 rounded-xl p-3 border border-border/50">
-                                                        <div className="flex justify-between items-center gap-2 text-xs">
-                                                            <dt className="text-muted-foreground uppercase tracking-wider font-bold text-xs shrink-0">Device ID</dt>
+                                                        <div className="flex justify-between items-center gap-2 text-sm">
+                                                            <dt className="text-muted-foreground uppercase tracking-wider font-bold shrink-0">Device ID</dt>
                                                             <dd className="min-w-0">
                                                                 <button
                                                                     type="button"
                                                                     onClick={() => copyDeviceId(device.deviceId)}
                                                                     title={`${device.deviceId} (click to copy)`}
                                                                     aria-label={`Copy device ID ${device.deviceId}`}
-                                                                    className="text-foreground font-mono text-xs truncate max-w-full hover:text-accent-cyan transition-colors flex items-center gap-1 rounded"
+                                                                    className="text-foreground font-mono text-sm truncate max-w-full hover:text-accent-cyan transition-colors flex items-center gap-1 rounded"
                                                                 >
                                                                     <span className="truncate">{device.deviceId}</span>
                                                                     <span className="opacity-40 shrink-0" aria-hidden="true">⧉</span>
                                                                 </button>
                                                             </dd>
                                                         </div>
-                                                        <div className="flex justify-between items-center text-xs">
+                                                        <div className="flex justify-between items-center text-sm">
                                                             <dt className="text-muted-foreground uppercase tracking-wider font-bold">Check-in</dt>
-                                                            <dd className="text-foreground font-mono text-xs">
+                                                            <dd className="text-foreground font-mono text-sm">
                                                                 {formatDateTime(device.lastCheckIn)}
                                                             </dd>
                                                         </div>
-                                                        <div className="flex justify-between items-center text-xs gap-2">
+                                                        <div className="flex justify-between items-center text-sm gap-2">
                                                             <dt className="text-muted-foreground uppercase tracking-wider font-bold shrink-0">Playlist</dt>
-                                                            <dd className="text-accent-cyan font-bold truncate min-w-0 text-sm" title={currentPlaylistLabel(device, currentPlaylist)}>
+                                                            <dd className="text-accent-cyan font-bold truncate min-w-0 text-base" title={currentPlaylistLabel(device, currentPlaylist)}>
                                                                 {currentPlaylistLabel(device, currentPlaylist)}
                                                             </dd>
                                                         </div>
                                                         {device.scheduleMode && (
-                                                            <div className="flex justify-between items-center text-xs gap-2">
+                                                            <div className="flex justify-between items-center text-sm gap-2">
                                                                 <dt className="text-muted-foreground uppercase tracking-wider font-bold shrink-0">Schedule</dt>
                                                                 <dd
-                                                                    className={`text-xs uppercase ${device.scheduleMode === 'explicit' && !device.currentPlaylistId ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`}
+                                                                    className={`text-sm uppercase ${device.scheduleMode === 'explicit' && !device.currentPlaylistId ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`}
                                                                     title={device.scheduleMode === 'explicit' && !device.currentPlaylistId
                                                                         ? 'An admin cleared the playlists of this screen, so it stays idle on purpose instead of inheriting a sibling. Assign a playlist or reset it to inherit.'
                                                                         : undefined}
@@ -798,9 +893,9 @@ export default function DevicesPage() {
                                                         )}
                                                         {(device.currentPlaylistId || device.currentMediaId) && (
                                                             <>
-                                                                <div className="flex justify-between items-center text-xs pt-2 mt-2 border-t border-border/50 gap-2">
+                                                                <div className="flex justify-between items-center text-sm pt-2 mt-2 border-t border-border/50 gap-2">
                                                                     <dt className="text-muted-foreground uppercase tracking-wider font-bold shrink-0">Current clip</dt>
-                                                                    <dd className="text-foreground font-mono text-xs truncate min-w-0 text-right" title={mediaName}>{mediaName}</dd>
+                                                                    <dd className="text-foreground font-mono text-sm truncate min-w-0 text-right" title={mediaName}>{mediaName}</dd>
                                                                 </div>
 
                                                                 {/* Segmented Playlist Progress */}
@@ -870,22 +965,28 @@ export default function DevicesPage() {
 
                                                     <div className="grid grid-cols-3 gap-2 mt-auto">
                                                         <div className="col-span-3 mb-1">
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => viewScreenshot(device.deviceId)}
-                                                                className="w-full py-2 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-xs font-black text-emerald-700 dark:text-emerald-400 uppercase tracking-wider transition-colors flex items-center justify-center gap-1.5"
-                                                            >
-                                                                <span aria-hidden="true">📺</span> View screen
-                                                            </button>
+                                                            {isAudioDevice(device) ? (
+                                                                <div className="w-full py-2 px-3 rounded-lg bg-muted/10 border border-border/50">
+                                                                    <VolumeControl deviceId={device.deviceId} initial={device.volume} onSend={sendVolume} />
+                                                                </div>
+                                                            ) : (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => viewScreenshot(device.deviceId)}
+                                                                    className="w-full py-2 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 text-sm font-black text-emerald-700 dark:text-emerald-400 uppercase tracking-wider transition-colors flex items-center justify-center gap-1.5"
+                                                                >
+                                                                    <span aria-hidden="true">📺</span> View screen
+                                                                </button>
+                                                            )}
                                                         </div>
                                                         <div className="col-span-3 flex gap-2 mb-1">
-                                                            <button type="button" onClick={() => openAssignModal(device.deviceId)} className="flex-[2] py-2 rounded-lg bg-accent-cyan/10 hover:bg-accent-cyan/20 border border-accent-cyan/20 text-xs font-black text-accent-cyan uppercase tracking-wider transition-colors">Assign playlist</button>
-                                                            <button type="button" onClick={() => handleClearSchedule([device.deviceId])} className="flex-1 py-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-xs font-black text-red-600 dark:text-red-400 uppercase tracking-wider transition-colors" title="Clear playlists">Clear</button>
+                                                            <button type="button" onClick={() => openAssignModal(device.deviceId)} className="flex-[2] py-2 rounded-lg bg-accent-cyan/10 hover:bg-accent-cyan/20 border border-accent-cyan/20 text-sm font-black text-accent-cyan uppercase tracking-wider transition-colors">Assign playlist</button>
+                                                            <button type="button" onClick={() => handleClearSchedule([device.deviceId])} className="flex-1 py-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-sm font-black text-red-600 dark:text-red-400 uppercase tracking-wider transition-colors" title="Clear playlists">Clear</button>
                                                         </div>
                                                         <button type="button" onClick={() => handleCommand(device.deviceId, 'RELOAD')} className={`${smallActionClass} bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/20 text-amber-700 dark:text-amber-400`}>Reset</button>
                                                         <button type="button" onClick={() => handleCommand(device.deviceId, 'REFRESH')} className={`${smallActionClass} bg-muted/20 hover:bg-muted/40 border-border text-muted-foreground hover:text-foreground`}>Refresh</button>
                                                         {isOnline ? (
-                                                            <button type="button" onClick={() => handleCommand(device.deviceId, 'RESTART')} className={`${smallActionClass} bg-muted/20 hover:bg-red-500/10 border-border text-muted-foreground hover:text-red-500`}>Reboot</button>
+                                                            <button type="button" onClick={() => handleCommand(device.deviceId, 'RESTART')} className={`${smallActionClass} bg-muted/20 hover:bg-red-500/10 border-border text-muted-foreground hover:text-red-500`}>{isAudioDevice(device) ? 'Restart player' : 'Reboot'}</button>
                                                         ) : (
                                                             <button type="button" onClick={() => handleDeleteDevice(device.deviceId)} className={`${smallActionClass} bg-muted/20 hover:bg-red-500/10 border-border text-muted-foreground hover:text-red-500`}>Remove</button>
                                                         )}
@@ -900,7 +1001,10 @@ export default function DevicesPage() {
                     })}
                     {filteredDevices.length === 0 && (
                         <div className="py-20 text-center">
-                            <h3 className="text-xl font-bold uppercase tracking-widest text-muted-foreground">No screens match the current filters</h3>
+                            <h3 className="text-xl font-bold uppercase tracking-widest text-muted-foreground">{devices.length === 0 && isAudioPage ? 'No audio player registered yet' : `No ${kindPlural} match the current filters`}</h3>
+                            {devices.length === 0 && isAudioPage && (
+                                <p className="mt-3 text-sm text-muted-foreground max-w-xl mx-auto">Install <span className="font-mono text-foreground">Signage Unicorn Audio</span> on a PC with speakers and register it; the player then appears here with an AUDIO badge and a volume slider. Screens stay on the Devices page.</p>
+                            )}
                         </div>
                     )}
                 </div>
@@ -995,6 +1099,7 @@ export default function DevicesPage() {
                                                                     <div className="text-xs text-muted-foreground font-mono mt-0.5 flex items-center gap-1 flex-wrap">
                                                                         <span>{device.appVersion || 'version unknown'}</span>
                                                                         <TokenBadges device={device} compact />
+                                                                        {isAudioDevice(device) && <AudioBadge compact />}
                                                                     </div>
                                                                 </td>
                                                                 <td className="p-4">
@@ -1083,10 +1188,10 @@ export default function DevicesPage() {
                                                                         <button
                                                                             type="button"
                                                                             onClick={() => handleCommand(device.deviceId, 'RESTART')}
-                                                                            aria-label={`Reboot ${device.deviceName}`}
+                                                                            aria-label={`${isAudioDevice(device) ? 'Restart player' : 'Reboot'} ${device.deviceName}`}
                                                                             className="text-xs text-red-600 dark:text-red-400 hover:bg-red-500/10 border border-transparent hover:border-red-500/20 px-3 py-1.5 rounded transition-colors uppercase font-bold tracking-wider"
                                                                         >
-                                                                            Reboot
+                                                                            {isAudioDevice(device) ? 'Restart player' : 'Reboot'}
                                                                         </button>
                                                                     ) : (
                                                                         <button
@@ -1112,7 +1217,10 @@ export default function DevicesPage() {
                     })}
                     {filteredDevices.length === 0 && (
                         <div className="py-20 text-center">
-                            <h3 className="text-xl font-bold uppercase tracking-widest text-muted-foreground">No screens match the current filters</h3>
+                            <h3 className="text-xl font-bold uppercase tracking-widest text-muted-foreground">{devices.length === 0 && isAudioPage ? 'No audio player registered yet' : `No ${kindPlural} match the current filters`}</h3>
+                            {devices.length === 0 && isAudioPage && (
+                                <p className="mt-3 text-sm text-muted-foreground max-w-xl mx-auto">Install <span className="font-mono text-foreground">Signage Unicorn Audio</span> on a PC with speakers and register it; the player then appears here with an AUDIO badge and a volume slider. Screens stay on the Devices page.</p>
+                            )}
                         </div>
                     )}
                 </div>
@@ -1128,6 +1236,7 @@ export default function DevicesPage() {
                     availablePlaylists={playlists}
                     scheduleMode={selectedDevice?.scheduleMode}
                     onScheduleModeChanged={fetchDevices}
+                    playbackMode={selectedDevice?.playbackMode}
                 />
             )}
 
@@ -1142,6 +1251,58 @@ export default function DevicesPage() {
                     }}
                 />
             )}
+
+            <Modal
+                isOpen={isBranchModalOpen}
+                onClose={() => { if (!branchBusy) setIsBranchModalOpen(false); }}
+                size="md"
+                labelledBy="branch-modal-title"
+                describedBy="branch-modal-desc"
+                showClose
+                closeDisabled={branchBusy}
+                initialFocusRef={branchInputRef}
+                className="p-6 space-y-5 bg-card-solid"
+            >
+                <form
+                    onSubmit={(e) => { e.preventDefault(); void handleBatchSetBranch(); }}
+                    className="space-y-5"
+                >
+                    <div className="pr-10">
+                        <h3 id="branch-modal-title" className="text-xl font-bold uppercase tracking-wider text-accent-purple">Change branch</h3>
+                        <p id="branch-modal-desc" className="text-sm text-muted-foreground mt-2">
+                            {selectedIds.length} selected {selectedIds.length === 1 ? 'player' : 'players'}
+                            {(() => {
+                                const current = Array.from(new Set(devices.filter(d => selectedIds.includes(d.deviceId)).map(d => d.branchCode || 'UNASSIGNED')));
+                                return current.length > 0 ? ` currently in ${current.length === 1 ? 'branch' : 'branches'} ${current.join(', ')}` : '';
+                            })()}.
+                            Each player saves the new code and reports it on its next check-in, usually within a minute.
+                            Players older than 2.8.6 ignore this command.
+                        </p>
+                    </div>
+                    <div className="space-y-2">
+                        <label htmlFor="branch-new-code" className="block text-xs font-bold text-muted-foreground uppercase tracking-widest">New branch code</label>
+                        <input
+                            id="branch-new-code"
+                            ref={branchInputRef}
+                            type="text"
+                            value={branchInput}
+                            onChange={(e) => setBranchInput(e.target.value)}
+                            maxLength={30}
+                            autoComplete="off"
+                            spellCheck={false}
+                            placeholder="e.g. MUSIC"
+                            className="w-full px-4 py-3 bg-muted/20 border border-border rounded-lg text-base font-mono tracking-wide text-foreground focus:border-accent-purple focus:ring-1 focus:ring-accent-purple/30 outline-none transition-colors placeholder:text-muted-foreground"
+                        />
+                        <p className="text-xs text-muted-foreground">Up to 30 characters. Playlists assigned directly to a player stay with it; a player without its own playlist follows a same-named sibling in the new branch.</p>
+                    </div>
+                    <div className="flex items-center justify-end gap-3 pt-1">
+                        <button type="button" onClick={() => setIsBranchModalOpen(false)} disabled={branchBusy} className="px-5 py-2 rounded-xl bg-muted/30 text-foreground font-bold uppercase tracking-widest text-xs hover:bg-muted/50 transition-colors disabled:opacity-50">Cancel</button>
+                        <button type="submit" disabled={branchBusy || branchInput.trim().length === 0} className="px-5 py-2 rounded-xl bg-accent-purple text-white font-black uppercase tracking-widest text-xs hover:brightness-110 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                            {branchBusy ? 'Sending…' : `Move ${selectedIds.length} ${selectedIds.length === 1 ? 'player' : 'players'}`}
+                        </button>
+                    </div>
+                </form>
+            </Modal>
 
             {isBatchAssignModalOpen && (
                 <BatchAssignPlaylistModal
@@ -1224,6 +1385,15 @@ export default function DevicesPage() {
                         >
                             Update client
                         </button>
+                        {isAudioPage && (
+                            <button
+                                type="button"
+                                onClick={() => { setBranchInput(''); setIsBranchModalOpen(true); }}
+                                className="px-5 py-2 rounded-xl bg-accent-purple/15 text-accent-purple border border-accent-purple/40 font-black uppercase tracking-widest text-xs hover:bg-accent-purple hover:text-white transition-colors"
+                            >
+                                Change branch
+                            </button>
+                        )}
                     </div>
 
                     <div className="border-l border-border pl-6">

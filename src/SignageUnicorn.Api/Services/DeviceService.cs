@@ -38,6 +38,32 @@ namespace SignageUnicorn.Api.Services
             await NotifyScheduleInheritorsAsync(deviceId);
         }
 
+        /// <summary>
+        /// Adds (or replaces) this playlist in one screen's assignments with the given schedule and
+        /// queues SYNC_SCHEDULE. Shared by POST /devices/batch-add-playlist and the rollout worker
+        /// (API 2.8.14), so both paths assign exactly the same way: one entry per playlist per screen.
+        /// </summary>
+        public async Task AssignPlaylistAsync(string deviceId, string playlistId, PlaylistScheduleFields schedule)
+        {
+            var current = await GetAssignedPlaylistsAsync(deviceId);
+            var updated = current.ToList();
+            updated.RemoveAll(x => x.PlaylistId == playlistId);
+            updated.Add(new DevicePlaylistDto
+            {
+                DeviceId = deviceId,
+                PlaylistId = playlistId,
+                StartDate = schedule.StartDate,
+                EndDate = schedule.EndDate,
+                StartTime = schedule.StartTime,
+                EndTime = schedule.EndTime,
+                DaysOfWeek = schedule.DaysOfWeek,
+                RepeatEveryMinutes = schedule.RepeatEveryMinutes,
+                IsActive = true
+            });
+            await UpdateAssignedPlaylistsAsync(deviceId, updated);
+            await SendCommandAsync(deviceId, "SYNC_SCHEDULE");
+        }
+
         // Round 3 (#11 / Codex round-3 finding 11). A screen in 'inherit' mode plays what its sibling
         // (same branch + name) is assigned, so every change to that sibling's assignments -- replace,
         // clear, reset to inherit -- must reach the inheritors too, or they keep the previous content
@@ -88,6 +114,7 @@ namespace SignageUnicorn.Api.Services
             // has assigned or deliberately cleared it (schedule_mode = 'explicit'), an empty list
             // means "play nothing" -- clearing a screen used to make it copy its neighbour instead.
             var deviceRow = await _deviceRepository.GetDeviceByIdAsync(deviceId);
+            var playbackMode = PlaybackModes.Normalize(deviceRow?.PlaybackMode);
             bool mayInherit = !string.Equals(deviceRow?.ScheduleMode, "explicit", StringComparison.OrdinalIgnoreCase);
             if (mayInherit && (assignments == null || !assignments.Any()))
             {
@@ -101,19 +128,62 @@ namespace SignageUnicorn.Api.Services
             int currentOrder = 1;
 
             var now = DateTime.UtcNow;
+            // Dayparts (2.8.7): daily windows and days of the week are evaluated in the store's time zone.
+            var configuration = _serviceProvider.GetService(typeof(Microsoft.Extensions.Configuration.IConfiguration)) as Microsoft.Extensions.Configuration.IConfiguration;
+            var tz = ScheduleWindow.ResolveTimeZone(configuration?["Schedule:TimeZoneId"]);
+            var localNow = ScheduleWindow.ToLocal(now, tz);
+            var isAudioDevice = playbackMode == PlaybackModes.Audio;
 
             foreach (var assignment in assignments)
             {
                 // Check Schedule Dates
                 if (assignment.StartDate.HasValue && now < assignment.StartDate.Value) continue;
                 if (assignment.EndDate.HasValue && now > assignment.EndDate.Value) continue;
+                if (!ScheduleWindow.IsWithin(localNow, assignment.StartTime, assignment.EndTime, assignment.DaysOfWeek)) continue;
 
                 var playlist = await playlistService.GetPlaylistByIdAsync(assignment.PlaylistId);
                 
+                // Media integrity (2.8.15): an item whose file failed the integrity check (or is a loop
+                // suspect) is never handed to a screen. The screen could not verify it and would download
+                // it again and again (27-11-2026). Admins still see it in the playlist editor, flagged.
+                var integrity = SignageUnicorn.Api.Services.Media.MediaIntegrityState.Current;
+                if (playlist?.Items != null && integrity != null)
+                {
+                    var kept = playlist.Items.Where(i => !integrity.IsQuarantined(i.MediaId, i.BlobUrl)).ToList();
+                    if (kept.Count != playlist.Items.Count)
+                        playlist.Items = kept;
+                }
+
                 if (playlist != null && playlist.Active == "Y" && playlist.Items != null)
                 {
+                    var repeat = ScheduleWindow.NormalizeRepeat(assignment.RepeatEveryMinutes);
+                    if (isAudioDevice && repeat.HasValue)
+                    {
+                        // Repeating announcement: not part of the loop. The audio player plays these items
+                        // once every N minutes between its regular tracks. Screens ignore the flag.
+                        var group = new SignageUnicorn.Api.Models.Domain.InterjectionDto
+                        {
+                            PlaylistId = playlist.PlaylistId,
+                            PlaylistName = playlist.PlaylistName,
+                            EveryMinutes = repeat.Value
+                        };
+                        foreach (var item in playlist.Items)
+                        {
+                            if (!PlaybackModes.Accepts(playbackMode, item.Media?.FileName ?? item.Media?.BlobUrl)) continue;
+                            group.Items.Add(item);
+                        }
+                        if (group.Items.Count > 0)
+                            (schedule.Interjections ??= new List<SignageUnicorn.Api.Models.Domain.InterjectionDto>()).Add(group);
+                        continue;
+                    }
+
                     foreach (var item in playlist.Items)
                     {
+                        // Audio player: a screen never receives an audio file (the deployed kiosk
+                        // client would show it as a broken image) and an audio player never receives
+                        // an image (nothing to hear). Decided per device, so one playlist can be
+                        // assigned to both kinds.
+                        if (!PlaybackModes.Accepts(playbackMode, item.Media?.FileName ?? item.Media?.BlobUrl)) continue;
                         item.PositionOrder = currentOrder++;
                         schedule.Items.Add(item);
                         
@@ -133,7 +203,7 @@ namespace SignageUnicorn.Api.Services
             var versionSource = string.Join("|", assignmentList
                 .OrderBy(a => a.PlaylistId, StringComparer.Ordinal)
                 .ThenBy(a => a.StartDate)
-                .Select(a => $"{a.PlaylistId}:{a.StartDate:O}:{a.EndDate:O}:{a.IsActive}"));
+                .Select(a => $"{a.PlaylistId}:{a.StartDate:O}:{a.EndDate:O}:{a.IsActive}:{a.StartTime}:{a.EndTime}:{a.DaysOfWeek}:{a.RepeatEveryMinutes}"));
             using (var sha = System.Security.Cryptography.SHA256.Create())
             {
                 var bytes = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(versionSource));
@@ -144,6 +214,11 @@ namespace SignageUnicorn.Api.Services
             {
                 if (a.StartDate.HasValue && a.StartDate.Value > now && (next == null || a.StartDate.Value < next)) next = a.StartDate.Value;
                 if (a.EndDate.HasValue && a.EndDate.Value > now && (next == null || a.EndDate.Value < next)) next = a.EndDate.Value;
+            }
+            foreach (var a in assignmentList)
+            {
+                var boundary = ScheduleWindow.NextBoundaryUtc(now, tz, a.StartTime, a.EndTime, a.DaysOfWeek);
+                if (boundary.HasValue && boundary.Value > now && (next == null || boundary.Value < next)) next = boundary.Value;
             }
             schedule.NextTransitionAtUtc = next;
             return schedule;
@@ -268,6 +343,14 @@ namespace SignageUnicorn.Api.Services
 
         public async Task SendCommandAsync(string deviceId, string command)
         {
+            // Audio player: SET_VOLUME:<0-100> is also remembered on the row so the console shows the
+            // level and the player can pick it up after a restart.
+            if (DeviceCommands.TryParseVolume(command, out var volumeLevel))
+            {
+                command = DeviceCommands.VolumeCommand(volumeLevel);
+                await _deviceRepository.SetDeviceVolumeAsync(deviceId, volumeLevel);
+            }
+
             // Case 4.2 & 3: Enhance RESTART command with resume data
             if (command.ToUpper() == "RESTART")
             {
@@ -325,6 +408,12 @@ namespace SignageUnicorn.Api.Services
                     {
                         finalCommand = $"RESTART:{dev.CurrentMediaId}:{dev.CurrentPositionSec ?? 0}";
                     }
+                }
+
+                if (DeviceCommands.TryParseVolume(finalCommand, out var batchVolume))
+                {
+                    finalCommand = DeviceCommands.VolumeCommand(batchVolume);
+                    await _deviceRepository.SetDeviceVolumeAsync(id, batchVolume);
                 }
 
                 var result = await _deviceRepository.AddCommandAsync(id, finalCommand);

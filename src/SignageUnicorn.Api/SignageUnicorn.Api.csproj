@@ -4,7 +4,10 @@
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>2.8.3</Version>
+    <Version>2.8.15</Version>
+    <!-- Old publish outputs live under publish/<version> inside the project; the Web SDK content glob (**/*.json, **/*.config)
+         would re-publish them and nest one level deeper every release (found 27-11-2026: 11 MB of junk in the bundle). -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);publish\**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>

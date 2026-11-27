@@ -43,6 +43,7 @@ namespace SignageUnicorn.Api.Repositories.Implementations
                 p.Add("@p_branch_code", request.BranchCode);
                 p.Add("@p_ip_address", request.IpAddress);
                 p.Add("@p_location", request.Location);
+                p.Add("@p_playback_mode", PlaybackModes.NormalizeOrNull(request.PlaybackMode));
 
                 // 1. Status (ALWAYS First)
                 using var multi = await connection.QueryMultipleAsync("sp_device_std", p, commandType: CommandType.StoredProcedure);
@@ -97,6 +98,7 @@ namespace SignageUnicorn.Api.Repositories.Implementations
 
                 p.Add("@p_device_name", request.DeviceName);
                 p.Add("@p_branch_code", request.BranchCode);
+                p.Add("@p_volume", request.Volume.HasValue ? Math.Clamp(request.Volume.Value, 0, 100) : (int?)null);
 
                 if (long.TryParse(request.CurrentPlaylistId, out var plId))
                 {
@@ -458,7 +460,9 @@ namespace SignageUnicorn.Api.Repositories.Implementations
 
             string sql = @"
                 SELECT dp.id as Id, dp.device_id as DeviceId, p.playlist_uuid as PlaylistId, p.playlist_name as PlaylistName,
-                       dp.start_date as StartDate, dp.end_date as EndDate, dp.is_active as IsActive
+                       dp.start_date as StartDate, dp.end_date as EndDate, dp.is_active as IsActive,
+                       dp.start_time as StartTime, dp.end_time as EndTime, dp.days_of_week as DaysOfWeek,
+                       dp.repeat_every_minutes as RepeatEveryMinutes
                 FROM sn_device_playlists dp
                 JOIN sn_playlists p ON dp.playlist_id = p.playlist_id
                 WHERE dp.device_id = (SELECT top 1 device_id FROM sn_devices WHERE device_id = @devId OR device_uuid = @devUuid)
@@ -506,16 +510,20 @@ namespace SignageUnicorn.Api.Repositories.Implementations
                              CASE WHEN device_id  = @devId  THEN 0 ELSE 1 END,
                              device_id DESC);
 
-                DECLARE @branch NVARCHAR(50), @name NVARCHAR(255);
+                DECLARE @branch NVARCHAR(50), @name NVARCHAR(255), @mode NVARCHAR(10);
                 SELECT @branch = LTRIM(RTRIM(branch_code)),
-                       @name   = {string.Format(NormaliseName, "device_name")}
+                       @name   = {string.Format(NormaliseName, "device_name")},
+                       @mode   = ISNULL(playback_mode, 'screen')
                 FROM sn_devices WHERE device_id = @self;
 
+                -- Review 2.8.8 (Codex #2): a screen never inherits from an audio player or vice versa,
+                -- even when both carry the same branch + name (one PC with both products installed).
                 SELECT TOP 1 sib.device_id
                 FROM sn_devices sib
                 JOIN sn_device_playlists dp ON dp.device_id = sib.device_id AND dp.is_active = 1
                 WHERE sib.is_deleted = 0
                   AND sib.device_id <> @self
+                  AND ISNULL(sib.playback_mode, 'screen') = @mode
                   AND LTRIM(RTRIM(sib.branch_code)) = @branch
                   AND {string.Format(NormaliseName, "sib.device_name")}
                       COLLATE SQL_Latin1_General_CP1_CI_AS = @name COLLATE SQL_Latin1_General_CP1_CI_AS
@@ -561,8 +569,10 @@ namespace SignageUnicorn.Api.Repositories.Implementations
 
                         IF @actual_playlist_id IS NOT NULL
                         BEGIN
-                            INSERT INTO sn_device_playlists (device_id, playlist_id, start_date, end_date, is_active)
-                            VALUES (@devId, @actual_playlist_id, @startDate, @endDate, 1)
+                            INSERT INTO sn_device_playlists (device_id, playlist_id, start_date, end_date, is_active,
+                                                             start_time, end_time, days_of_week, repeat_every_minutes)
+                            VALUES (@devId, @actual_playlist_id, @startDate, @endDate, 1,
+                                    @startTime, @endTime, @daysOfWeek, @repeatEveryMinutes)
                         END";
 
                     foreach (var p in playlists)
@@ -571,7 +581,11 @@ namespace SignageUnicorn.Api.Repositories.Implementations
                             devId = devId, 
                             playlistId = p.PlaylistId, 
                             startDate = p.StartDate, 
-                            endDate = p.EndDate 
+                            endDate = p.EndDate,
+                            startTime = ScheduleWindow.NormalizeTime(p.StartTime),
+                            endTime = ScheduleWindow.NormalizeTime(p.EndTime),
+                            daysOfWeek = ScheduleWindow.NormalizeDays(p.DaysOfWeek),
+                            repeatEveryMinutes = ScheduleWindow.NormalizeRepeat(p.RepeatEveryMinutes) 
                         }, transaction);
                     }
                 }
@@ -598,7 +612,8 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             string sql = @"
                 SELECT TOP 1 device_id AS DeviceId, device_uuid AS DeviceUuid, device_token_hash AS TokenHash,
                        mac_address AS MacAddress, device_token_issued_at AS TokenIssuedAt,
-                       device_token_reset_at AS TokenResetAt
+                       device_token_reset_at AS TokenResetAt,
+                       DATEDIFF(SECOND, last_check_in, SYSUTCDATETIME()) AS SecondsSinceCheckIn
                 FROM sn_devices WITH (NOLOCK)
                 WHERE is_deleted = 0
                   AND (device_id = @devId OR device_uuid = @devUuid OR device_uuid = @idAsUuid)
@@ -668,6 +683,19 @@ namespace SignageUnicorn.Api.Repositories.Implementations
             return rows.Count == 1 ? rows[0] : null;
         }
 
+        // Audio player: remembers the last SET_VOLUME level so the console shows it and the player
+        // can restore it after a restart (DeviceDto.Volume).
+        public async Task SetDeviceVolumeAsync(string deviceId, int volume)
+        {
+            using var connection = new SqlConnection(_connectionString);
+            long? devId = null; string? devUuid = null;
+            if (long.TryParse(deviceId, out var parsed)) devId = parsed; else devUuid = deviceId;
+            await connection.ExecuteAsync(
+                @"UPDATE sn_devices SET volume = @volume
+                  WHERE is_deleted = 0 AND (device_id = @devId OR device_uuid = @devUuid)",
+                new { volume, devId, devUuid });
+        }
+
         public async Task SetScheduleModeAsync(string deviceId, string mode)
         {
             using var connection = new SqlConnection(_connectionString);
@@ -733,6 +761,7 @@ namespace SignageUnicorn.Api.Repositories.Implementations
                     WHERE i.is_deleted = 0 AND o.is_deleted = 0
                       AND i.device_id <> o.device_id
                       AND ISNULL(i.schedule_mode, 'inherit') = 'inherit'
+                      AND ISNULL(i.playback_mode, 'screen') = ISNULL(o.playback_mode, 'screen')
                       AND LTRIM(RTRIM(i.branch_code)) = LTRIM(RTRIM(o.branch_code))
                       AND {string.Format(InheritorNameNorm, "i.device_name")} COLLATE SQL_Latin1_General_CP1_CI_AS
                         = {string.Format(InheritorNameNorm, "o.device_name")} COLLATE SQL_Latin1_General_CP1_CI_AS
@@ -747,23 +776,41 @@ namespace SignageUnicorn.Api.Repositories.Implementations
         // Contract item 6 / T8: devices whose assignment start or end fell inside (fromUtc, toUtc],
         // plus the screens inheriting those assignments, minus those that already have a
         // SYNC_SCHEDULE waiting.
-        public async Task<IEnumerable<string>> GetDevicesWithScheduleTransitionsAsync(DateTime fromUtc, DateTime toUtc)
+        public async Task<IEnumerable<string>> GetDevicesWithScheduleTransitionsAsync(DateTime fromUtc, DateTime toUtc, string? timeZoneId = null)
         {
             using var connection = new SqlConnection(_connectionString);
-            string sql = InheritorCtes(@"
+            // Dayparts (2.8.7): a daily start/end time or a day-of-week flip is a boundary too. The window
+            // is converted to store time once; @crossMidnight handles a scan window spanning 00:00.
+            string sql = @"
+                DECLARE @fromLocal datetime2 = CAST((@fromUtc AT TIME ZONE 'UTC') AT TIME ZONE @tz AS datetime2);
+                DECLARE @toLocal   datetime2 = CAST((@toUtc   AT TIME ZONE 'UTC') AT TIME ZONE @tz AS datetime2);
+                DECLARE @fromT time = CAST(@fromLocal AS time), @toT time = CAST(@toLocal AS time);
+                DECLARE @crossMidnight bit = CASE WHEN CAST(@fromLocal AS date) <> CAST(@toLocal AS date) THEN 1 ELSE 0 END;
+" + InheritorCtes(@"
                     SELECT DISTINCT dp.device_id
                     FROM sn_device_playlists dp
                     JOIN sn_devices d ON d.device_id = dp.device_id AND d.is_deleted = 0
                     WHERE dp.is_active = 1
                       AND ((dp.start_date > @fromUtc AND dp.start_date <= @toUtc)
-                        OR (dp.end_date   > @fromUtc AND dp.end_date   <= @toUtc))") + @"
+                        OR (dp.end_date   > @fromUtc AND dp.end_date   <= @toUtc)
+                        OR (TRY_CAST(dp.start_time AS time) IS NOT NULL AND (
+                               (@crossMidnight = 0 AND TRY_CAST(dp.start_time AS time) > @fromT AND TRY_CAST(dp.start_time AS time) <= @toT)
+                            OR (@crossMidnight = 1 AND (TRY_CAST(dp.start_time AS time) > @fromT OR TRY_CAST(dp.start_time AS time) <= @toT))))
+                        OR (TRY_CAST(dp.end_time AS time) IS NOT NULL AND (
+                               (@crossMidnight = 0 AND TRY_CAST(dp.end_time AS time) > @fromT AND TRY_CAST(dp.end_time AS time) <= @toT)
+                            OR (@crossMidnight = 1 AND (TRY_CAST(dp.end_time AS time) > @fromT OR TRY_CAST(dp.end_time AS time) <= @toT))))
+                        OR (dp.days_of_week IS NOT NULL AND @crossMidnight = 1)
+                        OR (@crossMidnight = 1 AND (
+                               (TRY_CAST(dp.start_time AS time) IS NOT NULL AND TRY_CAST(dp.end_time AS time) IS NULL)
+                            OR (TRY_CAST(dp.start_time AS time) IS NULL AND TRY_CAST(dp.end_time AS time) IS NOT NULL))))") + @"
                 SELECT DISTINCT CAST(t.device_id AS NVARCHAR(36))
                 FROM targets t
                 WHERE NOT EXISTS (SELECT 1 FROM sn_device_commands c
                                   WHERE c.device_id = t.device_id
                                     AND c.command_type = 'SYNC_SCHEDULE'
                                     AND c.status = 'PENDING') -- round 4 (#5): dedupe only against UNDELIVERED syncs; a POLLING one may already carry the old schedule";
-            return await connection.QueryAsync<string>(sql, new { fromUtc, toUtc });
+            var tz = string.IsNullOrWhiteSpace(timeZoneId) ? ScheduleWindow.DefaultTimeZoneId : timeZoneId.Trim();
+            return await connection.QueryAsync<string>(sql, new { fromUtc, toUtc, tz });
         }
 
         // Round 3 (#11): assignment changes used to notify only the edited screen; siblings that

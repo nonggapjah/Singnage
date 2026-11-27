@@ -116,6 +116,7 @@ namespace SignageUnicorn.Api.Services.Application
                 foreach (var item in items)
                 {
                     item.PlaylistId = playlist.PlaylistId;
+                    item.IntegrityStatus = SignageUnicorn.Api.Services.Media.MediaIntegrityState.Current?.StatusOf(item.MediaId, item.BlobUrl);
                     
                     // 1. Transform the item's direct URL
                     item.BlobUrl = TransformUrl(item.BlobUrl);

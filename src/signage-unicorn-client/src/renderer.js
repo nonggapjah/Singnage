@@ -13,8 +13,28 @@ const { createLoadSequencer, decideAfterVerify } = SignageLib.jobQueue;
 const { classifyBatchResponse } = SignageLib.playbackBatch;
 const { checkUpdateUrl } = SignageLib.updateUrl;
 const { classifyClaimResponse, claimRetryDelay, raceRetryDelay } = SignageLib.claim;
+const { createMismatchParking, isHashMismatchError, nextRefreshDecision } = SignageLib.mismatchPark;
+const { jingleKindFor, idleLayerPlan } = SignageLib.idleJingle;
+// 2.8.9: a file whose bytes never match the hash the server sent is parked for an hour after three
+// failures instead of being fetched again every heartbeat (27-11-2026 incident, 336 screens x 42 MB).
+const mismatchParking = createMismatchParking();
+// Key = stored name + the hash the server expects: when the server corrects the hash the key changes
+// and the file is tried again at once (Codex: a park must not outlive the fix).
+const parkKeyFor = (media) => `${media.cacheName || ''}|${media.fileHash || ''}`;
+let scheduleRefreshSkips = 0;
 
 const CLIENT_PROTOCOL = '2';                 // contract T5: server leases every command as POLLING for us
+// Audio player (Signage Unicorn Audio build): set from main's get-app-info at init. Everything it
+// gates is additive; a screen build behaves exactly as before.
+let AUDIO_MODE = false;
+let appInfo = null;
+let lastGoodSyncAt = 0;
+// Audio player 2.8.2: repeating announcements. Groups come with the SCHEDULE ({playlistId,
+// playlistName, everyMinutes, items}); a due group's items are queued and played between the loop's
+// tracks without touching currentIndex. Last-played times live in localStorage so a restart does
+// not replay every announcement at once.
+let scheduleInterjections = [];
+let interjectionQueue = [];
 const TOKEN_RECLAIM_MIN_MS = 10 * 60 * 1000; // contract T3: one re-claim per 10 minutes at most
 const HEALTH_REPORT_MS = 15000;              // Codex 22: renderer liveness report cadence
 const EMPTY_RETRY_MIN_MS = 5 * 60 * 1000;    // Codex 7: do not re-ask for an empty schedule every heartbeat
@@ -35,6 +55,7 @@ let volume = 50;
 let isMuted = true;
 let isUpdating = false;
 let isHeartbeating = false;  // Guard: prevent concurrent heartbeat calls
+let branchRefreshPending = false; // SET_BRANCH applied: reload the schedule once a heartbeat has carried the new branch
 let isBootReportSent = false; // Boot Report: send full device info once
 let cachedMachineUuid = null;
 let cachedMacAddress = null;  // BUG-03: stable hardware id so the server can merge identities on upgrade
@@ -84,6 +105,54 @@ let systemLogQueue = JSON.parse(localStorage.getItem('system_log_queue') || '[]'
 const hudOverlay = document.getElementById('hud-overlay');
 
 const jingleEl = document.getElementById('safety-jingle');
+const jingleVideoEl = document.getElementById('safety-jingle-video');
+const BUNDLED_JINGLE = 'assets/safety-jingle.png';
+// BUG-JINGLE-01: the configured jingle may be a video (production: "VDO Visual Villa.mp4"). It is shown
+// by the element that can render it; a load error falls back to the bundled picture, never to a black
+// panel with alt text. jingleKind is what the current source is; idleVisible mirrors "nothing to play".
+let jingleKind = 'image';
+let idleVisible = true;
+let jingleFallbackLogged = '';
+
+function applyIdleLayer() {
+    const plan = idleLayerPlan(jingleKind, idleVisible, AUDIO_MODE);
+    jingleEl.classList.toggle('hidden', plan.show !== 'image');
+    jingleVideoEl.classList.toggle('hidden', plan.show !== 'video');
+    if (plan.playVideo) {
+        if (jingleVideoEl.paused) jingleVideoEl.play().catch(() => { /* autoplay is muted; a failure lands in onerror or stays a still frame */ });
+    } else if (!jingleVideoEl.paused) {
+        jingleVideoEl.pause(); // no second decoder while real content plays (kiosk hardware budget)
+    }
+}
+function showIdleJingle() { idleVisible = true; applyIdleLayer(); }
+function hideIdleJingle() { idleVisible = false; applyIdleLayer(); }
+
+// Point the idle layer at a jingle source. `kind` comes from jingleKindFor(); anything the layer cannot
+// show (audio, unknown) uses the bundled picture.
+function setJingleSource(url, kind) {
+    if (kind === 'video') {
+        jingleKind = 'video';
+        if (jingleVideoEl.getAttribute('src') !== url) jingleVideoEl.src = url;
+        if (jingleEl.getAttribute('src') !== BUNDLED_JINGLE) jingleEl.src = BUNDLED_JINGLE;
+    } else {
+        jingleKind = 'image';
+        const src = kind === 'image' && url ? url : BUNDLED_JINGLE;
+        if (jingleEl.getAttribute('src') !== src) jingleEl.src = src;
+        try { jingleVideoEl.pause(); jingleVideoEl.removeAttribute('src'); jingleVideoEl.load(); } catch (e) { /* ignore */ }
+    }
+    applyIdleLayer();
+}
+function jingleLoadFailed(which) {
+    const current = which === 'video' ? jingleVideoEl.currentSrc || jingleVideoEl.getAttribute('src') : jingleEl.getAttribute('src');
+    if (!current || current === BUNDLED_JINGLE) return; // the bundled picture itself; nothing further to fall back to
+    if (jingleFallbackLogged !== current) {
+        jingleFallbackLogged = current;
+        addLog(`Idle jingle ${which} could not be shown (${current}); using the bundled picture`, 'warn');
+    }
+    setJingleSource(null, 'unsupported');
+}
+jingleEl.addEventListener('error', () => jingleLoadFailed('image'));
+jingleVideoEl.addEventListener('error', () => jingleLoadFailed('video'));
 const videoEl = document.getElementById('video-player');
 const imageEl = document.getElementById('image-player');
 const deviceInfoEl = document.getElementById('device-info');
@@ -252,6 +321,12 @@ function contentHashFor(playlistId, items) {
     return libContentHashFor(playlistId, items);
 }
 
+// '' for a plain loop; otherwise a stable suffix naming each announcement group and its items.
+function announcementSignature(groups) {
+    if (!Array.isArray(groups) || groups.length === 0) return '';
+    return ':a:' + groups.map(g => `${g.playlistId}@${g.everyMinutes}=${(g.items || []).map(i => i.playlistItemId || (i.media && i.media.cacheName) || '').join(',')}`).join('|');
+}
+
 function mediaExists(media) {
     if (!media || !media.cacheName) return Promise.resolve(false);
     return ipcRenderer.invoke('check-media-exists', { cacheName: media.cacheName, fileHash: media.fileHash, isFallback: !!media.isFallback });
@@ -263,7 +338,15 @@ function mediaFileUrl(media) {
 
 function isVideoMedia(media) {
     const name = (media && (media.cacheName || media.fileName)) || '';
-    return /\.(mp4|webm|mov)$/i.test(name) || /\.(mp4|webm|mov)$/i.test(String(media && media.fileName || ''));
+    if (/\.(mp4|webm|mov)$/i.test(name) || /\.(mp4|webm|mov)$/i.test(String(media && media.fileName || ''))) return true;
+    // Audio player only: sound files go through the same <video> element (it plays them; nothing
+    // is drawn). A screen build keeps treating them exactly as it always did.
+    return AUDIO_MODE && isAudioMedia(media);
+}
+
+function isAudioMedia(media) {
+    const names = [media && media.cacheName, media && media.fileName].filter(Boolean).map(String);
+    return names.some(n => /\.(mp3|wav|m4a|aac)$/i.test(n));
 }
 
 function reportPlaybackState() {
@@ -276,6 +359,8 @@ function setStatus(text, color) {
     dashStatus.textContent = text;
     dashStatus.style.color = color;
     statusDot.style.background = color;
+    const pill = document.getElementById('audio-status');
+    if (pill) { pill.textContent = text; pill.style.color = color; pill.style.borderColor = color; }
 }
 
 // =============================================================================================
@@ -283,8 +368,18 @@ function setStatus(text, color) {
 // =============================================================================================
 async function init() {
     config = await ipcRenderer.invoke('get-config');
-    volume = config.volume ?? 50;
-    isMuted = config.isMuted ?? true;
+    try { appInfo = await ipcRenderer.invoke('get-app-info'); } catch (e) { appInfo = null; }
+    AUDIO_MODE = !!(appInfo && appInfo.audioMode);
+    // 2.8.7: what the update launcher recorded about the last installer run (exit codes, retry),
+    // uploaded to the server log (config is loaded, so addLog queues it for the device).
+    if (appInfo && appInfo.updateResult) {
+        addLog(`Update launcher result: ${String(appInfo.updateResult).replace(/\s*\r?\n\s*/g, ' | ')}`, 'warn');
+    }
+    if (AUDIO_MODE) enterAudioMode();
+    // Audio player: sound is the whole point, so it starts unmuted at 70 %. Screens keep their
+    // muted-by-default behaviour.
+    volume = config.volume ?? (AUDIO_MODE ? 70 : 50);
+    isMuted = config.isMuted ?? !AUDIO_MODE;
     videoEl.muted = isMuted;
     videoEl.volume = isMuted ? 0 : volume / 100;
 
@@ -323,7 +418,8 @@ async function restoreCachedJingle() {
     const cacheName = localStorage.getItem('safety_jingle_cache');
     if (cacheName) {
         try {
-            jingleEl.src = await ipcRenderer.invoke('resolve-media-url', { cacheName });
+            const url = await ipcRenderer.invoke('resolve-media-url', { cacheName });
+            setJingleSource(url, jingleKindFor(cacheName, localStorage.getItem('safety_jingle_name')));
             return;
         } catch (e) {
             localStorage.removeItem('safety_jingle_cache');
@@ -331,7 +427,8 @@ async function restoreCachedJingle() {
     }
     // Older clients cached the jingle as a base64 data URL; keep using it until the file copy exists.
     const legacy = localStorage.getItem('safety_jingle_data');
-    if (legacy && legacy.startsWith('data:')) jingleEl.src = legacy;
+    if (legacy && legacy.startsWith('data:')) setJingleSource(legacy, legacy.startsWith('data:video') ? 'video' : 'image');
+    else applyIdleLayer();
 }
 
 // --- Jingle Sync (downloaded by main, so no renderer fetch of media is needed) ---
@@ -352,9 +449,14 @@ async function syncJingle() {
             if (mediaData && mediaData.success && mediaData.data && mediaData.data.blobUrl) {
                 const m = mediaData.data;
                 const cacheName = 'jingle_' + cacheNameFor(m);
-                const dl = await ipcRenderer.invoke('download-media', { url: m.blobUrl, cacheName, fileHash: m.fileHash });
+                // 2.8.7: /api/v1/media/{id} returns a relative blobUrl ("/media/..."); the downloader
+                // only accepts absolute URLs, so the jingle never downloaded ("Invalid URL" on Bukis).
+                const jingleUrl = /^https?:\/\//i.test(String(m.blobUrl)) ? m.blobUrl : serverUrl(String(m.blobUrl).startsWith('/') ? m.blobUrl : '/' + m.blobUrl);
+                const dl = await ipcRenderer.invoke('download-media', { url: jingleUrl, cacheName, fileHash: m.fileHash });
                 if (dl && dl.success) {
-                    jingleEl.src = await ipcRenderer.invoke('resolve-media-url', { cacheName });
+                    const url = await ipcRenderer.invoke('resolve-media-url', { cacheName });
+                    localStorage.setItem('safety_jingle_name', String(m.fileName || m.blobUrl || ''));
+                    setJingleSource(url, jingleKindFor(cacheName, m.fileName, m.blobUrl));
                     localStorage.setItem('safety_jingle_cache', cacheName);
                     localStorage.setItem('safety_jingle_id', serverJingleId);
                     localStorage.removeItem('safety_jingle_data');
@@ -416,6 +518,7 @@ function showHUD(msg, duration = 3000) {
 }
 
 function updateCursorVisibility() {
+    if (AUDIO_MODE) { document.body.classList.add('show-cursor'); return; }
     const shouldShow = !dashboardScreen.classList.contains('hidden') ||
         !setupScreen.classList.contains('hidden') ||
         !playlistSelectScreen.classList.contains('hidden') ||
@@ -647,10 +750,14 @@ async function startSync() {
     // no-op when nothing changed.
     if (scheduleRefreshTimer) clearInterval(scheduleRefreshTimer);
     scheduleRefreshTimer = setInterval(() => {
-        if (config && config.lastPlaylistId === 'SCHEDULE' && !syncWorkerRunning) {
-            addLog('Periodic schedule refresh.', 'info', true);
-            loadPlaylist('SCHEDULE');
-        }
+        if (!config || config.lastPlaylistId !== 'SCHEDULE') return;
+        // 2.8.9: a running sync postpones the refresh at most twice (30 min). A sync that never ends
+        // (a file the screen cannot verify) used to keep the screen on a stale schedule forever.
+        const decision = nextRefreshDecision(syncWorkerRunning, scheduleRefreshSkips);
+        scheduleRefreshSkips = decision.skips;
+        if (!decision.run) return;
+        addLog(syncWorkerRunning ? 'Periodic schedule refresh (sync still running, refreshing anyway).' : 'Periodic schedule refresh.', 'info', true);
+        loadPlaylist('SCHEDULE');
     }, SCHEDULE_REFRESH_MS);
 
     if (pruneTimer) clearInterval(pruneTimer);
@@ -903,6 +1010,8 @@ async function sync() {
             macAddress: cachedMacAddress
         };
         if (config.deviceToken) heartbeatData.deviceToken = config.deviceToken;
+        // Audio player: report the real level so the console slider follows tray/F2/F3/F4 changes.
+        if (AUDIO_MODE) heartbeatData.volume = isMuted ? 0 : volume;
 
         // Boot Report: enrich first heartbeat with device metadata
         if (!isBootReportSent) {
@@ -927,6 +1036,7 @@ async function sync() {
         const data = await readJsonSafe(res);
         commands = data && Array.isArray(data.data) ? data.data : [];
         ok = true;
+        lastGoodSyncAt = Date.now();
         smokeEvent('heartbeats');
 
         setStatus('ONLINE', '#00f2ff');
@@ -948,6 +1058,14 @@ async function sync() {
     if (heartbeatRetryTimer) {
         clearTimeout(heartbeatRetryTimer);
         heartbeatRetryTimer = null;
+    }
+
+    if (branchRefreshPending) {
+        // SET_BRANCH: the heartbeat that just succeeded carried the new branch, so sibling inheritance
+        // now resolves there; without this a player kept the old branch's schedule until the periodic refresh.
+        branchRefreshPending = false;
+        addLog('Branch changed: reloading the schedule for the new branch.', 'info', true);
+        await loadPlaylist('SCHEDULE');
     }
 
     if (commands.length > 0) {
@@ -974,7 +1092,9 @@ async function selfHealMissingFiles() {
     try {
         let hasMissing = false;
         for (const item of playlist) {
-            if (item.media && !item.media.isFallback && !(await mediaExists(item.media))) {
+            if (!item.media || item.media.isFallback) continue;
+            if (mismatchParking.isParked(parkKeyFor(item.media))) continue;   // 2.8.9: parked after repeated hash mismatches
+            if (!(await mediaExists(item.media))) {
                 hasMissing = true;
                 break;
             }
@@ -1080,6 +1200,74 @@ async function executeCommand(cmd, type) {
                 setTimeout(() => window.location.reload(), 1000);
             }
         }
+        return;
+    }
+
+    if (type.startsWith('SET_VOLUME:') || type === 'MUTE' || type === 'UNMUTE') {
+        // Audio player: the console's volume slider and mute (API 2.8.6 SET_VOLUME:<0-100>).
+        if (type === 'MUTE') await setMuted(true);
+        else if (type === 'UNMUTE') await setMuted(false);
+        else {
+            const level = parseInt(type.split(':')[1], 10);
+            if (isNaN(level)) { await ackCommand(cmd, 'FAILED', 'bad volume level'); return; }
+            await setVolumeAbsolute(level);
+        }
+        await ackCommand(cmd, 'EXECUTED');
+        return;
+    }
+
+    if (type.startsWith('SET_BRANCH:')) {
+        // Console "Change branch" (web 2.4.19, batch bar on the Audio Players page). The branch code
+        // lives in this device's config and is re-sent on every heartbeat, so the server cannot
+        // change it on its own; it asks us, we save it, and the next heartbeat carries it back.
+        const newBranch = type.slice('SET_BRANCH:'.length).trim();
+        if (!newBranch || newBranch.length > 39) { await ackCommand(cmd, 'FAILED', 'bad branch code'); return; }
+        // Commands whose ack was lost are redelivered after the server lease; an older SET_BRANCH must
+        // not undo a newer one, so the issue time of the last applied change is kept in the config.
+        const issuedAt = Date.parse(cmd.createdAt || '');
+        const lastAppliedAt = Date.parse(config.branchSetAt || '');
+        if (!isNaN(issuedAt) && !isNaN(lastAppliedAt) && issuedAt < lastAppliedAt) {
+            addLog(`Ignoring stale branch command ${newBranch} (issued before the current branch ${config.branchCode || '-'} was set).`, 'warn', true);
+            await ackCommand(cmd, 'EXECUTED', 'superseded');
+            return;
+        }
+        const appliedAt = new Date(isNaN(issuedAt) ? Date.now() : issuedAt).toISOString();
+        if (newBranch === String(config.branchCode || '')) {
+            // Review 2.8.8 (Codex): a same-branch command still has to advance branchSetAt, or an older
+            // delayed SET_BRANCH for another branch would pass the stale check above and apply later.
+            if (config.branchSetAt !== appliedAt) {
+                const prevSetAt = config.branchSetAt;
+                config.branchSetAt = appliedAt;
+                const saved = await ipcRenderer.invoke('save-config', config);
+                if (!saved || saved.success === false) config.branchSetAt = prevSetAt; // branch itself is already right
+            }
+            await ackCommand(cmd, 'EXECUTED');
+            return;
+        }
+        {
+            const prevBranch = config.branchCode;
+            const prevSetAt = config.branchSetAt;
+            config.branchCode = newBranch;
+            config.branchSetAt = appliedAt;
+            // save-config reports write failures as { success: false }; ack FAILED and keep the old
+            // value in memory too, otherwise heartbeats would carry a branch that a restart reverts.
+            const saved = await ipcRenderer.invoke('save-config', config);
+            if (!saved || saved.success === false) {
+                config.branchCode = prevBranch;
+                config.branchSetAt = prevSetAt;
+                const reason = (saved && saved.error) || 'config save failed';
+                addLog(`Branch change to ${newBranch} not saved: ${reason}`, 'error', true);
+                await ackCommand(cmd, 'FAILED', reason);
+                return;
+            }
+            addLog(`Branch changed by console: ${prevBranch || '-'} -> ${newBranch}`, 'warn'); // uploaded as WARN: the API keeps only WARN/ERROR (SystemLogController.IsKeptLevel)
+            branchRefreshPending = true; // sync() reloads the schedule after the next successful heartbeat
+            const field = document.getElementById('dash-branch-code');
+            if (field) field.value = newBranch;
+            if (AUDIO_MODE) updateAudioPanel();
+            showHUD(`BRANCH ${newBranch}`);
+        }
+        await ackCommand(cmd, 'EXECUTED');
         return;
     }
 
@@ -1288,6 +1476,10 @@ async function applyEmptyPlaylist(playlistId, playlistName) {
     swapTarget = null;
     playlist = [];
     currentIndex = 0;
+    // Review 2.8.3 (Codex #5): nothing assigned means no announcements either; a queued one must
+    // not play and the old groups must not keep repeating from idle.
+    scheduleInterjections = [];
+    interjectionQueue = [];
     config.lastPlaylistId = playlistId;
     localStorage.setItem('playlist_hash', contentHashFor(playlistId, []));
     localStorage.setItem('last_playlist_index', '0');
@@ -1315,6 +1507,7 @@ async function loadPlaylist(playlistId, resumeIndex = 0) {
         let items = [];
         let playlistName = 'Standard Loop';
         let fromServer = false;
+        let interjectionsFromServer = [];
 
         try {
             const apiPath = playlistId === 'SCHEDULE'
@@ -1332,12 +1525,14 @@ async function loadPlaylist(playlistId, resumeIndex = 0) {
                 items = data.data.items.filter(i => i.media).sort((a, b) => a.positionOrder - b.positionOrder);
             }
             playlistName = data.data.playlistName || playlistName;
+            if (Array.isArray(data.data.interjections)) interjectionsFromServer = data.data.interjections;
         } catch (fetchErr) {
             addLog(`Server unreachable, trying SQLite cache...`, 'warn');
             const cachedData = await ipcRenderer.invoke('db-get-playlist', playlistId);
             if (cachedData) {
                 items = cachedData.items || [];
                 playlistName = cachedData.playlistName || playlistName;
+                if (Array.isArray(cachedData.interjections)) interjectionsFromServer = cachedData.interjections;
                 addLog(`Offline Mode: Loaded from SQLite cache`);
             } else {
                 throw new Error("No local SQLite cache found for this playlist.");
@@ -1352,11 +1547,26 @@ async function loadPlaylist(playlistId, resumeIndex = 0) {
         // --- Cache in SQLite for Offline Survival (an empty list is cached too). Written only
         // AFTER the generation check (Codex #10): a superseded response must leave no trace.
         if (fromServer) {
-            await ipcRenderer.invoke('db-save-playlist', { id: playlistId, data: { items, playlistName } });
+            await ipcRenderer.invoke('db-save-playlist', { id: playlistId, data: { items, playlistName, interjections: interjectionsFromServer } });
             if (!loadSeq.isCurrent(loadNo)) return true;
         }
 
-        if (items.length === 0) {
+        // Audio player: announcements travel beside the loop. Their files are synced in the same job
+        // (same content hash) but they never become part of `playlist`.
+        const announcementGroups = [];
+        const extraItems = [];
+        if (AUDIO_MODE && playlistId === 'SCHEDULE') {
+            for (const g of interjectionsFromServer) {
+                const groupItems = (Array.isArray(g && g.items) ? g.items : []).filter(i => i && i.media).sort((a, b) => a.positionOrder - b.positionOrder);
+                const every = parseInt(g && g.everyMinutes, 10) || 0;
+                if (!groupItems.length || every <= 0) continue;
+                augmentItems(groupItems);
+                announcementGroups.push({ playlistId: String(g.playlistId || ''), playlistName: g.playlistName || '', everyMinutes: every, items: groupItems });
+                for (const it of groupItems) extraItems.push(it);
+            }
+        }
+
+        if (items.length === 0 && extraItems.length === 0) {
             // Both the live server answer and a cached empty answer mean "nothing assigned"; the
             // local fallback folder is only for an unreachable server (see the catch below).
             await applyEmptyPlaylist(playlistId, playlistName);
@@ -1364,7 +1574,10 @@ async function loadPlaylist(playlistId, resumeIndex = 0) {
         }
 
         augmentItems(items);
-        const contentHash = contentHashFor(playlistId, items);
+        const syncItems = extraItems.length ? items.concat(extraItems) : items;
+        // Review 2.8.3 (Codex #6): the flattened list alone cannot tell "A, B in the loop" from "A in
+        // the loop, B every 30 min". Fold the partition into the hash so Smart Sync re-applies it.
+        const contentHash = contentHashFor(playlistId, syncItems) + announcementSignature(announcementGroups);
         const savedHash = localStorage.getItem('playlist_hash');
 
         dashPlaylistName.textContent = playlistName;
@@ -1377,13 +1590,14 @@ async function loadPlaylist(playlistId, resumeIndex = 0) {
             // ownership SYNCHRONOUSLY, before the file check below yields -- otherwise B could swap
             // in during that await and we would still report A as ready.
             cancelPendingForOtherVersion(contentHash);
-            const complete = await allFilesExist(items);
+            const complete = await allFilesExist(syncItems);
             if (!loadSeq.isCurrent(loadNo)) return true;
             // A swap that was already in flight when we cancelled can still have completed during
             // the await: re-read the active hash and decide from the real state, not from `savedHash`.
             const decision = decideAfterVerify({ contentHash, activeHashAfterAwait: activeContentHash(), complete });
             if (decision === 'ready') {
                 refreshAttribution(items);
+                if (AUDIO_MODE && playlistId === 'SCHEDULE') scheduleInterjections = announcementGroups;
                 cancelPendingForOtherVersion(contentHash); // idempotent re-check after yielding
                 addLog("Smart Sync: Hash matches and all files exist. Skipping re-download.");
                 dashReadyStatus.textContent = 'READY';
@@ -1407,7 +1621,9 @@ async function loadPlaylist(playlistId, resumeIndex = 0) {
         // (not `savedHash`, which may predate a swap that finished during the awaits above).
         const silent = playlist.length > 0 && contentHash === activeContentHash();
         addLog(`Smooth Sync: Queuing ${items.length} items in background...`);
-        requestedJob = newJob(playlistId, playlistName, items, contentHash, { silent, resumeIndex });
+        requestedJob = newJob(playlistId, playlistName, syncItems, contentHash, { silent, resumeIndex });
+        requestedJob.loopItems = items;
+        requestedJob.interjections = announcementGroups;
         swapTarget = silent ? null : requestedJob;
         runSyncWorker();
         return true;
@@ -1456,6 +1672,7 @@ async function runSyncWorker() {
             if (requestedJob !== job) continue; // superseded: converge on the newest request
 
             job.completed = true;
+            if (AUDIO_MODE && job.interjections && job.hash === activeContentHash()) scheduleInterjections = job.interjections;
             const isFullySynced = job.synced === job.items.length;
             if (isFullySynced) {
                 addLog(`Background Sync Complete (${job.items.length} clips).`);
@@ -1499,6 +1716,12 @@ async function syncJobAssets(job) {
         dashReadyStatus.textContent = `SYNCING ${synced + 1}/${items.length}`;
         dashReadyStatus.style.color = '#f1c40f';
 
+        // 2.8.9: a file parked after repeated hash mismatches is not requested again this hour.
+        if (mismatchParking.isParked(parkKeyFor(media))) {
+            job.synced = synced;
+            continue;
+        }
+
         try {
             const res = await ipcRenderer.invoke('download-media', {
                 url: media.blobUrl,
@@ -1509,8 +1732,16 @@ async function syncJobAssets(job) {
 
             if (res && res.success) {
                 synced++;
+                mismatchParking.noteSuccess(parkKeyFor(media));
             } else {
                 addLog(`Download failed for ${media.displayName || media.cacheName}: ${res?.error || 'Unknown error'}`, 'warn');
+                if (isHashMismatchError(res?.error)) {
+                    const verdict = mismatchParking.noteFailure(parkKeyFor(media));
+                    if (verdict.parked) {
+                        // Uploaded to the server (not skipSync) so the operator sees which file is bad.
+                        addLog(`Parked ${media.displayName || media.cacheName} for 60 min: the downloaded file never matches the hash the server sent (${verdict.fails} times). The server must fix the file or its hash.`, 'error');
+                    }
+                }
             }
 
             job.synced = synced;
@@ -1533,7 +1764,8 @@ async function syncJobAssets(job) {
 async function swapToJob(job) {
     if (!job) return;
     addLog(`Swapping to new playlist: '${job.name}'`);
-    playlist = job.items;
+    playlist = job.loopItems || job.items;
+    if (AUDIO_MODE) { scheduleInterjections = job.interjections || []; interjectionQueue = []; }
     config.lastPlaylistId = job.id;
     localStorage.setItem('playlist_hash', job.hash);
     await ipcRenderer.invoke('save-config', config);
@@ -1552,6 +1784,7 @@ async function pruneCache() {
     try {
         const keep = new Set();
         for (const it of playlist) if (it.media && it.media.cacheName && !it.media.isFallback) keep.add(it.media.cacheName);
+        for (const g of scheduleInterjections) for (const it of g.items) if (it.media && it.media.cacheName) keep.add(it.media.cacheName);
         for (const job of [requestedJob, activeJob, swapTarget]) {
             if (!job) continue;
             for (const it of job.items) if (it.media && it.media.cacheName) keep.add(it.media.cacheName);
@@ -1579,6 +1812,7 @@ function formatTime(ms) {
 }
 
 function updatePlaybackHUD() {
+    if (AUDIO_MODE) updateAudioPanel();
     if (!isPlaying) return;
     const elapsed = Date.now() - mediaStartTime;
     const progress = Math.min(100, (elapsed / mediaDuration) * 100);
@@ -1589,15 +1823,25 @@ setInterval(updatePlaybackHUD, 500);
 
 // Codex 21: a single tracked retry timer, cancelled on every transition and bound to the playback
 // token that scheduled it, so a stale callback can never interrupt a clip that started meanwhile.
-function skipAfterDelay(delayMs, token) {
+// advance=false when the failed item came from the announcement queue (Review 2.8.3, Codex #8):
+// the loop index points at the track that has not played yet and must stay there.
+function skipAfterDelay(delayMs, token, advance = true) {
     if (skipTimer) clearTimeout(skipTimer);
+    if (!advance) {
+        skipTimer = setTimeout(() => {
+            skipTimer = null;
+            if (token !== playbackToken) return;
+            playNext();
+        }, delayMs);
+        return;
+    }
     skipStreak++;
     const lapped = playlist.length > 0 && skipStreak >= playlist.length;
     if (lapped && isPlaying) {
         // Nothing in this playlist is on disk right now: show the idle jingle instead of a frozen frame.
         isPlaying = false;
         reportPlaybackState();
-        jingleEl.classList.remove('hidden');
+        showIdleJingle();
         dashCurrentMedia.textContent = '▶ WAITING FOR MEDIA';
     }
     currentIndex = (currentIndex + 1) % Math.max(1, playlist.length);
@@ -1629,10 +1873,11 @@ async function playNext() {
         skipTimer = null;
     }
 
-    if (playlist.length === 0) {
+    const fromQueue = AUDIO_MODE && interjectionQueue.length > 0;
+    if (playlist.length === 0 && !fromQueue) {
         isPlaying = false;
         reportPlaybackState();
-        jingleEl.classList.remove('hidden');
+        showIdleJingle();
         dashCurrentMedia.textContent = '▶ IDLE / WAITING';
         try {
             videoEl.pause();
@@ -1642,15 +1887,17 @@ async function playNext() {
         } catch (e) { /* ignore */ }
         return;
     }
-    if (currentIndex >= playlist.length) currentIndex = 0;
-    localStorage.setItem('last_playlist_index', String(currentIndex));
-    const item = playlist[currentIndex];
+    if (!fromQueue) {
+        if (currentIndex >= playlist.length) currentIndex = 0;
+        localStorage.setItem('last_playlist_index', String(currentIndex));
+    }
+    const item = fromQueue ? interjectionQueue.shift() : playlist[currentIndex];
     const media = item.media;
     const isFallback = !!(media && media.isFallback) || !!(item.playlistItemId && String(item.playlistItemId).startsWith('FALLBACK'));
 
     if (!media || !media.cacheName) {
         addLog('Skip: item without media', 'warn');
-        skipAfterDelay(1000, myToken);
+        skipAfterDelay(1000, myToken, !fromQueue);
         return;
     }
 
@@ -1662,7 +1909,7 @@ async function playNext() {
         if (await trySwapIfReady()) return;
         if (myToken !== playbackToken) return;
         addLog(`Skip: ${media.displayName || media.cacheName} (still syncing)`, 'warn');
-        skipAfterDelay(1000, myToken);
+        skipAfterDelay(1000, myToken, !fromQueue);
         return;
     }
 
@@ -1671,7 +1918,7 @@ async function playNext() {
         localFile = await mediaFileUrl(media);
     } catch (e) {
         addLog(`Skip: cannot resolve ${media.cacheName}: ${e.message}`, 'warn');
-        skipAfterDelay(1000, myToken);
+        skipAfterDelay(1000, myToken, !fromQueue);
         return;
     }
     if (myToken !== playbackToken) return;
@@ -1682,14 +1929,14 @@ async function playNext() {
     reportPlaybackState();
 
     dashCurrentMedia.textContent = `▶ ${media.displayName || media.fileName || media.cacheName}`;
-    dashLoopInfo.textContent = `ITEM ${currentIndex + 1} / ${playlist.length}`;
+    dashLoopInfo.textContent = fromQueue ? 'ANNOUNCEMENT' : `ITEM ${currentIndex + 1} / ${playlist.length}`;
 
     mediaStartTime = Date.now();
     const override = parseInt(item.durationOverride, 10) || 0;
     const rawDuration = override || media.durationSec || 10;
     mediaDuration = Math.max(1, parseInt(rawDuration, 10) || 10) * 1000;
     dashDur.textContent = formatTime(mediaDuration);
-    jingleEl.classList.add('hidden');
+    hideIdleJingle();
 
     addLog(`Playing: ${media.displayName || media.fileName || media.cacheName} (${currentIndex + 1}/${playlist.length})`);
 
@@ -1711,9 +1958,19 @@ async function playNext() {
             addLog("Smooth Swap: Next playlist first item not ready yet. Staying on current.", "warn");
         }
 
-        currentIndex = (currentIndex + 1) % playlist.length;
+        if (!fromQueue && playlist.length > 0) currentIndex = (currentIndex + 1) % playlist.length;
+        if (AUDIO_MODE) queueDueInterjections();
         playNext();
     };
+
+    if (AUDIO_MODE && !isVideoMedia(media)) {
+        // Audio player: an image has nothing to hear. The server already keeps images out of an
+        // audio device's schedule; this covers a manually picked playlist. Half a second per skipped
+        // item, so a list of nothing but images cannot spin.
+        addLog(`Skipping ${media.displayName || media.cacheName}: no sound on an audio device.`, 'info', true);
+        currentItemTimer = setTimeout(() => onComplete(true), 500);
+        return;
+    }
 
     if (isVideoMedia(media)) {
         // If same file (1-item loop), reset and play explicitly
@@ -1811,13 +2068,18 @@ function showSetup() {
                     location: loc,
                     ipAddress: '127.0.0.1',
                     appVersion: appVer,
-                    tokenCapable: true // contract T1: only a client that stores the token asks for one
+                    tokenCapable: true, // contract T1: only a client that stores the token asks for one
+                    playbackMode: AUDIO_MODE ? 'audio' : undefined // audio player registers as an audio device; screens send nothing
                 })
             }, TIMEOUTS.settings);
             const result = await readJsonSafe(res);
             if (result && result.success && result.data) {
                 config.serverIp = ip; config.deviceName = name; config.branchCode = branch; config.location = loc; config.deviceId = result.data.deviceId;
                 config.deviceToken = result.data.deviceToken ? String(result.data.deviceToken) : null;
+                if (AUDIO_MODE) {
+                    const sh = document.getElementById('start-hidden');
+                    config.startHidden = !!(sh && sh.checked);
+                }
                 if (result.data.currentPlaylistId) config.lastPlaylistId = result.data.currentPlaylistId;
                 await ipcRenderer.invoke('save-config', config);
                 setupScreen.classList.add('hidden');
@@ -1918,7 +2180,8 @@ document.getElementById('update-settings').onclick = async () => {
                 location: newLocation,
                 ipAddress: '127.0.0.1', // Server should detect real IP. We send placeholder.
                 appVersion: appVer,
-                tokenCapable: true // contract T1
+                tokenCapable: true, // contract T1
+                playbackMode: AUDIO_MODE ? 'audio' : undefined
             })
         }, TIMEOUTS.settings);
 
@@ -2061,6 +2324,196 @@ document.getElementById('btn-esc').onclick = () => {
     updateCursorVisibility();
 };
 
+// --- Audio player: repeating announcements -------------------------------------------------------
+function interjectionLastKey(id) { return `interjection_last_${id}`; }
+
+function queueDueInterjections() {
+    if (!AUDIO_MODE || !scheduleInterjections.length) return;
+    const now = Date.now();
+    for (const g of scheduleInterjections) {
+        const last = parseInt(localStorage.getItem(interjectionLastKey(g.playlistId)) || '0', 10) || 0;
+        if (now - last < g.everyMinutes * 60000) continue;
+        localStorage.setItem(interjectionLastKey(g.playlistId), String(now));
+        for (const it of g.items) interjectionQueue.push(it);
+        addLog(`Announcement due: ${g.playlistName || g.playlistId} (${g.items.length} item(s), every ${g.everyMinutes} min)`, 'info', true);
+    }
+}
+
+// With an empty loop (announcements only) nothing else would ever call playNext.
+setInterval(() => {
+    if (!AUDIO_MODE || isPlaying || !scheduleInterjections.length || interjectionQueue.length) return;
+    queueDueInterjections();
+    if (interjectionQueue.length) playNext();
+}, 15000);
+
+// --- Audio player: output device --------------------------------------------------------------------
+async function populateAudioOutputs() {
+    const sel = document.getElementById('audio-output');
+    if (!sel || !navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+    try {
+        // Electron exposes output labels without any media permission (verified 20-11-2026 with a
+        // sandboxed file:// window), so no getUserMedia probe is needed here.
+        const outputs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'audiooutput');
+        const current = (config && config.audioSinkId) || '';
+        sel.replaceChildren();
+        const def = document.createElement('option');
+        def.value = '';
+        def.textContent = 'Windows default output';
+        sel.appendChild(def);
+        let n = 0;
+        for (const d of outputs) {
+            if (!d.deviceId || d.deviceId === 'default' || d.deviceId === 'communications') continue;
+            n++;
+            const o = document.createElement('option');
+            o.value = d.deviceId;
+            o.textContent = d.label || `Output ${n}`;
+            sel.appendChild(o);
+        }
+        sel.value = Array.from(sel.options).some(o => o.value === current) ? current : '';
+    } catch (e) {
+        addLog(`Audio outputs unavailable: ${e.message}`, 'warn', true);
+    }
+}
+
+async function applyAudioSink(sinkId, quiet) {
+    if (typeof videoEl.setSinkId !== 'function') {
+        if (!quiet) addLog('Output selection is not supported on this machine.', 'warn', true);
+        return false;
+    }
+    try {
+        await videoEl.setSinkId(sinkId || '');
+        config.audioSinkId = sinkId || null;
+        await ipcRenderer.invoke('save-config', config);
+        if (!quiet) { addLog(`Audio output set to ${sinkId ? 'selected device' : 'Windows default'}.`, 'info', true); showHUD('OUTPUT CHANGED'); }
+        return true;
+    } catch (e) {
+        addLog(`Audio output change failed: ${e.message}`, 'warn', true);
+        return false;
+    }
+}
+
+// --- Audio player helpers (also used by SET_VOLUME / MUTE commands on any build) ---------------
+async function applyVolume() {
+    videoEl.muted = isMuted;
+    videoEl.volume = isMuted ? 0 : volume / 100;
+    config.volume = volume;
+    config.isMuted = isMuted;
+    await ipcRenderer.invoke('save-config', config);
+    pushAudioStatus(true);
+}
+
+async function setVolumeAbsolute(level) {
+    volume = Math.max(0, Math.min(100, Math.round(Number(level) || 0)));
+    if (volume > 0 && isMuted) isMuted = false;
+    await applyVolume();
+    addLog(`Vol: ${volume}%`);
+    showHUD(`VOLUME: ${volume}%`);
+}
+
+async function setMuted(flag) {
+    isMuted = !!flag;
+    await applyVolume();
+    showHUD(isMuted ? 'MUTED' : 'UNMUTED');
+}
+
+function skipToNextTrack() {
+    if (!playlist.length) return;
+    currentIndex = (currentIndex + 1) % playlist.length;
+    playNext();
+}
+
+// The audio window: a compact panel instead of the full-screen player. The <video> element keeps
+// playing (sound) parked off-screen by CSS; everything here only reads state the player already keeps.
+function enterAudioMode() {
+    document.body.classList.add('audio-mode', 'show-cursor');
+    const panel = document.getElementById('audio-panel');
+    if (panel) panel.classList.remove('hidden');
+    const h1 = document.querySelector('#setup-screen h1');
+    if (h1) h1.textContent = 'SIGNAGE UNICORN AUDIO';
+    const sh = document.getElementById('start-hidden-row');
+    if (sh) sh.classList.remove('hidden');
+
+    const vol = document.getElementById('audio-volume');
+    if (vol) {
+        // Live while dragging (no disk write), saved once on release.
+        vol.oninput = (e) => {
+            volume = parseInt(e.target.value, 10) || 0;
+            if (volume > 0) isMuted = false;
+            videoEl.muted = isMuted;
+            videoEl.volume = isMuted ? 0 : volume / 100;
+            const lbl = document.getElementById('audio-volume-label');
+            if (lbl) lbl.textContent = `${volume}%`;
+        };
+        vol.onchange = (e) => setVolumeAbsolute(parseInt(e.target.value, 10));
+    }
+    const bind = (id, fn) => { const el = document.getElementById(id); if (el) el.onclick = fn; };
+    bind('audio-mute', () => setMuted(!isMuted));
+    bind('audio-skip', skipToNextTrack);
+    bind('audio-playlists', () => document.getElementById('show-playlists').onclick());
+    bind('audio-settings', () => document.getElementById('show-config').onclick());
+    bind('audio-dashboard', () => toggleDashboard());
+    bind('audio-hide', () => ipcRenderer.invoke('hide-to-tray').catch(() => { }));
+
+    const out = document.getElementById('audio-output');
+    if (out) {
+        out.onchange = (e) => { applyAudioSink(e.target.value, false).then(() => populateAudioOutputs()); };
+        populateAudioOutputs();
+        if (navigator.mediaDevices) navigator.mediaDevices.ondevicechange = () => populateAudioOutputs();
+    }
+    if (config && config.audioSinkId) applyAudioSink(config.audioSinkId, true);
+
+    if (window.signage && typeof window.signage.onAudioControl === 'function') {
+        window.signage.onAudioControl((msg) => {
+            if (!msg) return;
+            if (msg.action === 'toggle-mute') setMuted(!isMuted);
+            else if (msg.action === 'set-volume') setVolumeAbsolute(Number(msg.value));
+            else if (msg.action === 'skip') skipToNextTrack();
+        });
+    }
+}
+
+let lastAudioStatusKey = '';
+function pushAudioStatus(force) {
+    if (!AUDIO_MODE) return;
+    const item = playlist[currentIndex];
+    const title = item && item.media ? (item.media.displayName || item.media.fileName || '') : '';
+    const key = `${title}|${isPlaying}|${volume}|${isMuted}`;
+    if (!force && key === lastAudioStatusKey) return;
+    lastAudioStatusKey = key;
+    ipcRenderer.invoke('audio-status', { title, playing: isPlaying, volume, muted: isMuted }).catch(() => { });
+}
+
+function updateAudioPanel() {
+    const el = (id) => document.getElementById(id);
+    if (!el('audio-panel')) return;
+    const item = playlist[currentIndex];
+    const media = item && item.media;
+    const name = media ? (media.displayName || media.fileName || '') : '';
+    const next = playlist.length > 1 ? playlist[(currentIndex + 1) % playlist.length] : null;
+    const nextName = next && next.media ? (next.media.displayName || next.media.fileName || '') : '';
+    const fmt = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+
+    el('audio-now').textContent = isPlaying && name ? name : (playlist.length ? 'Starting…' : 'No playlist assigned');
+    el('audio-count').textContent = playlist.length ? `${currentIndex + 1} / ${playlist.length}` : '';
+    el('audio-next').textContent = nextName ? `NEXT  ${nextName}` : '';
+    const dur = isPlaying ? ((videoEl.duration && isFinite(videoEl.duration)) ? videoEl.duration * 1000 : mediaDuration) : 0;
+    const pos = isPlaying ? (videoEl.currentTime ? videoEl.currentTime * 1000 : Date.now() - mediaStartTime) : 0;
+    el('audio-pos').textContent = fmt(pos);
+    el('audio-dur').textContent = fmt(dur);
+    el('audio-bar').style.width = dur > 0 ? `${Math.min(100, (pos / dur) * 100)}%` : '0%';
+    const vol = el('audio-volume');
+    if (vol && document.activeElement !== vol) vol.value = isMuted ? 0 : volume;
+    el('audio-volume-label').textContent = isMuted ? 'MUTED' : `${volume}%`;
+    el('audio-mute').textContent = isMuted ? 'UNMUTE' : 'MUTE';
+    el('audio-device').textContent = `${(config && config.deviceName) || 'Not registered'} · Audio`;
+    el('audio-meta').textContent = `Branch ${(config && config.branchCode) || '-'} · ID ${(config && config.deviceId) || '-'}`;
+    const api = (apiCapabilities && apiCapabilities.apiVersion) ? `API ${apiCapabilities.apiVersion}` : 'API ---';
+    const tok = (config && config.deviceToken) ? 'TOKEN OK' : 'NO TOKEN';
+    const sync = lastGoodSyncAt ? `sync ${new Date(lastGoodSyncAt).toTimeString().slice(0, 5)}` : 'sync --:--';
+    el('audio-footer').textContent = `${api} · ${tok} · cache ${cacheProgress}% · ${sync} · v${(appInfo && appInfo.version) || '?'}`;
+    pushAudioStatus(false);
+}
+
 async function adjustVolume(delta) {
     volume = Math.max(0, Math.min(100, volume + delta));
     if (isMuted && delta > 0) {
@@ -2115,7 +2568,7 @@ document.getElementById('check-update-btn').onclick = async () => {
     msg.textContent = "Checking...";
     try {
         const cur = await ipcRenderer.invoke('get-app-version');
-        const latest = await fetchSetting('LatestClientVersion');
+        const latest = await fetchSetting(AUDIO_MODE ? 'LatestAudioClientVersion' : 'LatestClientVersion');
         if (latest && latest !== cur) {
             msg.textContent = `New: ${latest}`;
             if (confirm(`Download v${latest}?`)) {

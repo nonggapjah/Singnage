@@ -141,3 +141,13 @@ id_ed25519
 # Publish-ClientUpdate.ps1 copies in directly at release time -- the repo was never the source
 # of truth. Proof: production serves 2.7.4 while the newest file ever committed here was 2.5.9.
 # A fresh clone therefore has no /setup/*.exe until a release is published; that is expected.
+src/signage-unicorn-client/dist-audio/
+
+# Workspace operations folder (release bundles, reviews, the real .env): NEVER committed - the GitHub repo is public
+_ops/
+
+# Windows 7 / 32-bit audio build: a second package root; only its package.json + README are source
+src/signage-unicorn-client/dist-audio-win7/
+src/signage-unicorn-client/legacy-win7/*
+!src/signage-unicorn-client/legacy-win7/package.json
+!src/signage-unicorn-client/legacy-win7/README.md

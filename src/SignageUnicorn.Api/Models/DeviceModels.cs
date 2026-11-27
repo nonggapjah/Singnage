@@ -59,6 +59,10 @@ namespace SignageUnicorn.Api.Models
         public int ClientProtocol { get; set; } = 1;
         // Round 3 (R2): an operator cleared the token and the screen has not claimed a new one yet.
         public bool TokenResetPending { get; set; }
+        // Audio player: 'screen' (default, every kiosk) or 'audio' (see PlaybackModes).
+        public string? PlaybackMode { get; set; }
+        // Last level (0-100) an operator set with SET_VOLUME; null = never set.
+        public int? Volume { get; set; }
     }
 
     public class DeviceCommandDto
@@ -93,6 +97,11 @@ namespace SignageUnicorn.Api.Models
         // X-Device-Token-Capable: 1 is equivalent). Absent on deployed v2.7.x clients.
         [JsonPropertyName("tokenCapable")]
         public bool? TokenCapable { get; set; }
+
+        // Audio player: 'audio' from the Signage Unicorn Audio app; absent from every kiosk, which
+        // leaves the row's mode untouched (new rows default to 'screen').
+        [JsonPropertyName("playbackMode")]
+        public string? PlaybackMode { get; set; }
 
         [JsonPropertyName("macAddress")]
         public string? MacAddress { get; set; }
@@ -136,6 +145,11 @@ namespace SignageUnicorn.Api.Models
 
         [JsonPropertyName("branchCode")]
         public string? BranchCode { get; set; }
+
+        // Audio player 2.8.4: the box reports its real level (0 = muted) so the console slider follows
+        // tray/F-key changes; screens send nothing and the stored value is kept (ISNULL in the procedure).
+        [JsonPropertyName("volume")]
+        public int? Volume { get; set; }
 
         [JsonPropertyName("status")]
         public string Status { get; set; } = string.Empty;
@@ -217,6 +231,12 @@ namespace SignageUnicorn.Api.Models
         public DateTime? StartDate { get; set; }
         public DateTime? EndDate { get; set; }
         public bool IsActive { get; set; } = true;
+        // Dayparts (2.8.7): daily window 'HH:mm' in store time, ISO days "1,2,3" (Mon = 1), and for
+        // audio players a repeat interval that turns the playlist into an announcement.
+        public string? StartTime { get; set; }
+        public string? EndTime { get; set; }
+        public string? DaysOfWeek { get; set; }
+        public int? RepeatEveryMinutes { get; set; }
     }
 
     public class BatchAddScheduleRequest
@@ -232,6 +252,27 @@ namespace SignageUnicorn.Api.Models
 
         [JsonPropertyName("endDate")]
         public DateTime? EndDate { get; set; }
+
+        [JsonPropertyName("startTime")]
+        public string? StartTime { get; set; }
+        [JsonPropertyName("endTime")]
+        public string? EndTime { get; set; }
+        [JsonPropertyName("daysOfWeek")]
+        public string? DaysOfWeek { get; set; }
+        [JsonPropertyName("repeatEveryMinutes")]
+        public int? RepeatEveryMinutes { get; set; }
+
+        /// <summary>API 2.8.14: when present with byBranch = true, the screens are released one branch at a time.</summary>
+        [JsonPropertyName("rollout")]
+        public RolloutOptions? Rollout { get; set; }
+
+        /// <summary>The schedule as the assignment store keeps it: "HH:mm" times, ISO day numbers, validated repeat
+        /// (the same normalisation UpdateAssignedPlaylists applies, so a rollout header never holds a longer string).</summary>
+        public PlaylistScheduleFields ToSchedule() => new(StartDate, EndDate,
+            SignageUnicorn.Api.Services.ScheduleWindow.NormalizeTime(StartTime),
+            SignageUnicorn.Api.Services.ScheduleWindow.NormalizeTime(EndTime),
+            SignageUnicorn.Api.Services.ScheduleWindow.NormalizeDays(DaysOfWeek),
+            SignageUnicorn.Api.Services.ScheduleWindow.NormalizeRepeat(RepeatEveryMinutes));
     }
 
     public class CommandAckRequest

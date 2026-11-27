@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { MediaFile } from '../types/media';
-import { formatDuration } from '../utils/media-helpers';
+import { formatDuration, mediaKind } from '../utils/media-helpers';
 
 interface MediaCardProps {
     media: MediaFile;
@@ -10,13 +10,15 @@ interface MediaCardProps {
 }
 
 export const MediaCard: React.FC<MediaCardProps> = ({ media, onDelete }) => {
-    const isVideo = !!media.blobUrl.toLowerCase().match(/\.(mp4|webm|ogg)$/) || media.durationSec > 0;
+    const kind = mediaKind(media.blobUrl) || mediaKind(media.fileName) || (media.durationSec > 0 ? 'video' : 'image');
+    const kindIcon = kind === 'video' ? '🎬' : kind === 'audio' ? '🎵' : '🖼️';
+    const kindLabel = kind === 'video' ? 'Video' : kind === 'audio' ? 'Audio' : 'Image';
 
     return (
         <div className="glass-card group rounded-xl overflow-hidden flex flex-col hover:border-accent-cyan/40">
             <div className="relative aspect-video bg-muted/20 flex items-center justify-center overflow-hidden">
-                <div className="text-4xl" aria-hidden="true">{isVideo ? '🎬' : '🖼️'}</div>
-                <span className="sr-only">{isVideo ? 'Video' : 'Image'}</span>
+                <div className="text-4xl" aria-hidden="true">{kindIcon}</div>
+                <span className="sr-only">{kindLabel}</span>
 
                 {/* Overlay Metadata */}
                 <div className="absolute top-2 left-2 flex gap-1">

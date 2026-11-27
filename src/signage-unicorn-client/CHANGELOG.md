@@ -3,6 +3,86 @@
 รายการอัปเดตและประวัติการแก้ไขระบบ (Patch Version History)
 
 ---
+## 2.8.8 — rolled to the video screens as well (first screen update since 2.8.0)
+
+- SET_BRANCH: a command for the branch the device is already on now records its issue time too,
+  so an older, delayed SET_BRANCH for another branch cannot apply after it (Codex review of the
+  2.8.0 -> 2.8.7 diff for the kiosk product; no other screen-side regression was found).
+- Screens move from 2.8.0 to this version by the normal UPDATE_CLIENT canary rollout
+  (publish-client without -Audio, 1 then 5 per batch); the audio players follow.
+
+## 2.8.7 — Signage Unicorn Audio: update launcher retries and reports (screens still on 2.8.0)
+
+- The update launcher writes every installer attempt (exit code, duration, retry) to
+  `<userData>\update-result.log`; the player uploads it to the server log at the next boot as
+  "Update launcher result: ...", so a slow or failed update is explained instead of guessed.
+- A failed installer is retried once after 60 s before the previous version is restarted
+  (23-11-2026: two of fifteen players failed the first run and passed the re-queue 15 min later).
+- Startup jingle: `/api/v1/media/{id}` returns a relative blobUrl, which the downloader rejected
+  ("Jingle download failed: Invalid URL"); it is now resolved against the server.
+- "Branch changed by console" is uploaded to the server log as WARN (audit trail for Change branch;
+  the API keeps only WARN/ERROR lines).
+- Codex review: a `%` in the install/user-data path no longer breaks the launcher batch (escaped as
+  `%%`); the update log is handed to the renderer once per boot, not again after every reload.
+
+## 2.8.6 — Signage Unicorn Audio: branch change from the console (screens still on 2.8.0)
+
+- New command `SET_BRANCH:<code>`: the player saves the branch code in its config, acknowledges, and
+  the next heartbeat reports it, so a whole branch of music boxes can be re-homed from the Audio
+  Players page (web 2.4.19 batch bar, "Change branch") instead of opening each player's settings.
+  The branch code was only editable on the device until now because every heartbeat re-sends it.
+  A failed config write acks FAILED and keeps the old branch; a redelivered older SET_BRANCH cannot
+  undo a newer one (issue time kept as `branchSetAt`); the schedule is reloaded right after the first
+  heartbeat that carries the new branch, so sibling inheritance switches at once (Codex review).
+
+## 2.8.5 — Signage Unicorn Audio: Windows 7 / 32-bit build (screens still on 2.8.0)
+
+- `npm run build:audio:win7` packages the same source with Electron 22.3.27 (last release for
+  Windows 7, ia32) from `legacy-win7/` -> `Signage Unicorn Audio Win7 Setup <version>.exe`.
+- A 32-bit build reads `AudioClientDownloadUrlWin7` / `AudioClientDownloadSha256Win7` (version key
+  shared), so Win7 boxes are never offered the x64 installer. `Publish-ClientUpdate.ps1 -Audio`
+  publishes both installers when the Win7 one is present.
+
+## 2.8.4 — Signage Unicorn Audio: heartbeat reports the real volume (screens still on 2.8.0)
+
+- The heartbeat carries `volume` (0 when muted) so the console slider follows changes made from the
+  tray menu or F2/F3/F4; API 2.8.9 stores it (`@p_volume` in sp_device_std).
+
+## 2.8.3 — Signage Unicorn Audio: review fixes (Codex + Impeccable; screens still on 2.8.0)
+
+- The audio product registers under its own device key derived from the hardware uuid, so a PC
+  that also runs a screen keeps its screen row (the same uuid would have reclaimed it).
+- After an audio update the launcher restarts `Signage Unicorn Audio.exe`, never the screen exe.
+- An empty schedule also stops announcements; moving a playlist between the loop and
+  "repeat every N min" is a content change (Smart Sync re-applies it); a failed announcement
+  no longer skips the next regular track.
+- Output picker labels verified to be exposed by Electron without a permission probe; 11 px minimum text.
+
+## 2.8.2 — Signage Unicorn Audio: announcements and output device (screens still on 2.8.0)
+
+- Repeating announcements: the SCHEDULE may carry `interjections` (API 2.8.7, assignments with
+  "repeat every N min"); their files sync with the loop, they play between tracks when due (first
+  time right away), last-played times survive restarts, and an announcements-only schedule plays
+  them from idle.
+- Output device picker in the audio window (`setSinkId`), remembered as `audioSinkId`.
+- Setup, F7 dashboard, config, playlist picker and help are scaled to fit the small window.
+
+## 2.8.1 — Signage Unicorn Audio (separate product; screens stay on 2.8.0)
+
+- New build target `npm run build:audio` → `Signage Unicorn Audio Setup 2.8.1.exe` (appId
+  `com.signage.unicorn.audio`, own install folder and userData). The screen installer is NOT
+  republished and `LatestClientVersion` stays 2.8.0; the audio app reads
+  `LatestAudioClientVersion` / `AudioClientDownloadUrl` / `AudioClientDownloadSha256`.
+- Audio mode (detected from the product name, `SIGNAGE_AUDIO=1` in development): a 480×420
+  window with now-playing, progress, next track, volume + mute and Hide to tray; a tray icon
+  with Open / Mute / Volume / Skip / Restart player / Exit; closing the window hides it; "Start
+  hidden in tray" at setup; starts unmuted at 70 %. Sound files (mp3, wav, m4a, aac) play
+  through the existing video element; images are skipped. Registers with `playbackMode: audio`.
+- Audio mode leaves the PC alone: no kiosk/fullscreen/always-on-top, no screensaver or power-plan
+  changes (display may sleep), REBOOT restarts the app only, CAPTURE_SCREEN is refused, no
+  identity migration from the screen client, own watchdog task and diagnostics port 8089.
+- Commands `SET_VOLUME:<0-100>`, `MUTE`, `UNMUTE` (API 2.8.6) are handled on every build.
+
 ## [2.8.0] - 2026-10-27 (protocol 2 client; requires API 2.8.0 for device tokens, works against older APIs without them)
 
 #### Round 3 (same day, after the second review)

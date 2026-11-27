@@ -25,9 +25,9 @@ namespace SignageUnicorn.Api.Tests.Fakes
         public List<string> AppliedMigrations { get; } = new();
         public Dictionary<string, string> RecordedProcedureHashes { get; } = new(StringComparer.OrdinalIgnoreCase);
 
-        public FakeDeviceRepository Add(long id, string? uuid, string? tokenHash = null, string? mac = null, DateTime? resetAt = null)
+        public FakeDeviceRepository Add(long id, string? uuid, string? tokenHash = null, string? mac = null, DateTime? resetAt = null, int? seenSecondsAgo = null)
         {
-            Rows.Add(new DeviceAuthInfo { DeviceId = id, DeviceUuid = uuid, TokenHash = tokenHash, MacAddress = mac, TokenResetAt = resetAt });
+            Rows.Add(new DeviceAuthInfo { DeviceId = id, DeviceUuid = uuid, TokenHash = tokenHash, MacAddress = mac, TokenResetAt = resetAt, SecondsSinceCheckIn = seenSecondsAgo });
             return this;
         }
 
@@ -185,8 +185,10 @@ namespace SignageUnicorn.Api.Tests.Fakes
         public Task<string?> GetSiblingDeviceIdWithAssignmentsAsync(string deviceId) => throw new NotImplementedException();
         public Task UpdateAssignedPlaylistsAsync(string deviceId, List<DevicePlaylistDto> playlists) => throw new NotImplementedException();
         public Task SetScheduleModeAsync(string deviceId, string mode) => throw new NotImplementedException();
+        public List<(string deviceId, int volume)> VolumeWrites { get; } = new();
+        public Task SetDeviceVolumeAsync(string deviceId, int volume) { VolumeWrites.Add((deviceId, volume)); return Task.CompletedTask; }
         public Task ResetScheduleToInheritAsync(string deviceId) => throw new NotImplementedException();
-        public Task<IEnumerable<string>> GetDevicesWithScheduleTransitionsAsync(DateTime fromUtc, DateTime toUtc) => throw new NotImplementedException();
+        public Task<IEnumerable<string>> GetDevicesWithScheduleTransitionsAsync(DateTime fromUtc, DateTime toUtc, string? timeZoneId = null) => throw new NotImplementedException();
     }
 
     public sealed class FakeSystemLogRepository : ISystemLogRepository

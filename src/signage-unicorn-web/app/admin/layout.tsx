@@ -9,6 +9,7 @@ import { useUI } from '@/features/ui/context/UIContext';
 import { useAuth } from '@/features/auth/context/AuthContext';
 import { useVisibleInterval } from '@/features/ui/hooks/useVisibleInterval';
 import { dashboardApi, DashboardStats } from '@/features/dashboard/api/dashboard-api';
+import { MediaIntegrityBanner } from '@/features/system/components/MediaIntegrityBanner';
 import {
     LayoutDashboard,
     FolderOpen,
@@ -24,7 +25,8 @@ import {
     Users,
     Menu,
     X,
-    LogOut
+    LogOut,
+    Volume2,
 } from 'lucide-react';
 
 export default function AdminLayout({
@@ -66,6 +68,7 @@ export default function AdminLayout({
         { name: 'Media Library', href: '/admin/media', icon: FolderOpen },
         { name: 'Playlists', href: '/admin/playlists', icon: ListVideo },
         { name: 'Devices', href: '/admin/devices', icon: Monitor },
+        { name: 'Audio Players', href: '/admin/audio', icon: Volume2 },
         { name: 'Playback Stats', href: '/admin/statistics', icon: BarChart2 },
         { name: 'System Logs', href: '/admin/system-logs', icon: ScrollText },
         { name: 'User Management', href: '/admin/users', icon: Users },
@@ -417,6 +420,7 @@ export default function AdminLayout({
                 {/* --- Scrollable Content --- */}
                 <main className="flex-1 overflow-y-auto custom-scrollbar relative page-transition scroll-smooth">
                     <div className="relative z-10 pb-20">
+                        <MediaIntegrityBanner />
                         {children}
                     </div>
                 </main>

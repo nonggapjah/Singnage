@@ -21,6 +21,8 @@ const ALLOWED_CHANNELS = new Set([
     'db-delete-logs-by-event-ids', 'db-clear-synced-logs', 'db-save-playlist', 'db-get-playlist',
     // liveness / logging / smoke test (round 2)
     'report-health', 'log-line', 'smoke-event',
+    // audio player (Signage Unicorn Audio build)
+    'get-app-info', 'hide-to-tray', 'audio-status',
 ]);
 
 contextBridge.exposeInMainWorld('signage', {
@@ -29,5 +31,13 @@ contextBridge.exposeInMainWorld('signage', {
             return Promise.reject(new Error(`IPC channel not allowed: ${String(channel)}`));
         }
         return ipcRenderer.invoke(channel, ...args);
+    },
+    // Audio player: main -> renderer tray actions ({ action: 'toggle-mute' | 'set-volume' | 'skip', value }).
+    // The only push channel; the payload is a plain object built by main.js.
+    onAudioControl(callback) {
+        if (typeof callback !== 'function') return;
+        ipcRenderer.on('audio-control', (_event, payload) => {
+            if (payload && typeof payload === 'object') callback({ action: String(payload.action || ''), value: payload.value });
+        });
     },
 });

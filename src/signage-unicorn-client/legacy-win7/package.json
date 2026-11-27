@@ -1,0 +1,90 @@
+{
+  "name": "signage-unicorn-audio",
+  "version": "2.8.9",
+  "description": "Audio-only player for Signage Unicorn - Windows 7 / 32-bit build (Electron 22)",
+  "main": "main.js",
+  "author": "Signage Unicorn Team",
+  "license": "ISC",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "sqlite:x64": "cd node_modules/better-sqlite3 && node ../prebuild-install/bin.js -r electron -t 22.3.27 --arch x64",
+    "sqlite:ia32": "cd node_modules/better-sqlite3 && node ../prebuild-install/bin.js -r electron -t 22.3.27 --arch ia32",
+    "smoke": "node smoke/run-smoke.js",
+    "build": "electron-builder --win nsis --ia32"
+  },
+  "dependencies": {
+    "better-sqlite3": "9.6.0",
+    "fs-extra": "^11.2.0"
+  },
+  "devDependencies": {
+    "electron": "22.3.27",
+    "electron-builder": "^24.13.3",
+    "prebuild-install": "^7.1.1"
+  },
+  "build": {
+    "appId": "com.signage.unicorn.audio",
+    "productName": "Signage Unicorn Audio",
+    "artifactName": "Signage Unicorn Audio Win7 Setup ${version}.${ext}",
+    "npmRebuild": false,
+    "asar": true,
+    "asarUnpack": [
+      "**/better-sqlite3/**/*.node",
+      "**/better-sqlite3/build/**"
+    ],
+    "compression": "maximum",
+    "electronLanguages": [
+      "en-US",
+      "th"
+    ],
+    "directories": {
+      "output": "../dist-audio-win7"
+    },
+    "files": [
+      "main.js",
+      "index.html",
+      "StartWatchdog.bat",
+      "Watchdog.ps1",
+      "preload.js",
+      "src/**/*",
+      "assets/**/*",
+      "node_modules/**/*",
+      "!node_modules/**/test/**",
+      "!node_modules/**/tests/**",
+      "!node_modules/**/*.md",
+      "!node_modules/**/*.ts",
+      "!node_modules/**/*.map",
+      "!node_modules/**/LICENSE*",
+      "!node_modules/**/CHANGELOG*",
+      "!node_modules/**/README*",
+      "!node_modules/**/.github/**",
+      "!node_modules/**/docs/**",
+      "!node_modules/**/examples/**",
+      "!node_modules/better-sqlite3/deps/**",
+      "!node_modules/better-sqlite3/src/**",
+      "!node_modules/better-sqlite3/build/**/*.obj",
+      "!node_modules/better-sqlite3/build/**/*.pdb",
+      "!node_modules/better-sqlite3/build/**/*.iobj",
+      "!node_modules/better-sqlite3/build/**/*.ipdb",
+      "!node_modules/prebuild-install/**",
+      "!test/**",
+      "!smoke/**"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "ia32"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "deleteAppDataOnUninstall": false
+    }
+  }
+}

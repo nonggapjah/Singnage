@@ -17,15 +17,19 @@ namespace SignageUnicorn.Api.Controllers
         private readonly DeviceService _deviceService;
         private readonly DeviceAuthService _deviceAuth;
 
-        public DeviceController(DeviceService deviceService, DeviceAuthService deviceAuth)
+        private readonly SignageUnicorn.Api.Services.Rollout.RolloutService _rollouts;
+
+        public DeviceController(DeviceService deviceService, DeviceAuthService deviceAuth, SignageUnicorn.Api.Services.Rollout.RolloutService rollouts)
         {
             _deviceService = deviceService;
             _deviceAuth = deviceAuth;
+            _rollouts = rollouts;
         }
 
         private string? PresentedToken => Request.Headers.TryGetValue(DeviceAuthService.HeaderName, out var v) ? v.ToString() : null;
         private string? RemoteIp => HttpContext.Connection.RemoteIpAddress?.ToString();
-        private IActionResult DeviceTokenRejected() => Unauthorized(ApiResponse<object>.ErrorResponse(401, DeviceAuthService.RejectMessage));
+        private IActionResult DeviceTokenRejected(string? detail = null)
+            => Unauthorized(ApiResponse<object>.ErrorResponse(401, string.IsNullOrEmpty(detail) ? DeviceAuthService.RejectMessage : DeviceAuthService.RejectMessage + ": " + detail));
         private IActionResult DeviceAuthRejected(DeviceAuthResult auth) => Unauthorized(ApiResponse<object>.ErrorResponse(401, auth.Message));
         // Round 3 (R3): a token write lost against a concurrent issuance; the caller retries later.
         private IActionResult TokenRace() => StatusCode(409, ApiResponse<object>.ErrorResponse(409, DeviceAuthService.RaceMessage));
@@ -62,13 +66,14 @@ namespace SignageUnicorn.Api.Controllers
 
             var tokenCapable = DeviceAuthService.IsTokenCapable(request.TokenCapable, Request.Headers[DeviceAuthService.CapabilityHeaderName]);
 
+            RegisterPreAuth preAuth;
             try
             {
-                await _deviceAuth.PreAuthorizeRegisterAsync(request.DeviceKey, PresentedToken, remoteIp);
+                preAuth = await _deviceAuth.PreAuthorizeRegisterAsync(request.DeviceKey, PresentedToken, remoteIp, tokenCapable);
             }
-            catch (DeviceAuthRejectedException)
+            catch (DeviceAuthRejectedException ex)
             {
-                return DeviceTokenRejected();
+                return DeviceTokenRejected(ex.Detail);
             }
 
             var device = await _deviceService.RegisterDeviceAsync(request);
@@ -77,7 +82,7 @@ namespace SignageUnicorn.Api.Controllers
 
             try
             {
-                var token = await _deviceAuth.IssueOrRotateAsync(device, PresentedToken, tokenCapable, remoteIp);
+                var token = await _deviceAuth.IssueOrRotateAsync(device, PresentedToken, tokenCapable, remoteIp, preAuth);
                 if (token != null)
                 {
                     device.DeviceToken = token;
@@ -421,26 +426,38 @@ namespace SignageUnicorn.Api.Controllers
 
             try
             {
+                // API 2.8.14: release one branch at a time. Wave 1 is assigned here; the worker does the
+                // rest. With a single branch there is nothing to stagger, so it falls through to the
+                // immediate path below.
+                if (request.Rollout is { ByBranch: true })
+                {
+                    long? userId = long.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var uid) ? uid : null;
+                    RolloutStartResult? started;
+                    try
+                    {
+                        started = await _rollouts.StartAsync(request, userId, HttpContext.RequestAborted);
+                    }
+                    catch (ArgumentException ex)
+                    {
+                        return BadRequest(ApiResponse<object>.ErrorResponse(400, ex.Message));
+                    }
+                    catch (InvalidOperationException ex)
+                    {
+                        return Conflict(ApiResponse<object>.ErrorResponse(409, ex.Message));
+                    }
+                    if (started != null)
+                    {
+                        return Ok(ApiResponse<RolloutStartResult>.SuccessResponse(started,
+                            $"Rollout started: branch {started.FirstBranch} now ({started.FirstWaveApplied} of {started.FirstWaveDevices} assigned), " +
+                            $"then one branch every {started.WaveMinutes} min; {started.Waves} branches, {started.TotalDevices} devices in total."));
+                    }
+                }
+
+                var schedule = request.ToSchedule();
                 var options = new ParallelOptions { MaxDegreeOfParallelism = 10 };
                 await Parallel.ForEachAsync(request.DeviceIds, options, async (deviceId, ct) =>
                 {
-                    var current = await _deviceService.GetAssignedPlaylistsAsync(deviceId);
-                    var updated = current.ToList();
-
-                    // Remove existing mapping of the same playlist just in case
-                    updated.RemoveAll(x => x.PlaylistId == request.PlaylistId);
-
-                    updated.Add(new DevicePlaylistDto
-                    {
-                        DeviceId = deviceId,
-                        PlaylistId = request.PlaylistId,
-                        StartDate = request.StartDate,
-                        EndDate = request.EndDate,
-                        IsActive = true
-                    });
-
-                    await _deviceService.UpdateAssignedPlaylistsAsync(deviceId, updated);
-                    await _deviceService.SendCommandAsync(deviceId, "SYNC_SCHEDULE");
+                    await _deviceService.AssignPlaylistAsync(deviceId, request.PlaylistId, schedule);
                 });
 
                 return Ok(ApiResponse<object>.SuccessResponse(null, $"Added playlist to {request.DeviceIds.Count} devices."));

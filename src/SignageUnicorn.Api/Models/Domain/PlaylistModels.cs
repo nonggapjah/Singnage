@@ -5,6 +5,16 @@ namespace SignageUnicorn.Api.Models.Domain
 {
     // ... MediaDto skipped ...
 
+    // Repeating announcement (2.8.7): a playlist an AUDIO player plays once every N minutes between
+    // the regular loop's tracks. Never part of Items; the kiosk client ignores the field.
+    public class InterjectionDto
+    {
+        public string PlaylistId { get; set; } = string.Empty;
+        public string PlaylistName { get; set; } = string.Empty;
+        public int EveryMinutes { get; set; }
+        public List<PlaylistItemDto> Items { get; set; } = new();
+    }
+
     public class PlaylistDto
     {
         [JsonPropertyName("playlistId")]
@@ -65,6 +75,8 @@ namespace SignageUnicorn.Api.Models.Domain
 
         [JsonPropertyName("nextTransitionAtUtc")]
         public DateTime? NextTransitionAtUtc { get; set; }
+        // Dayparts (2.8.7): announcements for audio players; null for screens and when none are assigned.
+        public List<InterjectionDto>? Interjections { get; set; }
 
         // IMPORTANT: Database compatibility layer
         // DB returns 'status' column as 'active' or 'inactive'
@@ -108,6 +120,8 @@ namespace SignageUnicorn.Api.Models.Domain
         // Join data
         [JsonPropertyName("fileName")]
         public string? FileName { get; set; }
+        /// <summary>Media integrity (2.8.15): null/"ok" = fine; "mismatch" | "missing" | "loop-suspect" = held back from the screens.</summary>
+        public string? IntegrityStatus { get; set; }
         
         [JsonPropertyName("displayName")]
         public string? DisplayName { get; set; }

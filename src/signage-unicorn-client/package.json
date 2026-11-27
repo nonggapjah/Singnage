@@ -1,6 +1,6 @@
 {
   "name": "signage-unicorn-client",
-  "version": "2.8.0",
+  "version": "2.8.9",
   "description": "Standalone Player for Signage Unicorn",
   "main": "main.js",
   "author": "Signage Unicorn Team",
@@ -8,6 +8,9 @@
   "scripts": {
     "start": "electron .",
     "build": "electron-builder",
+    "build:audio": "node scripts/build-audio.js",
+    "build:audio:win7": "node scripts/build-audio-win7.js",
+    "smoke:win7": "node scripts/build-audio-win7.js --smoke",
     "rebuild": "electron-rebuild -f -w better-sqlite3",
     "test": "node --test",
     "smoke": "node smoke/run-smoke.js",

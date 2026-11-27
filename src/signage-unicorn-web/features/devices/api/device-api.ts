@@ -3,6 +3,7 @@ import { getDeviceToken } from '@/lib/device-token';
 import { getCapabilities } from '@/lib/api-capabilities';
 import { mapPlaylistItems } from '@/features/playlists/api/playlist-api';
 import { Playlist } from '@/features/playlists/types/playlist';
+import type { RolloutStartResult } from '@/features/playlists/api/rollout-api';
 import { Device, DeviceCommand, DeviceRegisterResponse, DeviceTokenClaimResponse, CommandAckStatus } from '../types';
 
 export const deviceApi = {
@@ -126,17 +127,23 @@ export const deviceApi = {
         return await apiFetch<any[]>(`/devices/${deviceId}/playlists`, { method: 'GET' });
     },
 
-    updateAssignedPlaylists: async (deviceId: string, playlists: { playlistId: string; startDate?: string; endDate?: string }[]) => {
+    updateAssignedPlaylists: async (deviceId: string, playlists: { playlistId: string; startDate?: string; endDate?: string; startTime?: string; endTime?: string; daysOfWeek?: string; repeatEveryMinutes?: number | null }[]) => {
         return await apiFetch<{ success: boolean }>(`/devices/${deviceId}/playlists`, {
             method: 'POST',
             body: JSON.stringify(playlists),
         });
     },
 
-    batchAddSchedule: async (deviceIds: string[], playlistId: string, startDate?: string, endDate?: string) => {
-        return await apiFetch<{ success: boolean }>('/devices/batch-add-playlist', {
+    // daypart (web 2.4.15 / API 2.8.7): startTime, endTime, daysOfWeek, repeatEveryMinutes; older APIs ignore them.
+    /**
+     * Assigns the playlist to every device at once, or - with `rollout` (API 2.8.14) - one branch at
+     * a time: the first branch now, the next every `waveMinutes`. In that case `data` describes the
+     * rollout that was started; with a single branch the API assigns immediately and `data` is null.
+     */
+    batchAddSchedule: async (deviceIds: string[], playlistId: string, startDate?: string, endDate?: string, daypart?: { startTime?: string; endTime?: string; daysOfWeek?: string; repeatEveryMinutes?: number | null }, rollout?: { byBranch: boolean; waveMinutes: number }) => {
+        return await apiFetch<RolloutStartResult | null>('/devices/batch-add-playlist', {
             method: 'POST',
-            body: JSON.stringify({ deviceIds, playlistId, startDate, endDate }),
+            body: JSON.stringify({ deviceIds, playlistId, startDate, endDate, ...(daypart || {}), ...(rollout ? { rollout } : {}) }),
         });
     },
 

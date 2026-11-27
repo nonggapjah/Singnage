@@ -23,6 +23,10 @@ export interface Device {
     clientProtocol?: number;
     /** Set by an admin token reset; cleared once the screen claims a new token (server sends RECLAIM_TOKEN). */
     tokenResetPending?: boolean;
+    /** 'screen' (every kiosk, the default) or 'audio' (the Signage Unicorn Audio app; sound only). */
+    playbackMode?: 'screen' | 'audio';
+    /** Last SET_VOLUME level (0-100) sent from the console; null/undefined = never set. */
+    volume?: number | null;
 }
 
 /** Register response: the device plus, when the server issued or rotated one, its secret token. */

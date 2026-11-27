@@ -6,6 +6,8 @@ import type { ApiResponse } from '@/lib/api-fetch';
 import { useUI } from '@/features/ui/context/UIContext';
 import { Playlist } from '@/features/playlists/types/playlist';
 import { DateTimePicker24h } from '@/components/ui/DateTimePicker24h';
+import { DaypartFields } from './DaypartFields';
+import { Daypart, isWithinDaypart, storeNow } from '@/lib/daypart';
 import { Modal } from '@/components/ui/Modal';
 
 interface DevicePlaylistModalProps {
@@ -18,11 +20,13 @@ interface DevicePlaylistModalProps {
     scheduleMode?: 'inherit' | 'explicit';
     /** Called after the schedule mode was reset to inherit, so the caller can refresh. */
     onScheduleModeChanged?: () => void;
+    /** 'audio' shows the announcement (repeat) field; screens never use it. */
+    playbackMode?: string | null;
 }
 
-type Assignment = { id?: number, playlistId: string, startDate?: string, endDate?: string };
+type Assignment = { id?: number, playlistId: string, startDate?: string, endDate?: string } & Daypart;
 
-function assignmentStatus(assignment: Assignment) {
+function assignmentStatus(assignment: Assignment, isAudio: boolean) {
     const now = new Date();
     const st = assignment.startDate ? new Date(assignment.startDate) : null;
     const nd = assignment.endDate ? new Date(assignment.endDate) : null;
@@ -33,11 +37,19 @@ function assignmentStatus(assignment: Assignment) {
     if (nd && nd < now) {
         return { label: 'EXPIRED', className: 'text-red-600 dark:text-red-400 bg-red-500/10 border-red-500/30' };
     }
+    if (isAudio && assignment.repeatEveryMinutes && assignment.repeatEveryMinutes > 0) {
+        return { label: `EVERY ${assignment.repeatEveryMinutes} MIN`, className: 'text-accent-cyan bg-accent-cyan/10 border-accent-cyan/30' };
+    }
+    // Daily windows are judged in store time (the API's Schedule:TimeZoneId), not the admin's clock.
+    if (!isWithinDaypart(storeNow(), assignment)) {
+        return { label: 'OFF HOURS', className: 'text-amber-600 dark:text-amber-400 bg-amber-500/10 border-amber-500/30' };
+    }
     return { label: 'ACTIVE', className: 'text-green-600 dark:text-green-400 bg-green-500/10 border-green-500/30' };
 }
 
-export const DevicePlaylistModal: React.FC<DevicePlaylistModalProps> = ({ isOpen, onClose, deviceId, deviceName, availablePlaylists, scheduleMode, onScheduleModeChanged }) => {
+export const DevicePlaylistModal: React.FC<DevicePlaylistModalProps> = ({ isOpen, onClose, deviceId, deviceName, availablePlaylists, scheduleMode, onScheduleModeChanged, playbackMode }) => {
     const { showModal } = useUI();
+    const isAudio = (playbackMode || 'screen') === 'audio';
     const [assignments, setAssignments] = useState<Assignment[]>([]);
     const [loading, setLoading] = useState(true);
     const [loadFailed, setLoadFailed] = useState(false);
@@ -75,6 +87,10 @@ export const DevicePlaylistModal: React.FC<DevicePlaylistModalProps> = ({ isOpen
                     playlistId: a.playlistId,
                     startDate: parseUtcToLocalInput(a.startDate),
                     endDate: parseUtcToLocalInput(a.endDate),
+                    startTime: a.startTime || undefined,
+                    endTime: a.endTime || undefined,
+                    daysOfWeek: a.daysOfWeek || undefined,
+                    repeatEveryMinutes: a.repeatEveryMinutes ?? null,
                 }));
                 setAssignments(formatted);
             } else {
@@ -101,6 +117,10 @@ export const DevicePlaylistModal: React.FC<DevicePlaylistModalProps> = ({ isOpen
                 playlistId: a.playlistId,
                 startDate: parseLocalInputToUtc(a.startDate),
                 endDate: parseLocalInputToUtc(a.endDate),
+                startTime: a.startTime || undefined,
+                endTime: a.endTime || undefined,
+                daysOfWeek: a.daysOfWeek || undefined,
+                repeatEveryMinutes: a.repeatEveryMinutes && a.repeatEveryMinutes > 0 ? a.repeatEveryMinutes : null,
             }));
 
             const res = await deviceApi.updateAssignedPlaylists(deviceId, payload);
@@ -191,6 +211,12 @@ export const DevicePlaylistModal: React.FC<DevicePlaylistModalProps> = ({ isOpen
         setAssignments(updated);
     };
 
+    const updateDaypart = (index: number, dp: Daypart) => {
+        const updated = [...assignments];
+        updated[index] = { ...updated[index], startTime: dp.startTime, endTime: dp.endTime, daysOfWeek: dp.daysOfWeek, repeatEveryMinutes: dp.repeatEveryMinutes ?? null };
+        setAssignments(updated);
+    };
+
     const activePlaylists = availablePlaylists.filter(p => p.active === 'Y');
     const playlistName = (id: string) => availablePlaylists.find(p => p.playlistId === id)?.playlistName || '';
     const selectClass = 'w-full bg-muted/20 border border-border rounded-xl px-3 h-[46px] text-sm font-mono text-foreground outline-none focus:border-accent-cyan focus:ring-1 focus:ring-accent-cyan/30 cursor-pointer transition-colors';
@@ -251,17 +277,18 @@ export const DevicePlaylistModal: React.FC<DevicePlaylistModalProps> = ({ isOpen
                                 <thead>
                                     <tr className="border-b border-border text-xs text-muted-foreground uppercase tracking-wider bg-muted/20">
                                         <th scope="col" className="p-3 font-bold min-w-[200px]">Playlist</th>
-                                        <th scope="col" className="p-3 font-bold min-w-[220px]">Start date (optional)</th>
-                                        <th scope="col" className="p-3 font-bold min-w-[220px]">End date (optional)</th>
+                                        <th scope="col" className="p-3 font-bold min-w-[380px]">Start date (optional)</th>
+                                        <th scope="col" className="p-3 font-bold min-w-[380px]">End date (optional)</th>
                                         <th scope="col" className="p-3 font-bold text-center w-[110px]">Status</th>
                                         <th scope="col" className="p-3 font-bold w-12"><span className="sr-only">Remove</span></th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {assignments.map((assignment, idx) => {
-                                        const status = assignmentStatus(assignment);
+                                        const status = assignmentStatus(assignment, isAudio);
                                         return (
-                                            <tr key={idx} className="border-b border-border/50 hover:bg-muted/10 transition-colors">
+                                            <React.Fragment key={idx}>
+                                            <tr className="hover:bg-muted/10 transition-colors">
                                                 <td className="p-2">
                                                     <select
                                                         value={assignment.playlistId}
@@ -289,6 +316,7 @@ export const DevicePlaylistModal: React.FC<DevicePlaylistModalProps> = ({ isOpen
                                                         onChange={val => updateRow(idx, 'endDate', val)}
                                                         isLarge={true}
                                                         ariaLabel={`End date for row ${idx + 1}`}
+                                                        defaultTime="23:59"
                                                     />
                                                 </td>
                                                 <td className="p-2 text-center">
@@ -307,6 +335,16 @@ export const DevicePlaylistModal: React.FC<DevicePlaylistModalProps> = ({ isOpen
                                                     </button>
                                                 </td>
                                             </tr>
+                                            {/* Second row: the daily window stays visible without horizontal scrolling. */}
+                                            <tr className="border-b border-border/50">
+                                                <td colSpan={5} className="px-2 pb-3 pt-0">
+                                                    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg bg-muted/10 border border-border/40 px-3 py-2">
+                                                        <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground shrink-0">Daily window</span>
+                                                        <DaypartFields compact idPrefix={`dp-${idx}`} value={assignment} onChange={dp => updateDaypart(idx, dp)} showRepeat={isAudio} />
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                            </React.Fragment>
                                         );
                                     })}
                                     {assignments.length === 0 && (
@@ -321,7 +359,7 @@ export const DevicePlaylistModal: React.FC<DevicePlaylistModalProps> = ({ isOpen
                         {/* Narrow layout: stacked cards */}
                         <ul className="md:hidden space-y-3">
                             {assignments.map((assignment, idx) => {
-                                const status = assignmentStatus(assignment);
+                                const status = assignmentStatus(assignment, isAudio);
                                 return (
                                     <li key={idx} className="rounded-2xl border border-border bg-muted/10 p-4 space-y-3">
                                         <div className="flex items-center justify-between gap-2">
@@ -354,7 +392,11 @@ export const DevicePlaylistModal: React.FC<DevicePlaylistModalProps> = ({ isOpen
                                         </div>
                                         <div>
                                             <label htmlFor={`sched-end-${idx}`} className="block text-xs font-bold text-muted-foreground uppercase tracking-wider mb-1">End date (optional)</label>
-                                            <DateTimePicker24h id={`sched-end-${idx}`} value={assignment.endDate || ''} onChange={val => updateRow(idx, 'endDate', val)} isLarge={true} />
+                                            <DateTimePicker24h id={`sched-end-${idx}`} value={assignment.endDate || ''} onChange={val => updateRow(idx, 'endDate', val)} isLarge={true} defaultTime="23:59" />
+                                        </div>
+                                        <div>
+                                            <span className="block text-xs font-bold text-muted-foreground uppercase tracking-wider mb-1">{isAudio ? 'Daily window · days · repeat' : 'Daily window · days'}</span>
+                                            <DaypartFields idPrefix={`dpm-${idx}`} value={assignment} onChange={dp => updateDaypart(idx, dp)} showRepeat={isAudio} />
                                         </div>
                                     </li>
                                 );

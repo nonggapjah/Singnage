@@ -147,7 +147,8 @@ namespace SignageUnicorn.Api.Services.Background
                         _logger.LogInformation("[ScheduleTransition] Delivered {Count} previously failed SYNC_SCHEDULE command(s).", succeeded.Count);
 
                     // 2. Scan the window. If the query itself fails the window is kept (exception path).
-                    var deviceIds = (await devices.GetDevicesWithScheduleTransitionsAsync(lastCheckUtc, nowUtc)).ToList();
+                    var tzId = (scope.ServiceProvider.GetService(typeof(Microsoft.Extensions.Configuration.IConfiguration)) as Microsoft.Extensions.Configuration.IConfiguration)?["Schedule:TimeZoneId"];
+                    var deviceIds = (await devices.GetDevicesWithScheduleTransitionsAsync(lastCheckUtc, nowUtc, tzId)).ToList();
                     var failedNow = new List<string>();
                     foreach (var deviceId in deviceIds)
                     {

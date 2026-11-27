@@ -44,6 +44,68 @@ export function cacheRequestUrl(blobUrl: string, fileHash?: string, base?: strin
     return absolute + (absolute.includes('?') ? '&' : '?') + 'h=' + encodeURIComponent(fileHash);
 }
 
+/**
+ * The page-relative form of a media URL. The API publishes media under its own BaseUrl -- the LAN
+ * http address the kiosks download from -- which on the web player is cross-origin and, on an https
+ * page, mixed content the browser blocks (the video element then stays black and the clip never
+ * caches). Next rewrites /media/* to the API, so the same file is always reachable same-origin over
+ * the page's own scheme. Data URLs, blob URLs and paths outside /media/ are returned unchanged.
+ */
+export function pageMediaUrl(blobUrl: string | null | undefined): string {
+    if (!blobUrl) return '';
+    if (/^(data|blob):/i.test(blobUrl)) return blobUrl;
+    try {
+        const u = new URL(blobUrl, 'http://local');
+        if (u.pathname.startsWith('/media/')) return u.pathname + u.search;
+        return blobUrl;
+    } catch {
+        return blobUrl;
+    }
+}
+
+/** Playlist items with every media URL in its page-relative form (see pageMediaUrl). The cache
+ *  identity (stored file name + hash) is unchanged, so this never looks like a content change. */
+export function withPageMediaUrls<T extends { media?: { blobUrl?: string } | null }>(items: T[]): T[] {
+    return items.map(i => (i.media && i.media.blobUrl)
+        ? ({ ...i, media: { ...i.media, blobUrl: pageMediaUrl(i.media.blobUrl) } } as T)
+        : i);
+}
+
+/** The part of HTMLMediaElement the autoplay fallback needs (kept minimal so tests can fake it). */
+export interface PlayableMedia {
+    muted: boolean;
+    play(): Promise<void>;
+}
+
+/** True for the rejection browsers raise when autoplay policy refuses to start a clip with sound. */
+export function isAutoplayBlocked(err: unknown): boolean {
+    return typeof err === 'object' && err !== null && (err as { name?: unknown }).name === 'NotAllowedError';
+}
+
+/**
+ * Starts a clip, falling back to muted playback when the browser refuses unmuted autoplay.
+ * Chrome (and Safari) reject play() with NotAllowedError until the viewer has interacted with the
+ * page -- the normal state of an unattended screen that boots straight into /player -- and without
+ * the fallback the clip sits on its first frame for the whole slot. Anything other than an autoplay
+ * block (source cannot be decoded, element went away) is reported as 'failed' unchanged, and a clip
+ * that is already muted when it is refused is not retried.
+ */
+export async function playWithMutedFallback(media: PlayableMedia): Promise<'playing' | 'muted' | 'failed'> {
+    try {
+        await media.play();
+        return 'playing';
+    } catch (err) {
+        if (media.muted || !isAutoplayBlocked(err)) return 'failed';
+        media.muted = true;
+        try {
+            await media.play();
+            return 'muted';
+        } catch {
+            return 'failed';
+        }
+    }
+}
+
 export interface BatchResponseLike {
     success: boolean;
     code: number;

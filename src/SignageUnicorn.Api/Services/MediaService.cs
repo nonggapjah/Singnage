@@ -323,6 +323,28 @@ namespace SignageUnicorn.Api.Services
             // deployed v2.7.x cache (keyed by that name, existence-checked without the hash).
             bool bytesChanged = request.File != null
                 || (!string.IsNullOrEmpty(request.BlobUrl) && !string.Equals(request.BlobUrl, existing.BlobUrl, StringComparison.OrdinalIgnoreCase));
+
+            // Media integrity (2.8.15): a replacement that only points the row at another url used to
+            // keep the OLD hash - the exact state that sent 336 screens into a download loop on
+            // 27-11-2026. Hash the new local file, or store no hash at all (a screen skips the check
+            // for a missing hash; it never loops on one).
+            var hashCleared = false;
+            if (request.File == null && bytesChanged)
+            {
+                var storedName = SignageUnicorn.Api.Services.Media.MediaIntegrityVerdict.StoredName(finalUrl);
+                var localHosts = _configuration.GetSection("Media:LocalHosts").Get<string[]>() ?? Array.Empty<string>();
+                var localPath = storedName == null ? null : Path.Combine(UploadsFolder(), storedName);
+                if (localPath != null && SignageUnicorn.Api.Services.Media.MediaIntegrityVerdict.IsLocalMediaUrl(finalUrl, localHosts) && File.Exists(localPath))
+                {
+                    fileHash = ComputeMd5(localPath);
+                    request.FileSizeKb = (int)Math.Ceiling(new FileInfo(localPath).Length / 1024.0);
+                }
+                else
+                {
+                    fileHash = null;
+                    hashCleared = true;   // sp_media_std keeps the old hash for a NULL parameter: cleared explicitly below
+                }
+            }
             var logicalName = request.FileName ?? existing.FileName;
             if (bytesChanged)
             {
@@ -347,9 +369,24 @@ namespace SignageUnicorn.Api.Services
             };
 
             var result = await _repository.ReplaceAsync(media, userId);
+            if (result.Success && hashCleared)
+            {
+                // The procedure's ISNULL(@p_file_hash, file_hash) would have kept the hash of the previous
+                // bytes - exactly the mismatch that sent the screens into a download loop on 27-11-2026.
+                await _deviceRepository.ExecuteSqlAsync(
+                    "UPDATE dbo.sn_media_files SET file_hash = NULL, integrity_status = NULL, integrity_note = 'hash cleared: external or unknown bytes' WHERE (CAST(media_id AS nvarchar(50)) = @id OR media_uuid = @id) AND blob_url = @url",
+                    new { id, url = finalUrl });
+                await _systemLog.LogAsync(null, "WARNING", $"[MediaService] REPLACE_HASH_CLEARED | MediaID: {id} | {finalUrl} | no local file to hash; screens will skip the hash check for this media", "API", userId);
+            }
             if (result.Success)
             {
                 await _systemLog.LogAsync(null, "INFO", $"[MediaService] CONTENT_REPLACED | FileName: {media.FileName} | MediaID: {id}", "API", userId);
+                // Only genuinely new bytes release an old verdict: a stored upload, or a url that names a
+                // different stored file (not the same file with a query string) (Codex).
+                var newStoredFile = (request.File != null && request.File.Length > 0)
+                    || !string.Equals(SignageUnicorn.Api.Services.Media.MediaIntegrityVerdict.StoredName(finalUrl),
+                                      SignageUnicorn.Api.Services.Media.MediaIntegrityVerdict.StoredName(existing.BlobUrl), StringComparison.OrdinalIgnoreCase);
+                if (newStoredFile) await ResetIntegrityAfterWriteAsync(id, finalUrl, userId);
 
                 if (needsTranscoding && !string.IsNullOrEmpty(localFilePath))
                 {
@@ -449,12 +486,14 @@ namespace SignageUnicorn.Api.Services
         // Converts into media/temp_conversion and returns the staged output path, or null when the
         // file needs no conversion or conversion failed. Never touches the published file itself;
         // PublishTranscodedAsync decides what becomes visible to clients.
-        private async Task<string?> TranscodeToStagingAsync(string filePath)
+        private async Task<StagedTranscode?> TranscodeToStagingAsync(string filePath)
         {
             try
             {
                 var ext = Path.GetExtension(filePath)?.ToLowerInvariant();
-                if (!MediaFileValidator.IsVideoExtension(ext)) return null;
+                var isAudio = MediaFileValidator.IsAudioExtension(ext);
+                if (!MediaFileValidator.IsVideoExtension(ext) && !isAudio) return null;
+                int? audioDurationSec = null;
 
                 string ffmpegPath = Path.Combine(Directory.GetCurrentDirectory(), "ffmpeg");
                 if (!Directory.Exists(ffmpegPath)) Directory.CreateDirectory(ffmpegPath);
@@ -471,14 +510,15 @@ namespace SignageUnicorn.Api.Services
                 string tempFolder = Path.Combine(uploadsFolder, "temp_conversion");
                 if (!Directory.Exists(tempFolder)) Directory.CreateDirectory(tempFolder);
 
-                string tempOutputPath = Path.Combine(tempFolder, $"{Guid.NewGuid()}.mp4");
+                string tempOutputPath = Path.Combine(tempFolder, $"{Guid.NewGuid()}{(isAudio ? ".m4a" : ".mp4")}");
                 
                 try 
                 {
                     var mediaInfo = await Xabe.FFmpeg.FFmpeg.GetMediaInfo(filePath);
                     var conversion = Xabe.FFmpeg.FFmpeg.Conversions.New();
 
-                    var videoStream = mediaInfo.VideoStreams.FirstOrDefault();
+                    // An audio file may carry its cover art as a video stream; never map it.
+                    var videoStream = isAudio ? null : mediaInfo.VideoStreams.FirstOrDefault();
                     if (videoStream != null) {
                         conversion.AddStream(videoStream.SetCodec(Xabe.FFmpeg.VideoCodec.h264));
 
@@ -519,6 +559,21 @@ namespace SignageUnicorn.Api.Services
                         conversion.AddStream(audioStream.SetCodec(Xabe.FFmpeg.AudioCodec.aac).SetBitrate(128000));
                     }
 
+                    if (isAudio)
+                    {
+                        if (audioStream == null)
+                        {
+                            Console.WriteLine($"[FFmpeg] {Path.GetFileName(filePath)} has no audio stream; kept as uploaded");
+                            return null;
+                        }
+                        // Audio player: one loudness for the whole library (EBU R128 at -16 LUFS, true
+                        // peak -1.5 dBTP) so a spot recorded loud and a lounge track recorded quiet come
+                        // out of the store speakers at the same level; sound only, .m4a container. The
+                        // real length replaces whatever the uploader guessed (images default to 10 s).
+                        conversion.AddParameter("-vn -af loudnorm=I=-16:TP=-1.5:LRA=11 -movflags +faststart");
+                        audioDurationSec = Math.Max(1, (int)Math.Round(mediaInfo.Duration.TotalSeconds));
+                    }
+
                     conversion.SetOutput(tempOutputPath);
                     Console.WriteLine($"[FFmpeg] Starting conversion for {Path.GetFileName(filePath)}");
                     await conversion.Start();
@@ -530,7 +585,7 @@ namespace SignageUnicorn.Api.Services
                     }
 
                     Console.WriteLine($"[FFmpeg] Conversion finished for {Path.GetFileName(filePath)} -> staging {Path.GetFileName(tempOutputPath)}");
-                    return tempOutputPath;
+                    return new StagedTranscode { Path = tempOutputPath, IsAudio = isAudio, DurationSec = audioDurationSec };
                 }
                 catch (Exception ex)
                 {
@@ -544,6 +599,14 @@ namespace SignageUnicorn.Api.Services
                 Console.WriteLine($"[FFmpeg Error] {ex.Message}");
                 return null; // caller keeps the original file
             }
+        }
+
+        private sealed class StagedTranscode
+        {
+            public string Path = string.Empty;
+            public bool IsAudio;
+            // Measured by ffprobe for audio; null for video, whose stored duration is left as it is.
+            public int? DurationSec;
         }
 
         private sealed class StoredUpload
@@ -622,7 +685,7 @@ namespace SignageUnicorn.Api.Services
                 FilePath = finalPath,
                 Hash = ComputeMd5(finalPath),
                 SizeKb = (int)(info.Length / 1024),
-                NeedsTranscoding = MediaFileValidator.IsVideoExtension(ext)
+                NeedsTranscoding = MediaFileValidator.IsVideoExtension(ext) || MediaFileValidator.IsAudioExtension(ext)
             };
         }
 
@@ -653,6 +716,7 @@ namespace SignageUnicorn.Api.Services
             {
                 var createdMedia = TransformToAbsoluteUrl(result.Value);
                 await _systemLog.LogAsync(null, "INFO", $"[MediaService] UPLOAD_SUCCESS | FileName: {createdMedia.FileName} | MediaID: {createdMedia.MediaId}", "API", userId);
+                SignageUnicorn.Api.Services.Media.MediaIntegrityState.Current?.RequestCheck(createdMedia.MediaId);
 
                 // F22: transcode in the background and publish the result under a NEW file name
                 // with blob_url + hash + size updated in one step (see PublishTranscodedAsync).
@@ -1028,8 +1092,9 @@ namespace SignageUnicorn.Api.Services
             {
                 await _systemLog.LogAsync(null, "INFO", $"[MediaService] {logPrefix}_START | MediaID: {mediaId} | FilePath: {sourcePath}", "SYSTEM", userId);
 
-                var stagedPath = await TranscodeToStagingAsync(sourcePath);
-                if (stagedPath == null)
+                var staged = await TranscodeToStagingAsync(sourcePath);
+                var stagedPath = staged?.Path;
+                if (staged == null || string.IsNullOrEmpty(stagedPath))
                 {
                     await _systemLog.LogAsync(null, "WARNING", $"[MediaService] {logPrefix}_SKIPPED | MediaID: {mediaId} | original kept", "SYSTEM", userId);
                     await NotifyDevicesForMediaAsync(mediaId);
@@ -1037,7 +1102,8 @@ namespace SignageUnicorn.Api.Services
                 }
 
                 var uploadsFolder = UploadsFolder();
-                var newName = $"{Guid.NewGuid()}.mp4";
+                var newExt = staged.IsAudio ? ".m4a" : ".mp4";
+                var newName = $"{Guid.NewGuid()}{newExt}";
                 var finalPath = Path.Combine(uploadsFolder, newName);
                 File.Move(stagedPath, finalPath);
 
@@ -1057,9 +1123,9 @@ namespace SignageUnicorn.Api.Services
                 var update = new MediaFile
                 {
                     MediaId = existing.MediaId,
-                    FileName = MediaFileNaming.NextVersion(existing.FileName, namesInUse, ".mp4") ?? newName,
+                    FileName = MediaFileNaming.NextVersion(existing.FileName, namesInUse, newExt) ?? newName,
                     BlobUrl = $"/media/{newName}",
-                    DurationSec = existing.DurationSec,
+                    DurationSec = staged.DurationSec ?? existing.DurationSec,
                     Ratio = existing.Ratio,
                     FileSizeKb = (int)(info.Length / 1024),
                     FileHash = ComputeMd5(finalPath),
@@ -1086,11 +1152,46 @@ namespace SignageUnicorn.Api.Services
                 try { if (File.Exists(sourcePath)) File.Delete(sourcePath); } catch { }
 
                 await _systemLog.LogAsync(null, "INFO", $"[MediaService] {logPrefix}_SUCCESS | MediaID: {mediaId} | {newName}", "SYSTEM", userId);
+                await ResetIntegrityAfterWriteAsync(mediaId, $"/media/{newName}", userId);
                 await NotifyDevicesForMediaAsync(mediaId);
             }
             catch (Exception ex)
             {
                 await _systemLog.LogAsync(null, "ERROR", $"[MediaService] {logPrefix}_FAILED | MediaID: {mediaId} | Error: {ex.Message}", "SYSTEM", userId);
+            }
+        }
+
+        // Media integrity (2.8.15): a row that just got new bytes is a new file as far as the verdict is
+        // concerned. The old status (a loop latch included) is dropped for THAT url and the worker checks
+        // the new file within a minute, so a bad hash is caught before the screens fetch it and a good
+        // replacement is released without an admin click.
+        private async Task ResetIntegrityAfterWriteAsync(string mediaId, string? blobUrl, long? userId)
+        {
+            var state = SignageUnicorn.Api.Services.Media.MediaIntegrityState.Current;
+            // Serialised with the checker's passes (same gate), so a pass that is half-way through cannot
+            // write the old file's verdict over the new file afterwards. A pass takes seconds; if the gate
+            // is not free within 30 s the reset still happens and the re-check fixes any overlap.
+            var held = state != null && await state.Gate.WaitAsync(TimeSpan.FromSeconds(30));
+            try
+            {
+                // The in-memory verdict is file-specific (it carries the stored name), so the new file is
+                // not blocked by the old file's entry and nothing has to be cleared here; the DB columns are
+                // reset for the new url so the operator report does not show a stale verdict.
+                if (!string.IsNullOrEmpty(blobUrl))
+                {
+                    await _deviceRepository.ExecuteSqlAsync(
+                        "UPDATE dbo.sn_media_files SET integrity_status = NULL, integrity_checked_at = NULL, integrity_note = 'new file written; re-check pending', integrity_file = NULL WHERE (CAST(media_id AS nvarchar(50)) = @id OR media_uuid = @id) AND blob_url = @url",
+                        new { id = mediaId, url = blobUrl });
+                }
+            }
+            catch (Exception ex)
+            {
+                await _systemLog.LogAsync(null, "WARNING", $"[MediaService] INTEGRITY_RESET_FAILED | MediaID: {mediaId} | {ex.Message} | the re-check still runs", "API", userId);
+            }
+            finally
+            {
+                if (held) state!.Gate.Release();
+                state?.RequestCheck(mediaId);   // always: the new file is checked within a minute whatever happened above
             }
         }
 

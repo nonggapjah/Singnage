@@ -15,7 +15,7 @@ import {
     blobBasename, mediaCacheKey, cacheRequestUrl, applyPlaybackBatchResult, nextBackoffMs, shouldAttemptClaim, playbackPlaylistId,
     nextClaimRetryMs, isRetryableClaimFailure, isTokenRace,
     emptyOwnership, ownerOf, beginActiveLoad, beginPendingLoad, promotePending, dropAllOwnership, type UrlMapOwnership,
-    isLatestLoad, cancelPendingLoad,
+    isLatestLoad, cancelPendingLoad, pageMediaUrl, withPageMediaUrls, playWithMutedFallback,
 } from '@/lib/player-sync';
 import { getCapabilities } from '@/lib/api-capabilities';
 import pkg from '../../package.json';
@@ -146,13 +146,25 @@ export default function PlayerPage() {
     const itemsRef = useRef<PlaylistItem[]>([]);
     useEffect(() => { itemsRef.current = items; }, [items]);
 
-    // Explicit Play Trigger for Video
+    // Explicit Play Trigger for Video. Browsers refuse unmuted autoplay on a page nobody has
+    // interacted with yet -- the normal state of an unattended screen that boots straight into
+    // /player -- and the clip would sit on its first frame for the whole slot. Fall back to muted
+    // playback and say so once; F2/F3 (a key press is the gesture) brings the sound back.
+    const autoplayNoticeShownRef = useRef(false);
     useEffect(() => {
-        if (videoRef.current && currentItem && isVideo(currentItem.media?.fileName)) {
+        const video = videoRef.current;
+        if (video && currentItem && isVideo(currentItem.media?.fileName)) {
             // Reset to beginning just in case
-            videoRef.current.currentTime = 0;
-            videoRef.current.play().catch(e => {
-                console.warn("Video play() failed (often due to autoplay policy):", e);
+            video.currentTime = 0;
+            void playWithMutedFallback(video).then(result => {
+                if (result === 'muted') {
+                    if (autoplayNoticeShownRef.current) return;
+                    autoplayNoticeShownRef.current = true;
+                    addLog('SYS: Browser blocked autoplay with sound; playing muted. Press F3 for sound.', 'WARN');
+                    showToast('AUTOPLAY BLOCKED: PLAYING MUTED (F3 FOR SOUND)');
+                } else if (result === 'failed') {
+                    addLog(`PLAY FAILED: ${currentItem.media?.displayName || currentItem.media?.fileName || currentItem.mediaId}`, 'ERROR');
+                }
             });
         }
     }, [currentItem, loopTick]);
@@ -189,7 +201,7 @@ export default function PlayerPage() {
         try {
             const res = await apiFetch(`/media/${id}`, deviceInit());
             if (res.success && res.data && res.data.blobUrl) {
-                setSafetyJingleUrl(res.data.blobUrl);
+                setSafetyJingleUrl(pageMediaUrl(res.data.blobUrl));
             }
         } catch (e) {
             console.error('Failed to load safety jingle', e);
@@ -318,7 +330,7 @@ export default function PlayerPage() {
                             try {
                                 const mediaRes = await apiFetch(`/media/${serverJingleId}`, deviceInit());
                                 if (mediaRes.success && mediaRes.data?.blobUrl) {
-                                    const url = mediaRes.data.blobUrl;
+                                    const url = pageMediaUrl(mediaRes.data.blobUrl);
 
                                     // Download and Cache as Base64 (Wrapped in safety block for offline robustness)
                                     try {
@@ -360,7 +372,9 @@ export default function PlayerPage() {
                 // Restore Playlist if exists
                 if (savedPlaylistId && savedPlaylistItems) {
                     try {
-                        const parsedItems = JSON.parse(savedPlaylistItems);
+                        const parsedRaw = JSON.parse(savedPlaylistItems);
+                        // Items saved by an older build carry the API's absolute LAN URLs.
+                        const parsedItems = Array.isArray(parsedRaw) ? withPageMediaUrls(parsedRaw) : parsedRaw;
                         if (Array.isArray(parsedItems) && parsedItems.length > 0) {
                             setPlaylistId(savedPlaylistId);
                             setPlaylistName(savedPlaylistName || 'Cached Playlist');
@@ -802,7 +816,9 @@ export default function PlayerPage() {
                 return true;
             }
             if (res.success && res.data && res.data.items) {
-                const validItems = res.data.items.filter(i => i.media);
+                // Same-origin media URLs: the API hands out its LAN BaseUrl form, which an https
+                // page cannot fetch or play (mixed content). Next proxies /media/* to the API.
+                const validItems = withPageMediaUrls(res.data.items.filter(i => i.media));
                 // Ensure items are sorted by positionOrder
                 const sortedItems = validItems.sort((a, b) => a.positionOrder - b.positionOrder);
                 const playlistLabel = wantsSchedule ? (res.data.playlistName || 'Device Schedule') : res.data.playlistName;
@@ -1115,6 +1131,9 @@ export default function PlayerPage() {
 
     const handleVolumeChange = (newVol: number) => {
         setVolume(newVol);
+        // The key press that got us here is a user gesture, so sound is allowed again: undo the
+        // muted-autoplay fallback (React re-applies `muted` only when its prop value changes).
+        if (videoRef.current && newVol > 0 && videoRef.current.muted) videoRef.current.muted = false;
         setShowVolumeOSD(true);
         if (osdTimerRef.current) clearTimeout(osdTimerRef.current);
         osdTimerRef.current = setTimeout(() => setShowVolumeOSD(false), 2000);
@@ -1297,7 +1316,7 @@ export default function PlayerPage() {
 
                 {currentItem && currentItem.media && !isLoadingContent ? (
                     (() => {
-                        const mediaUrl = cachedMediaUrls[currentItem.mediaId] || currentItem.media.blobUrl;
+                        const mediaUrl = cachedMediaUrls[currentItem.mediaId] || pageMediaUrl(currentItem.media.blobUrl);
                         const itemKey = `${currentItem.playlistItemId}-${loopTick}`;
 
                         return isVideo(currentItem.media.fileName) ? (

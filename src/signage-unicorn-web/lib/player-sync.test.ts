@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
     blobBasename,
     mediaCacheKey,
+    pageMediaUrl, withPageMediaUrls,
+    playWithMutedFallback, isAutoplayBlocked,
     cacheRequestUrl,
     applyPlaybackBatchResult,
     nextBackoffMs,
@@ -170,5 +172,82 @@ describe('load ordering and obsolete pending swaps (round-4 #7, #8)', () => {
     it('a promotion after cancellation does nothing (no obsolete swap can fire)', () => {
         const o = cancelPendingLoad(beginPendingLoad(beginActiveLoad(emptyOwnership(), 1), 2));
         expect(promotePending(o)).toBe(o);
+    });
+});
+
+describe('pageMediaUrl (web player media must be same-origin)', () => {
+    it('maps the API BaseUrl form of a media URL to the page-relative /media path', () => {
+        expect(pageMediaUrl('http://192.1.200.185:8862/media/5fe41232.mp4')).toBe('/media/5fe41232.mp4');
+        expect(pageMediaUrl('https://signage.example.com/media/a.png?v=2')).toBe('/media/a.png?v=2');
+        expect(pageMediaUrl('/media/x.mp4')).toBe('/media/x.mp4');
+    });
+
+    it('leaves data, blob and non-media URLs alone', () => {
+        expect(pageMediaUrl('data:image/png;base64,AAAA')).toBe('data:image/png;base64,AAAA');
+        expect(pageMediaUrl('blob:https://x/123')).toBe('blob:https://x/123');
+        expect(pageMediaUrl('http://cdn.example.com/other/file.mp4')).toBe('http://cdn.example.com/other/file.mp4');
+        expect(pageMediaUrl('')).toBe('');
+        expect(pageMediaUrl(undefined)).toBe('');
+    });
+
+    it('withPageMediaUrls rewrites every item and keeps the cache identity (file name + hash)', () => {
+        const items = [
+            { mediaId: '120', media: { blobUrl: 'http://192.1.200.185:8862/media/5fe.mp4', fileHash: 'h1' } },
+            { mediaId: '121', media: undefined },
+        ];
+        const out = withPageMediaUrls(items);
+        expect(out[0].media!.blobUrl).toBe('/media/5fe.mp4');
+        expect(mediaCacheKey({ mediaId: '120', blobUrl: out[0].media!.blobUrl, fileHash: 'h1' }))
+            .toBe(mediaCacheKey({ mediaId: '120', blobUrl: items[0].media!.blobUrl, fileHash: 'h1' }));
+        expect(out[1]).toBe(items[1]);
+    });
+});
+
+describe('playWithMutedFallback (an unattended screen must not freeze on the first frame)', () => {
+    const notAllowed = () => Object.assign(new Error('autoplay blocked'), { name: 'NotAllowedError' });
+    const fake = (outcomes: Array<Error | null>) => {
+        const calls: boolean[] = [];
+        const m = {
+            muted: false,
+            play: () => {
+                calls.push(m.muted);
+                const o = outcomes.shift();
+                return o ? Promise.reject(o) : Promise.resolve();
+            },
+        };
+        return { m, calls };
+    };
+
+    it('plays with sound when the browser allows it', async () => {
+        const { m, calls } = fake([null]);
+        expect(await playWithMutedFallback(m)).toBe('playing');
+        expect(m.muted).toBe(false);
+        expect(calls).toEqual([false]);
+    });
+
+    it('retries muted when autoplay with sound is refused', async () => {
+        const { m, calls } = fake([notAllowed(), null]);
+        expect(await playWithMutedFallback(m)).toBe('muted');
+        expect(m.muted).toBe(true);
+        expect(calls).toEqual([false, true]);
+    });
+
+    it('does not retry for other errors or when already muted', async () => {
+        const broken = fake([Object.assign(new Error('no supported source'), { name: 'NotSupportedError' })]);
+        expect(await playWithMutedFallback(broken.m)).toBe('failed');
+        expect(broken.m.muted).toBe(false);
+        expect(broken.calls).toEqual([false]);
+
+        const muted = fake([notAllowed()]);
+        muted.m.muted = true;
+        expect(await playWithMutedFallback(muted.m)).toBe('failed');
+        expect(muted.calls).toEqual([true]);
+    });
+
+    it('isAutoplayBlocked recognises only NotAllowedError', () => {
+        expect(isAutoplayBlocked(notAllowed())).toBe(true);
+        expect(isAutoplayBlocked(new Error('x'))).toBe(false);
+        expect(isAutoplayBlocked(undefined)).toBe(false);
+        expect(isAutoplayBlocked('NotAllowedError')).toBe(false);
     });
 });

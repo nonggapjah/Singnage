@@ -53,6 +53,33 @@ times are stored and how the admin console signs in. Everything is staged so tha
 - A screen stuck on `NO TOKEN` with `CLAIM_EVIDENCE_MISMATCH` / `DEVICE_IDENTITY_CONFLICT`
   in the API log has a duplicate device row: retire the duplicate, then **Reset device token**
   on the card; the screen reclaims on its next heartbeat (`RECLAIM_TOKEN`).
+- A kiosk setup screen answering **`Registration rejected: TOKEN_RACE`** (API log
+  `TOKEN_RACE ... during ISSUED` naming an `is_deleted = 1` row) meant the register procedure
+  returned a retired twin row with the same uuid and the token write hit that dead row.
+  Fixed in API 2.8.4 (procedure + `IssueOrRotateAsync`). On an older API, give the retired twins
+  another uuid and register again:
+  `UPDATE sn_devices SET device_uuid = 'RETIRED-' + CAST(device_id AS NVARCHAR(20)) WHERE is_deleted = 1 AND device_uuid = '<uuid>'`.
+  2.8.4 also stops `MaintenanceWorker` retiring same-name screens that are merely switched off
+  overnight (the twin must have appeared after, and within 24 h of, the row's last check-in).
+- A kiosk setup screen answering **`Registration rejected: DEVICE_TOKEN_INVALID`** is a screen that
+  was reinstalled (config.json lost) on hardware whose row still holds a token. Since API 2.8.5 a
+  token-capable register may take such a row back once its previous holder has not checked in for
+  `Security:DeviceTokenReclaimAfterOfflineSeconds` (default 120, read from code when the key is
+  absent; 0 disables): same device_id, playlist assignments kept, old token invalidated, audited as
+  `RECLAIMED_AFTER_OFFLINE`. While the holder is still checking in the 401 now names the device and
+  the way out; **Reset device token** on the card remains the manual path, and the blanket
+  `DeviceTokenReclaimOnRegister` switch is unchanged (still off).
+
+## 6. Audio player (API 2.8.6-2.8.9 / web 2.4.14-2.4.17 / audio client 2.8.4)
+
+See `docs/ops/audio-player.md`. In short: the audio-only player is a separate product built from the
+same client source (`npm run build:audio`); screens stay on client 2.8.0 and `LatestClientVersion`
+is not touched. Deploy order: `deploy-api` (migration 010 + procedure), then `rebuild-web`; install
+the audio app on one box first and check the row shows `AUDIO` and plays the assigned audio playlist.
+API 2.8.7 adds migration 011 (dayparts: daily window, days of week, repeat) and `Schedule:TimeZoneId`;
+screens keep working unchanged because the server evaluates the windows.
+API 2.8.8-2.8.9 / web 2.4.16-2.4.17 / audio 2.8.3-2.8.4 are the Codex + Impeccable review fixes and clean-up (see docs/ops/audio-player.md,
+"Review round"); no new migration.
 
 ## New files and keys on a kiosk
 

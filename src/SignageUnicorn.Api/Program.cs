@@ -309,6 +309,10 @@ builder.Services.AddScoped<SignageUnicorn.Api.Repositories.Interfaces.IUserRepos
 builder.Services.AddScoped<SignageUnicorn.Api.Repositories.Interfaces.ISystemLogRepository, SignageUnicorn.Api.Repositories.Implementations.SpSystemLogRepository>();
 builder.Services.AddScoped<SignageUnicorn.Api.Repositories.Interfaces.IPlaybackLogRepository, SignageUnicorn.Api.Repositories.Implementations.SpPlaybackLogRepository>();
 builder.Services.AddScoped<SignageUnicorn.Api.Repositories.Interfaces.ISystemSettingsRepository, SignageUnicorn.Api.Repositories.Implementations.SpSystemSettingsRepository>();
+builder.Services.AddScoped<SignageUnicorn.Api.Repositories.Interfaces.IRolloutRepository, SignageUnicorn.Api.Repositories.Implementations.SqlRolloutRepository>();
+builder.Services.AddScoped<SignageUnicorn.Api.Services.Rollout.RolloutService>();
+builder.Services.AddSingleton<SignageUnicorn.Api.Services.Media.MediaIntegrityState>();   // 2.8.15: quarantine set + download counters
+builder.Services.AddScoped<SignageUnicorn.Api.Services.Media.MediaIntegrityService>();
 
 // Services
 builder.Services.AddScoped<SignageUnicorn.Api.Services.DeviceService>();
@@ -322,7 +326,13 @@ builder.Services.AddScoped<SignageUnicorn.Api.Services.AuthService>();
 builder.Services.AddHostedService<SignageUnicorn.Api.Services.Background.MaintenanceWorker>();
 builder.Services.AddHostedService<SignageUnicorn.Api.Services.Background.MediaCleanupWorker>();
 builder.Services.AddHostedService<SignageUnicorn.Api.Services.Background.ScheduleTransitionWorker>();
+builder.Services.AddHostedService<SignageUnicorn.Api.Services.Background.PlaylistRolloutWorker>();   // API 2.8.14: branch-by-branch playlist rollouts
+builder.Services.AddHostedService<SignageUnicorn.Api.Services.Background.MediaIntegrityWorker>();    // API 2.8.15: media hash check + loop detector
 
+
+// Media egress gate (2.8.12): bounds concurrent /media and /setup downloads and the total upload
+// rate; settings in appsettings Media:* with runtime overrides in sn_system_settings.
+builder.Services.AddSingleton<SignageUnicorn.Api.Services.MediaEgressGate>();
 
 var app = builder.Build();
 
@@ -369,6 +379,9 @@ foreach (var blocked in new[] { ".html", ".htm", ".xhtml", ".shtml", ".svg", ".s
     provider.Mappings.Remove(blocked);
 }
 
+// Gate the screens' downloads BEFORE the static file middleware serves them (see MediaEgressGate).
+app.UseMiddleware<SignageUnicorn.Api.Middleware.MediaEgressMiddleware>();
+
 app.UseStaticFiles(new StaticFileOptions
 {
     ContentTypeProvider = provider,
@@ -413,6 +426,10 @@ app.Use(async (context, next) =>
 });
 
 app.UseAuthorization();
+
+// Media integrity (2.8.15): materialise the singleton now so MediaIntegrityState.Current is set before
+// the first schedule request (the worker fills it from the stored verdicts 45 s after start).
+_ = app.Services.GetRequiredService<SignageUnicorn.Api.Services.Media.MediaIntegrityState>();
 
 // 5. Database schema: tables, pending migrations, changed procedures (see SchemaApplier).
 // F14: the outcome is reported honestly -- "updated successfully" is printed only when nothing failed.
