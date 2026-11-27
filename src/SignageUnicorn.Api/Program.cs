@@ -309,6 +309,8 @@ builder.Services.AddScoped<SignageUnicorn.Api.Repositories.Interfaces.IUserRepos
 builder.Services.AddScoped<SignageUnicorn.Api.Repositories.Interfaces.ISystemLogRepository, SignageUnicorn.Api.Repositories.Implementations.SpSystemLogRepository>();
 builder.Services.AddScoped<SignageUnicorn.Api.Repositories.Interfaces.IPlaybackLogRepository, SignageUnicorn.Api.Repositories.Implementations.SpPlaybackLogRepository>();
 builder.Services.AddScoped<SignageUnicorn.Api.Repositories.Interfaces.ISystemSettingsRepository, SignageUnicorn.Api.Repositories.Implementations.SpSystemSettingsRepository>();
+builder.Services.AddScoped<SignageUnicorn.Api.Repositories.Interfaces.IRolloutRepository, SignageUnicorn.Api.Repositories.Implementations.SqlRolloutRepository>();
+builder.Services.AddScoped<SignageUnicorn.Api.Services.Rollout.RolloutService>();
 
 // Services
 builder.Services.AddScoped<SignageUnicorn.Api.Services.DeviceService>();
@@ -322,6 +324,7 @@ builder.Services.AddScoped<SignageUnicorn.Api.Services.AuthService>();
 builder.Services.AddHostedService<SignageUnicorn.Api.Services.Background.MaintenanceWorker>();
 builder.Services.AddHostedService<SignageUnicorn.Api.Services.Background.MediaCleanupWorker>();
 builder.Services.AddHostedService<SignageUnicorn.Api.Services.Background.ScheduleTransitionWorker>();
+builder.Services.AddHostedService<SignageUnicorn.Api.Services.Background.PlaylistRolloutWorker>();   // API 2.8.14: branch-by-branch playlist rollouts
 
 
 // Media egress gate (2.8.12): bounds concurrent /media and /setup downloads and the total upload

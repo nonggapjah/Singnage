@@ -6,11 +6,15 @@ import { playlistApi } from '@/features/playlists/api/playlist-api';
 import { PlaylistTable } from '@/features/playlists/components/PlaylistTable';
 import { BatchAssignModal } from '@/features/playlists/components/BatchAssignModal';
 import { PlaylistDevicesModal } from '@/features/playlists/components/PlaylistDevicesModal';
+import { RolloutsPanel } from '@/features/playlists/components/RolloutsPanel';
+import { useUI } from '@/features/ui/context/UIContext';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
 export default function PlaylistsPage() {
     const router = useRouter();
+    const { showNotify } = useUI();
+    const [rolloutsRefresh, setRolloutsRefresh] = useState(0);
     const [playlists, setPlaylists] = useState<Playlist[]>([]);
     const [loading, setLoading] = useState(true);
 
@@ -66,9 +70,10 @@ export default function PlaylistsPage() {
         }
     };
 
-    const handleDeploySuccess = () => {
-        alert('Playlist deployment initiated for selected devices.');
+    const handleDeploySuccess = (message?: string) => {
+        showNotify(message ? 'Rollout started' : 'Playlist deployed', message || 'Playlist deployment initiated for selected devices.', 'SUCCESS');
         setSelectedPlaylist(null);
+        setRolloutsRefresh(n => n + 1);   // the Rollouts panel picks the new one up at once
     };
 
     const handleDuplicate = async (playlist: Playlist) => {
@@ -183,6 +188,8 @@ export default function PlaylistsPage() {
                     </select>
                 </div>
             </div>
+
+            <RolloutsPanel refreshKey={rolloutsRefresh} />
 
             {loading ? (
                 <div className="h-64 flex items-center justify-center" role="status">

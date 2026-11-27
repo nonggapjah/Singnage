@@ -3,6 +3,7 @@ import { getDeviceToken } from '@/lib/device-token';
 import { getCapabilities } from '@/lib/api-capabilities';
 import { mapPlaylistItems } from '@/features/playlists/api/playlist-api';
 import { Playlist } from '@/features/playlists/types/playlist';
+import type { RolloutStartResult } from '@/features/playlists/api/rollout-api';
 import { Device, DeviceCommand, DeviceRegisterResponse, DeviceTokenClaimResponse, CommandAckStatus } from '../types';
 
 export const deviceApi = {
@@ -134,10 +135,15 @@ export const deviceApi = {
     },
 
     // daypart (web 2.4.15 / API 2.8.7): startTime, endTime, daysOfWeek, repeatEveryMinutes; older APIs ignore them.
-    batchAddSchedule: async (deviceIds: string[], playlistId: string, startDate?: string, endDate?: string, daypart?: { startTime?: string; endTime?: string; daysOfWeek?: string; repeatEveryMinutes?: number | null }) => {
-        return await apiFetch<{ success: boolean }>('/devices/batch-add-playlist', {
+    /**
+     * Assigns the playlist to every device at once, or - with `rollout` (API 2.8.14) - one branch at
+     * a time: the first branch now, the next every `waveMinutes`. In that case `data` describes the
+     * rollout that was started; with a single branch the API assigns immediately and `data` is null.
+     */
+    batchAddSchedule: async (deviceIds: string[], playlistId: string, startDate?: string, endDate?: string, daypart?: { startTime?: string; endTime?: string; daysOfWeek?: string; repeatEveryMinutes?: number | null }, rollout?: { byBranch: boolean; waveMinutes: number }) => {
+        return await apiFetch<RolloutStartResult | null>('/devices/batch-add-playlist', {
             method: 'POST',
-            body: JSON.stringify({ deviceIds, playlistId, startDate, endDate, ...(daypart || {}) }),
+            body: JSON.stringify({ deviceIds, playlistId, startDate, endDate, ...(daypart || {}), ...(rollout ? { rollout } : {}) }),
         });
     },
 

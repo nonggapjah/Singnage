@@ -38,6 +38,32 @@ namespace SignageUnicorn.Api.Services
             await NotifyScheduleInheritorsAsync(deviceId);
         }
 
+        /// <summary>
+        /// Adds (or replaces) this playlist in one screen's assignments with the given schedule and
+        /// queues SYNC_SCHEDULE. Shared by POST /devices/batch-add-playlist and the rollout worker
+        /// (API 2.8.14), so both paths assign exactly the same way: one entry per playlist per screen.
+        /// </summary>
+        public async Task AssignPlaylistAsync(string deviceId, string playlistId, PlaylistScheduleFields schedule)
+        {
+            var current = await GetAssignedPlaylistsAsync(deviceId);
+            var updated = current.ToList();
+            updated.RemoveAll(x => x.PlaylistId == playlistId);
+            updated.Add(new DevicePlaylistDto
+            {
+                DeviceId = deviceId,
+                PlaylistId = playlistId,
+                StartDate = schedule.StartDate,
+                EndDate = schedule.EndDate,
+                StartTime = schedule.StartTime,
+                EndTime = schedule.EndTime,
+                DaysOfWeek = schedule.DaysOfWeek,
+                RepeatEveryMinutes = schedule.RepeatEveryMinutes,
+                IsActive = true
+            });
+            await UpdateAssignedPlaylistsAsync(deviceId, updated);
+            await SendCommandAsync(deviceId, "SYNC_SCHEDULE");
+        }
+
         // Round 3 (#11 / Codex round-3 finding 11). A screen in 'inherit' mode plays what its sibling
         // (same branch + name) is assigned, so every change to that sibling's assignments -- replace,
         // clear, reset to inherit -- must reach the inheritors too, or they keep the previous content

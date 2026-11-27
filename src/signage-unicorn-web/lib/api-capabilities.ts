@@ -19,6 +19,8 @@ export interface ApiCapabilities {
     screenshotRoute: boolean;
     cookieSession: boolean;
     playbackBatchV2: boolean;
+    /** POST /devices/batch-add-playlist accepts `rollout` and /rollouts exists (API 2.8.14). */
+    playlistRollout: boolean;
     /** True when the probe found no capabilities endpoint (API < 2.8) and these are the defaults. */
     legacy: boolean;
 }
@@ -31,6 +33,7 @@ export const LEGACY_CAPABILITIES: Readonly<ApiCapabilities> = Object.freeze({
     screenshotRoute: false,
     cookieSession: false,
     playbackBatchV2: false,
+    playlistRollout: false,
     legacy: true,
 });
 
@@ -63,6 +66,7 @@ export function parseCapabilities(data: unknown): ApiCapabilities | null {
         screenshotRoute: flag('screenshotRoute'),
         cookieSession: flag('cookieSession'),
         playbackBatchV2: flag('playbackBatchV2'),
+        playlistRollout: flag('playlistRollout'),
         legacy: false,
     };
 }

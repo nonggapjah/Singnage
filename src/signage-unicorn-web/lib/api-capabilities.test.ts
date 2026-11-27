@@ -31,6 +31,13 @@ describe('api capabilities (mixed-version rollout)', () => {
         expect(peekCapabilities()?.apiVersion).toBe('2.8.0');
     });
 
+    it('playlistRollout (API 2.8.14) is read as a flag: absent or non-true = not supported', () => {
+        expect(parseCapabilities(NEW_API)?.playlistRollout).toBe(false);
+        expect(parseCapabilities({ ...NEW_API, playlistRollout: 'yes' })?.playlistRollout).toBe(false);
+        expect(parseCapabilities({ ...NEW_API, playlistRollout: true })?.playlistRollout).toBe(true);
+        expect(LEGACY_CAPABILITIES.playlistRollout).toBe(false);
+    });
+
     it('404 = the deployed 2.7.x API: legacy defaults, cached like a real answer', async () => {
         fetchMock.mockResolvedValue(envelope(null, 404));
         expect(await getCapabilities()).toEqual(LEGACY_CAPABILITIES);

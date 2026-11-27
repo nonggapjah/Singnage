@@ -261,6 +261,12 @@ namespace SignageUnicorn.Api.Models
         public string? DaysOfWeek { get; set; }
         [JsonPropertyName("repeatEveryMinutes")]
         public int? RepeatEveryMinutes { get; set; }
+
+        /// <summary>API 2.8.14: when present with byBranch = true, the screens are released one branch at a time.</summary>
+        [JsonPropertyName("rollout")]
+        public RolloutOptions? Rollout { get; set; }
+
+        public PlaylistScheduleFields ToSchedule() => new(StartDate, EndDate, StartTime, EndTime, DaysOfWeek, RepeatEveryMinutes);
     }
 
     public class CommandAckRequest

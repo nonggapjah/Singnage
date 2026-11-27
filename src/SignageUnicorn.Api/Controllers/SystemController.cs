@@ -39,6 +39,8 @@ namespace SignageUnicorn.Api.Controllers
             public bool Dayparts { get; init; } = true;
             // Media egress gate (2.8.12): /media and /setup downloads may answer 503 + Retry-After under load.
             public bool EgressGate { get; init; } = true;
+            // Branch-by-branch rollout (2.8.14): batch-add-playlist accepts `rollout`, /rollouts lists and steers them.
+            public bool PlaylistRollout { get; init; } = true;
         }
 
         // Media egress gate (2.8.12): what the server is pushing out right now and the limits in force.

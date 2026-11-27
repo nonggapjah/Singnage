@@ -10,6 +10,7 @@ import { DateTimePicker24h } from '@/components/ui/DateTimePicker24h';
 import { DaypartFields } from '@/features/devices/components/DaypartFields';
 import { Daypart, describeDaypart, hasDaypart } from '@/lib/daypart';
 import { Modal } from '@/components/ui/Modal';
+import { getCapabilities } from '@/lib/api-capabilities';
 
 /**
  * Deploy one playlist to many screens (Playlists page -> "Deploy").
@@ -30,7 +31,8 @@ interface BatchAssignModalProps {
     playlistId: string;
     playlistName: string;
     onClose: () => void;
-    onSuccess: () => void;
+    /** `message` is set when the deploy became a branch-by-branch rollout (API 2.8.14). */
+    onSuccess: (message?: string) => void;
 }
 
 const ONLINE_STATES = ['ONLINE', 'PLAYING', 'IDLE'];
@@ -96,6 +98,11 @@ export const BatchAssignModal: React.FC<BatchAssignModalProps> = ({ playlistId, 
     const [endDate, setEndDate] = useState('');
     const [daypart, setDaypart] = useState<Daypart>({});
     const [limitsOpen, setLimitsOpen] = useState(false);
+    const [byBranch, setByBranch] = useState(false);
+    const [waveMinutes, setWaveMinutes] = useState(10);
+    // null = not known yet. An API older than 2.8.14 would ignore the `rollout` block and assign every
+    // branch at once, so the option is offered only when the server advertises it (Codex 2.4.21).
+    const [rolloutSupported, setRolloutSupported] = useState<boolean | null>(null);
     const searchRef = useRef<HTMLInputElement | null>(null);
 
     useEffect(() => {
@@ -127,6 +134,14 @@ export const BatchAssignModal: React.FC<BatchAssignModalProps> = ({ playlistId, 
         })();
         return () => { cancelled = true; };
     }, [playlistId]);
+
+    useEffect(() => {
+        let cancelled = false;
+        getCapabilities()
+            .then(c => { if (!cancelled) setRolloutSupported(c.playlistRollout === true); })
+            .catch(() => { if (!cancelled) setRolloutSupported(false); });
+        return () => { cancelled = true; };
+    }, []);
 
     // Branch codes with their screen counts, sorted naturally (1003 < 1021 < MUSIC).
     const branches = useMemo(() => {
@@ -196,6 +211,23 @@ export const BatchAssignModal: React.FC<BatchAssignModalProps> = ({ playlistId, 
     }, [daypart, startDate, endDate]);
     const limitsSummary = hasDaypart(daypart) ? describeDaypart(daypart) : 'none';
 
+    // Branch-by-branch release (API 2.8.14): only meaningful when the selection spans 2+ branches.
+    // The API orders branches the same way (natural, UNASSIGNED last), so this preview matches.
+    const selectedBranches = useMemo(() => {
+        const codes = new Set(selectedDevices.map(d => (d.branchCode || '').trim() || 'UNASSIGNED'));
+        return Array.from(codes).sort((a, b) => (a === 'UNASSIGNED' ? 1 : 0) - (b === 'UNASSIGNED' ? 1 : 0) || a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+    }, [selectedDevices]);
+    const rolloutEligible = selectedBranches.length >= 2 && rolloutSupported === true;
+    const rolloutOn = byBranch && rolloutEligible;
+    const startInFuture = !isNaN(startMs) && startMs > Date.now() + 60_000;
+    const rolloutSummary = useMemo(() => {
+        if (!rolloutEligible) return '';
+        const n = selectedBranches.length;
+        const last = new Date(Date.now() + (n - 1) * waveMinutes * 60_000);
+        const hhmm = `${String(last.getHours()).padStart(2, '0')}:${String(last.getMinutes()).padStart(2, '0')}`;
+        return `${selectedBranches[0]} now, then one branch every ${waveMinutes} min · last branch (${selectedBranches[n - 1]}) about ${hhmm}`;
+    }, [rolloutEligible, selectedBranches, waveMinutes]);
+
     const canDeploy = selected.size > 0 && !submitting && !endBeforeStart;
 
     const handleAssign = async () => {
@@ -205,9 +237,21 @@ export const BatchAssignModal: React.FC<BatchAssignModalProps> = ({ playlistId, 
             const ids = Array.from(selected);
             const st = startDate ? new Date(startDate).toISOString() : undefined;
             const ed = endDate ? new Date(endDate).toISOString() : undefined;
-            const res = await deviceApi.batchAddSchedule(ids, playlistId, st, ed, daypart);
+            const res = await deviceApi.batchAddSchedule(ids, playlistId, st, ed, daypart, rolloutOn ? { byBranch: true, waveMinutes } : undefined);
             if (res.success) {
-                onSuccess();
+                const r = res.data;
+                if (rolloutOn && r && r.rolloutId) {
+                    const failed = r.firstWaveFailed > 0 ? ` (${r.firstWaveFailed} failed, will be retried)` : '';
+                    const unknown = Array.isArray(r.unknownDevices) && r.unknownDevices.length > 0
+                        ? ` ${r.unknownDevices.length} selected ${r.unknownDevices.length === 1 ? 'screen no longer exists' : 'screens no longer exist'} and ${r.unknownDevices.length === 1 ? 'was' : 'were'} skipped: ${r.unknownDevices.map(id => devices.find(d => String(d.deviceId) === String(id))?.deviceName || id).join(', ')}.`
+                        : '';
+                    onSuccess(`Rollout started: ${r.firstBranch} now, ${r.firstWaveApplied} of ${r.firstWaveDevices} assigned${failed}. The other ${r.waves - 1} branches follow every ${r.waveMinutes} min; watch and pause it under Rollouts.${unknown}`);
+                } else if (rolloutOn) {
+                    // The server found nothing to stagger (the selection resolved to one branch) and assigned at once.
+                    onSuccess(`All ${ids.length} ${noun(selectedDevices)} were assigned at once: the server saw only one branch to release, so there was nothing to stagger.`);
+                } else {
+                    onSuccess();
+                }
             } else {
                 // The API updates screens in parallel without a transaction, so a failure can be
                 // partial; it also replaces the device's entry for THIS playlist rather than adding a
@@ -419,6 +463,46 @@ export const BatchAssignModal: React.FC<BatchAssignModalProps> = ({ playlistId, 
                             </div>
                         )}
                     </div>
+
+                    {/* Branch-by-branch release (API 2.8.14) */}
+                    <div className="border-t border-border/60 pt-4">
+                        <label className={`flex items-start gap-3 ${rolloutEligible ? 'cursor-pointer' : 'cursor-default'}`}>
+                            <input
+                                type="checkbox"
+                                checked={rolloutOn}
+                                disabled={!rolloutEligible || submitting}
+                                onChange={e => setByBranch(e.target.checked)}
+                                aria-describedby={`${uid}-rollout-help`}
+                                className="mt-0.5 h-[18px] w-[18px] shrink-0 rounded border-border bg-muted/20 accent-[var(--primary)] disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan/50"
+                            />
+                            <span className="min-w-0">
+                                <span className={`block text-sm font-bold ${rolloutEligible ? 'text-foreground' : 'text-muted-foreground'}`}>Release branch by branch</span>
+                                <span id={`${uid}-rollout-help`} className="block mt-0.5 text-xs text-muted-foreground leading-snug">
+                                    {rolloutEligible
+                                        ? `${selectedBranches.length} branches selected. The first branch gets the playlist now; the server releases the next one at each interval, waiting while screens are still downloading.`
+                                        : rolloutSupported === false
+                                            ? 'Needs API 2.8.14 or newer on the server.'
+                                            : 'Select screens in two or more branches to release them in waves.'}
+                                </span>
+                            </span>
+                        </label>
+                        {rolloutOn && (
+                            <div className="mt-3 pl-[30px] space-y-2.5">
+                                <div className="flex items-center gap-2">
+                                    <label htmlFor={`${uid}-wave`} className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Every</label>
+                                    <select id={`${uid}-wave`} value={waveMinutes} onChange={e => setWaveMinutes(Number(e.target.value))} disabled={submitting} className={`${fieldCls} h-9 px-2 text-sm`}>
+                                        {[5, 10, 15, 30, 60].map(m => <option key={m} value={m}>{m} min</option>)}
+                                    </select>
+                                </div>
+                                <p className="text-sm text-foreground leading-snug" aria-live="polite">{rolloutSummary}</p>
+                                {startInFuture && (
+                                    <p className="text-xs text-amber-600 dark:text-amber-400 leading-snug">
+                                        With a start in the future, screens only download once the start date arrives, so the branches are released over time but all download at that moment. Leave Start empty to spread the downloads now.
+                                    </p>
+                                )}
+                            </div>
+                        )}
+                    </div>
                 </section>
             </div>
 
@@ -444,7 +528,7 @@ export const BatchAssignModal: React.FC<BatchAssignModalProps> = ({ playlistId, 
                         onClick={handleAssign}
                         className="px-6 h-11 rounded-xl bg-primary text-primary-foreground font-black text-xs uppercase tracking-[0.15em] transition-colors hover:brightness-110 disabled:opacity-30 disabled:hover:brightness-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-cyan/60 focus-visible:ring-offset-2 focus-visible:ring-offset-card"
                     >
-                        {submitting ? 'Deploying…' : selected.size === 0 ? 'Deploy' : `Deploy to ${selected.size} ${noun(selectedDevices)}`}
+                        {submitting ? (rolloutOn ? 'Starting…' : 'Deploying…') : selected.size === 0 ? 'Deploy' : rolloutOn ? `Start rollout to ${selected.size} ${noun(selectedDevices)}` : `Deploy to ${selected.size} ${noun(selectedDevices)}`}
                     </button>
                 </div>
             </div>
