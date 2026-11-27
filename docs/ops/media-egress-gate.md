@@ -15,12 +15,13 @@ A middleware in front of the static file middleware, for `GET /media/*` and `GET
 |---|---|---|
 | `MaxConcurrentDownloads` | 40 | responses in flight at once; the rest queue |
 | `QueueWaitSeconds` | 60 | how long a queued request waits before `503` + `Retry-After: 30` (kept under Cloudflare's 100 s origin timeout) |
-| `MaxEgressMbps` | 150 | total Mbit/s of all gated responses together (token bucket, 64 KB granularity); `0` = unlimited |
+| `MaxEgressMbps` | 150 | total Mbit/s of all gated responses together (token bucket, 64 KB granularity); hard maximum 250 (code constant, Commander 27-11-2026) |
 
 A screen that gets a 503 logs "Download failed ... Server status 503", keeps playing what it has,
-and retries the missing files on its 15-minute schedule refresh ("Smart Sync: hash matches but some
-files are missing. Re-syncing..."). Nothing is lost, the campaign just spreads over an hour or two
-instead of ten minutes.
+and retries the missing files on its next heartbeat (about 15 s; `selfHealMissingFiles` in the
+renderer, "Self-Healing: Detected missing/corrupted files in cache"). A partly downloaded file is
+resumed with a Range request, not restarted. Nothing is lost, the campaign just spreads over hours
+instead of minutes.
 
 ## Settings
 
@@ -32,11 +33,11 @@ without a deploy or restart:
 |---|---|
 | `MediaMaxConcurrentDownloads` | 1..1000 |
 | `MediaQueueWaitSeconds` | 0..90 |
-| `MediaMaxEgressMbps` | 0 (unlimited)..10000 |
+| `MediaMaxEgressMbps` | 1..250 (above 250 is clamped to 250; 0 is ignored) |
 
 Invalid or out-of-range values are ignored (the gate can never be switched off by a typo).
 From the deploy bundle: `run-on-server.ps1 egress -ScriptArgs '-Action show'`,
-`'-Action set -Mbps 100'`, `'-Action set -Mbps 400 -Slots 200'` (night), `'-Action clear'`.
+`'-Action set -Mbps 100'`, `'-Action set -Mbps 250 -Slots 200'` (night), `'-Action clear'`.
 
 ## Watching it
 
@@ -56,8 +57,8 @@ The 26-11 push (567 Mbit/s) was therefore the whole line. Budget for this server
 | when | `MediaMaxEgressMbps` | why |
 |---|---|---|
 | office hours (default) | 150 | a quarter of the line; the rest stays with the other servers and the office |
-| night push | 300-400 | faster rollout while still leaving 200+ Mbit/s for everyone else |
-| never | 0 (unlimited) | it reproduces 26-11: one push can fill the line on its own |
+| night push | 250 | the hard maximum: faster rollout while 350 Mbit/s stays with everyone else |
+| 0 (unlimited) or > 250 | refused / clamped by code (2.8.13) | 26-11 must not be reproducible by a setting |
 
 `net-now` shows only this server's NIC; what the other servers use at the same time is not visible
 from here, so if the office still degrades at 150, lower it rather than argue with the number.

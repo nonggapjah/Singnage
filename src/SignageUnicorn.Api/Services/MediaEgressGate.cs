@@ -9,7 +9,13 @@ namespace SignageUnicorn.Api.Services
     {
         public const int DefaultMaxConcurrentDownloads = 40;
         public const int DefaultQueueWaitSeconds = 60;   // must stay below Cloudflare's 100 s origin timeout
-        public const int DefaultMaxEgressMbps = 150;     // 0 = unlimited
+        public const int DefaultMaxEgressMbps = 150;
+        /// <summary>
+        /// Commander, 27-11-2026: the Symphony line is 600 Mbit/s and shared with several other servers,
+        /// so this server never takes more than 250 Mbit/s. Any setting above it is clamped to it and
+        /// "unlimited" (0) is no longer accepted from configuration or the settings table.
+        /// </summary>
+        public const int HardMaxEgressMbps = 250;
 
         public static MediaEgressSettings Default { get; } =
             new(DefaultMaxConcurrentDownloads, DefaultQueueWaitSeconds, DefaultMaxEgressMbps);
@@ -40,8 +46,9 @@ namespace SignageUnicorn.Api.Services
         private static int? ClampSlots(int? v) => v is >= 1 and <= 1000 ? v : null;
         // 0 (reject at once) .. 90 s (Cloudflare 524s a response that has not started after 100 s).
         private static int? ClampWait(int? v) => v is >= 0 and <= 90 ? v : null;
-        // 0 = unlimited; otherwise 1..10000 Mbit/s.
-        private static int? ClampMbps(int? v) => v is >= 0 and <= 10000 ? v : null;
+        // 1..HardMaxEgressMbps. 0 or negative (= unlimited) is ignored; anything above the hard cap is
+        // pulled down to it rather than ignored, so an operator asking for "more" gets the most allowed.
+        private static int? ClampMbps(int? v) => v is null or <= 0 ? null : Math.Min(v.Value, HardMaxEgressMbps);
     }
 
     /// <summary>Point-in-time counters for <c>GET /api/v1/system/egress</c> and the periodic log line.</summary>
@@ -58,7 +65,8 @@ namespace SignageUnicorn.Api.Services
     ///      flight; the rest wait up to <see cref="MediaEgressSettings.QueueWaitSeconds"/> and are then
     ///      refused (the middleware answers 503 + Retry-After; the client retries later)
     ///   2. a shared token bucket: all admitted responses together send at most
-    ///      <see cref="MediaEgressSettings.MaxEgressMbps"/> (0 = unlimited)
+    ///      <see cref="MediaEgressSettings.MaxEgressMbps"/> (settings never exceed
+    ///      <see cref="MediaEgressSettings.HardMaxEgressMbps"/>; 0 = unlimited exists only for tests)
     /// Singleton; settings can change at runtime via <see cref="Apply"/>.
     /// </summary>
     public sealed class MediaEgressGate : IDisposable

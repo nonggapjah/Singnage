@@ -202,14 +202,20 @@ namespace SignageUnicorn.Api.Tests
             // Valid overrides win.
             var s = MediaEgressSettings.WithOverrides(baseline, "20", "30", "80");
             Assert.Equal(new MediaEgressSettings(20, 30, 80), s);
-            // 0 Mbit/s = unlimited is allowed; 0 slots is not; a wait above Cloudflare's limit is not.
+            // 0 Mbit/s (unlimited) is refused since 27-11-2026; 0 slots is not valid; a wait above Cloudflare's limit is not.
             s = MediaEgressSettings.WithOverrides(baseline, "0", "120", "0");
-            Assert.Equal(new MediaEgressSettings(40, 60, 0), s);
+            Assert.Equal(baseline, s);
             // Garbage, blanks and nulls keep the baseline.
             s = MediaEgressSettings.WithOverrides(baseline, "abc", " ", null);
             Assert.Equal(baseline, s);
+            // Negative values keep the baseline; a cap above the hard maximum is pulled down to it, not ignored.
             s = MediaEgressSettings.WithOverrides(baseline, "-5", "-1", "99999");
-            Assert.Equal(baseline, s);
+            Assert.Equal(new MediaEgressSettings(40, 60, MediaEgressSettings.HardMaxEgressMbps), s);
+            Assert.Equal(250, MediaEgressSettings.HardMaxEgressMbps);
+            Assert.Equal(250, MediaEgressSettings.WithOverrides(baseline, null, null, "251").MaxEgressMbps);
+            Assert.Equal(250, MediaEgressSettings.WithOverrides(baseline, null, null, "250").MaxEgressMbps);
+            Assert.Equal(249, MediaEgressSettings.WithOverrides(baseline, null, null, "249").MaxEgressMbps);
+            Assert.Equal(1, MediaEgressSettings.WithOverrides(baseline, null, null, "1").MaxEgressMbps);
         }
 
         [Fact]
@@ -223,7 +229,13 @@ namespace SignageUnicorn.Api.Tests
                 ["Media:QueueWaitSeconds"] = "45",
                 ["Media:MaxEgressMbps"] = "0",
             }).Build();
-            Assert.Equal(new MediaEgressSettings(25, 45, 0), MediaEgressSettings.FromConfiguration(cfg));
+            // appsettings cannot switch the cap off either: 0 falls back to the default.
+            Assert.Equal(new MediaEgressSettings(25, 45, MediaEgressSettings.DefaultMaxEgressMbps), MediaEgressSettings.FromConfiguration(cfg));
+            var high = new ConfigurationBuilder().AddInMemoryCollection(new System.Collections.Generic.Dictionary<string, string?>
+            {
+                ["Media:MaxEgressMbps"] = "600",
+            }).Build();
+            Assert.Equal(MediaEgressSettings.HardMaxEgressMbps, MediaEgressSettings.FromConfiguration(high).MaxEgressMbps);
         }
 
         [Theory]

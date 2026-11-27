@@ -37,8 +37,8 @@ namespace SignageUnicorn.Api.Middleware
             _logger = logger;
             _baseline = MediaEgressSettings.FromConfiguration(configuration);
             _gate.Apply(_baseline, "appsettings");
-            _logger.LogInformation("[Egress] Media egress gate on: {Slots} concurrent downloads, {Wait}s queue, {Mbps} Mbit/s cap (0 = unlimited).",
-                _baseline.MaxConcurrentDownloads, _baseline.QueueWaitSeconds, _baseline.MaxEgressMbps);
+            _logger.LogInformation("[Egress] Media egress gate on: {Slots} concurrent downloads, {Wait}s queue, {Mbps} Mbit/s cap (hard max {HardMax}).",
+                _baseline.MaxConcurrentDownloads, _baseline.QueueWaitSeconds, _baseline.MaxEgressMbps, MediaEgressSettings.HardMaxEgressMbps);
         }
 
         public static bool IsGated(PathString path, string method)
